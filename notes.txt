@@ -1,0 +1,353 @@
+erp-backend/
+│
+├── src/
+│   │
+│   ├── app.js
+│   ├── server.js
+│   │
+│   ├── config/
+│   │   ├── env.js
+│   │   ├── database.js
+│   │   ├── cors.js
+│   │   └── logger.js
+│   │
+│   ├── routes/
+│   │   └── index.routes.js        # central route loader
+│   │
+│   ├── modules/
+│   │   └── core/
+│   │       │
+│   │       ├── core.routes.js     # combines all core module routes
+│   │       ├── core.module.js     # registers core modules
+│   │       │
+│   │       └── health/
+│   │           │
+│   │           ├── models/
+│   │           │   └── health.model.js
+│   │           │
+│   │           ├── controllers/
+│   │           │   └── health.controller.js
+│   │           │
+│   │           ├── services/
+│   │           │   └── health.service.js
+│   │           │
+│   │           ├── repositories/
+│   │           │   └── health.repository.js
+│   │           │
+│   │           ├── routes/
+│   │           │   └── health.routes.js
+│   │           │
+│   │           ├── validations/
+│   │           │   └── health.validation.js
+│   │           │
+│   │           ├── constants/
+│   │           │   └── health.constant.js
+│   │           │
+│   │           └── health.module.js
+│   │
+│   ├── middlewares/
+│   │   ├── auth.middleware.js
+│   │   ├── error.middleware.js
+│   │   ├── notFound.middleware.js
+│   │   ├── validate.middleware.js
+│   │   └── rateLimiter.middleware.js
+│   │
+│   ├── utils/
+│   │   ├── asyncHandler.js
+│   │   ├── ApiError.js
+│   │   ├── ApiResponse.js
+│   │   ├── jwt.js
+│   │   ├── hash.js
+│   │   └── helpers.js
+│   │
+│   ├── constants/
+│   │   ├── app.constant.js
+│   │   ├── http.constant.js
+│   │   ├── status.constant.js
+│   │   └── roles.constant.js
+│   │
+│   ├── jobs/
+│   │   └── .gitkeep
+│   │
+│   └── docs/
+│       └── .gitkeep
+│
+├── tests/
+│   ├── api/
+│   │   └── health.test.js
+│   └── unit/
+│       └── .gitkeep
+│
+├── logs/
+│   └── .gitkeep
+│
+├── uploads/
+│   └── .gitkeep
+│
+├── public/
+│   └── .gitkeep
+│
+├── scripts/
+│   └── .gitkeep
+│
+├── .env.example
+├── .gitignore
+├── package.json
+├── package-lock.json
+├── README.md
+└── nodemon.json
+
+
+
+
+src/
+├── modules/
+│   └── core/
+│       │
+│       ├── auth/
+│       │   ├── controllers/
+│       │   │   └── auth.controller.js
+│       │   ├── services/
+│       │   │   └── auth.service.js
+│       │   ├── repositories/
+│       │   │   └── auth.repository.js
+│       │   ├── routes/
+│       │   │   └── auth.routes.js
+│       │   ├── validations/
+│       │   │   └── auth.validation.js
+│       │   ├── constants/
+│       │   │   └── auth.constant.js
+│       │   └── auth.module.js
+│       │
+│       ├── users/
+│       │   ├── models/
+│       │   │   └── user.model.js
+│       │   ├── controllers/
+│       │   │   └── user.controller.js
+│       │   ├── services/
+│       │   │   └── user.service.js
+│       │   ├── repositories/
+│       │   │   └── user.repository.js
+│       │   ├── routes/
+│       │   │   └── user.routes.js
+│       │   ├── validations/
+│       │   │   └── user.validation.js
+│       │   ├── constants/
+│       │   │   └── user.constant.js
+│       │   └── user.module.js
+│       │
+│       ├── access-control/
+│       │   ├── models/
+│       │   │   ├── role.model.js
+│       │   │   ├── permission.model.js
+│       │   │   └── user-role.model.js
+│       │   ├── controllers/
+│       │   │   ├── role.controller.js
+│       │   │   └── permission.controller.js
+│       │   ├── services/
+│       │   │   ├── role.service.js
+│       │   │   └── permission.service.js
+│       │   ├── repositories/
+│       │   │   ├── role.repository.js
+│       │   │   └── permission.repository.js
+│       │   ├── routes/
+│       │   │   └── access-control.routes.js
+│       │   ├── validations/
+│       │   │   ├── role.validation.js
+│       │   │   └── permission.validation.js
+│       │   ├── constants/
+│       │   │   └── permission.constant.js
+│       │   └── access-control.module.js
+│       │
+│       ├── settings/
+│       │   ├── models/
+│       │   │   ├── app-setting.model.js
+│       │   │   └── user-setting.model.js
+│       │   ├── controllers/
+│       │   │   └── setting.controller.js
+│       │   ├── services/
+│       │   │   └── setting.service.js
+│       │   ├── repositories/
+│       │   │   └── setting.repository.js
+│       │   ├── routes/
+│       │   │   └── setting.routes.js
+│       │   ├── validations/
+│       │   │   └── setting.validation.js
+│       │   └── setting.module.js
+│       │
+│       ├── core.routes.js
+│       └── core.module.js
+│
+├── middlewares/
+│   ├── auth.middleware.js
+│   ├── permission.middleware.js
+│   ├── validate.middleware.js
+│   └── error.middleware.js
+│
+├── utils/
+│   ├── asyncHandler.js
+│   ├── ApiError.js
+│   ├── ApiResponse.js
+│   ├── jwt.js
+│   └── hash.js
+│
+└── constants/
+    ├── status.constant.js
+    └── app.constant.js
+
+src/modules/
+├── core/
+│   ├── auth/
+│   ├── users/
+│   ├── access-control/
+│   ├── settings/
+│
+├── organization/
+│   ├── workspaces/
+│   ├── companies/
+│   ├── branches/
+│
+├── subscription/
+│   ├── plans/
+│   ├── subscriptions/
+│   ├── usage/
+│
+├── catalog/
+│   ├── products/
+│   ├── medicines/
+│   ├── categories/
+│   ├── batches/
+│
+├── inventory/
+│   ├── stock/
+│   ├── stock-movements/
+│   ├── expiry/
+│
+├── parties/
+│   ├── customers/
+│   ├── suppliers/
+│
+├── purchase/
+│   ├── purchases/
+│   ├── purchase-returns/
+│
+├── sales/
+│   ├── sales/
+│   ├── sales-returns/
+│
+├── billing/
+│   ├── pos/
+│   ├── bills/
+│
+├── invoicing/
+│   ├── invoices/
+│
+├── taxation/
+│   ├── gst/
+│   ├── taxes/
+│
+├── finance/
+│   ├── payments/
+│   ├── transactions/
+│   ├── ledger/
+│   ├── expenses/
+│   ├── income/
+│
+├── orders/
+│   ├── orders/
+│   ├── shipping/
+│   ├── delivery/
+│
+├── ecommerce/
+│   ├── cart/
+│   ├── checkout/
+│   ├── wishlist/
+│   ├── coupons/
+│
+├── crm/
+│   ├── leads/
+│   ├── followups/
+│
+├── hrm/
+│   ├── employees/
+│   ├── attendance/
+│   ├── payroll/
+│
+├── reports/
+│
+├── notifications/
+│
+└── system/
+    ├── files/
+    ├── logs/
+    ├── audit/
+
+
+
+
+
+
+    erp/
+└── erp-server/
+    │
+    ├── src/
+    │   │
+    │   ├── app.js
+    │   ├── server.js
+    │   │
+    │   ├── config/
+    │   │   ├── database.js
+    │   │   ├── env.js
+    │   │   └── cors.js
+    │   │
+    │   ├── routes/
+    │   │   └── index.routes.js
+    │   │
+    │   ├── modules/
+    │   │   ├── core/
+    │   │
+    │   ├── middlewares/
+    │   │   ├── auth.middleware.js
+    │   │   ├── permission.middleware.js
+    │   │   ├── validate.middleware.js
+    │   │   ├── error.middleware.js
+    │   │   ├── workspace.middleware.js
+    │   │   ├── company.middleware.js
+    │   │   └── branch.middleware.js
+    │   │
+    │   ├── utils/
+    │   │   ├── asyncHandler.js
+    │   │   ├── ApiError.js
+    │   │   ├── ApiResponse.js
+    │   │   ├── jwt.js
+    │   │   ├── hash.js
+    │   │   ├── logger.js          ⭐ (for logs)
+    │   │   └── helpers.js
+    │   │
+    │   ├── constants/
+    │   │   ├── app.constant.js
+    │   │   ├── status.constant.js
+    │   │   ├── http.constant.js
+    │   │   └── roles.constant.js
+    │   │
+    │   └── jobs/                 ⭐ background jobs
+    │
+    ├── logs/                    ⭐ runtime logs
+    │   ├── error.log
+    │   └── combined.log
+    │
+    ├── tests/                   ⭐ testing
+    │   ├── api/
+    │   │   ├── auth.test.js
+    │   │   ├── user.test.js
+    │   │
+    │   └── unit/
+    │
+    ├── uploads/
+    │
+    ├── .env
+    ├── .env.example
+    ├── .gitignore
+    ├── package.json
+    ├── README.md
+    └── nodemon.json
