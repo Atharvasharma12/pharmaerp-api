@@ -124,31 +124,27 @@ const userSchema = new mongoose.Schema(
 );
 
 const generateUserCode = async () => {
-  const User = mongoose.models.User || mongoose.model("User");
+  const User = mongoose.models.User;
 
   while (true) {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const exists = await User.exists({ userCode: code });
+    const exists = await User.exists({ userCode: code, isDeleted: false });
 
     if (!exists) return code;
   }
 };
 
-userSchema.pre("validate", async function (next) {
+userSchema.pre("validate", async function () {
   if (!this.userCode) {
     this.userCode = await generateUserCode();
   }
-
-  next();
 });
 
-userSchema.pre("save", async function (next) {
-  if (!this.isModified("password")) return next();
+userSchema.pre("save", async function () {
+  if (!this.isModified("password")) return;
 
   this.password = await bcrypt.hash(this.password, 12);
   this.passwordChangedAt = new Date();
-
-  next();
 });
 
 userSchema.methods.comparePassword = async function (plainPassword) {
