@@ -35,29 +35,26 @@ export const removeMyAvatar = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Avatar removed successfully", user));
 });
 
-export const getUsers = asyncHandler(async (req, res) => {
-  const result = await userService.getUsers(req.query);
+export const updateMyEmail = asyncHandler(async (req, res) => {
+  const user = await userService.updateMyEmail(req.user._id, req.body.email);
 
   return res
     .status(200)
-    .json(new ApiResponse(200, "Users fetched successfully", result));
+    .json(new ApiResponse(200, "Email updated successfully", user));
 });
 
-export const getUserById = asyncHandler(async (req, res) => {
-  const user = await userService.getUserById(req.params.userId);
+export const updateMyPhone = asyncHandler(async (req, res) => {
+  const user = await userService.updateMyPhone(req.user._id, req.body.phone);
 
   return res
     .status(200)
-    .json(new ApiResponse(200, "User fetched successfully", user));
+    .json(new ApiResponse(200, "Phone updated successfully", user));
 });
 
-export const updateUserStatus = asyncHandler(async (req, res) => {
-  const user = await userService.updateUserStatus(
-    req.params.userId,
-    req.body.isActive,
-  );
+export const deleteMyAccount = asyncHandler(async (req, res) => {
+  await userService.deleteMyAccount(req.user._id);
 
   return res
     .status(200)
-    .json(new ApiResponse(200, "User status updated successfully", user));
+    .json(new ApiResponse(200, "Account deleted successfully"));
 });

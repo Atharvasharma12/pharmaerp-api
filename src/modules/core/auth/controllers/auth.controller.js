@@ -64,3 +64,19 @@ export const changePassword = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Password changed successfully"));
 });
+
+export const sendEmailOtp = asyncHandler(async (req, res) => {
+  const result = await authService.sendEmailOtp(req.body);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "OTP sent successfully", result));
+});
+
+export const verifyEmailOtp = asyncHandler(async (req, res) => {
+  const result = await authService.verifyEmailOtp(req.body);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Email verified successfully", result));
+});

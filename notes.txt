@@ -140,7 +140,7 @@ src/
 │       │   ├── models/
 │       │   │   ├── role.model.js
 │       │   │   ├── permission.model.js
-│       │   │   └── user-role.model.js
+│       │   │   └── workspaceMemberRole.model.js
 │       │   ├── controllers/
 │       │   │   ├── role.controller.js
 │       │   │   └── permission.controller.js
@@ -194,6 +194,216 @@ src/
 └── constants/
     ├── status.constant.js
     └── app.constant.js
+
+
+plans/
+├── models/
+│   └── plan.model.js
+
+├── repositories/
+│   └── plan.repository.js
+
+├── services/
+│   └── plan.service.js
+
+├── controllers/
+│   └── plan.controller.js
+
+├── routes/
+│   └── plan.routes.js
+
+├── validations/
+│   └── plan.validation.js
+
+├── constants/
+│   └── plan.constant.js
+
+
+    subscriptions/
+├── models/
+│   └── subscription.model.js
+
+├── repositories/
+│   └── subscription.repository.js
+
+├── services/
+│   └── subscription.service.js
+
+├── controllers/
+│   └── subscription.controller.js
+
+├── routes/
+│   └── subscription.routes.js
+
+├── validations/
+│   └── subscription.validation.js
+
+├── constants/
+│   └── subscription.constant.js
+
+usage/
+├── models/
+│   └── usage.model.js
+
+├── repositories/
+│   └── usage.repository.js
+
+├── services/
+│   └── usage.service.js
+
+├── controllers/
+│   └── usage.controller.js
+
+├── routes/
+│   └── usage.routes.js
+
+├── validations/
+│   └── usage.validation.js
+
+├── constants/
+│   └── usage.constant.js
+
+
+src/utils/subscription/
+├── calculateSubscriptionExpiry.js
+├── checkPlanLimit.js
+├── calculateUsagePercentage.js
+├── generateSubscriptionCode.js
+├── subscriptionStatus.js
+└── billingCycle.js
+
+
+src/modules/subscription/
+├── subscription.module.js
+├── subscription.routes.js
+
+├── plans/
+│   ├── plan.module.js
+│   ├── models/plan.model.js
+│   ├── repositories/plan.repository.js
+│   ├── services/plan.service.js
+│   ├── controllers/plan.controller.js
+│   ├── routes/plan.routes.js
+│   ├── validations/plan.validation.js
+│   └── constants/plan.constant.js
+
+├── subscriptions/
+│   ├── subscription.module.js
+│   ├── models/subscription.model.js
+│   ├── repositories/subscription.repository.js
+│   ├── services/subscription.service.js
+│   ├── controllers/subscription.controller.js
+│   ├── routes/subscription.routes.js
+│   ├── validations/subscription.validation.js
+│   └── constants/subscription.constant.js
+
+└── usage/
+    ├── usage.module.js
+    ├── models/usage.model.js
+    ├── repositories/usage.repository.js
+    ├── services/usage.service.js
+    ├── controllers/usage.controller.js
+    ├── routes/usage.routes.js
+    ├── validations/usage.validation.js
+    └── constants/usage.constant.js
+
+
+src/
+├── middlewares/
+│   ├── workspaceContext.middleware.js
+│   └── subscriptionGuard.middleware.js
+│
+├── modules/
+│   ├── organization/
+│   │   ├── workspaces/
+│   │   │   ├── models/
+│   │   │   │   ├── workspace.model.js
+│   │   │   │   └── workspaceMember.model.js
+│   │   │   ├── controllers/
+│   │   │   │   └── workspace.controller.js
+│   │   │   ├── services/
+│   │   │   │   └── workspace.service.js
+│   │   │   ├── repositories/
+│   │   │   │   └── workspace.repository.js
+│   │   │   ├── validations/
+│   │   │   │   └── workspace.validation.js
+│   │   │   ├── routes/
+│   │   │   │   └── workspace.routes.js
+│   │   │   └── workspace.module.js
+│   │   │
+│   │   ├── companies/
+│   │   │   ├── models/
+│   │   │   │   └── company.model.js
+│   │   │   ├── controllers/
+│   │   │   │   └── company.controller.js
+│   │   │   ├── services/
+│   │   │   │   └── company.service.js
+│   │   │   ├── repositories/
+│   │   │   │   └── company.repository.js
+│   │   │   ├── validations/
+│   │   │   │   └── company.validation.js
+│   │   │   ├── routes/
+│   │   │   │   └── company.routes.js
+│   │   │   └── company.module.js
+│   │   │
+│   │   └── branches/
+│   │       ├── models/
+│   │       │   └── branch.model.js
+│   │       ├── controllers/
+│   │       │   └── branch.controller.js
+│   │       ├── services/
+│   │       │   └── branch.service.js
+│   │       ├── repositories/
+│   │       │   └── branch.repository.js
+│   │       ├── validations/
+│   │       │   └── branch.validation.js
+│   │       ├── routes/
+│   │       │   └── branch.routes.js
+│   │       └── branch.module.js
+│   │
+│   └── subscription/
+│       ├── plans/
+│       │   ├── models/
+│       │   │   └── plan.model.js
+│       │   ├── controllers/
+│       │   │   └── plan.controller.js
+│       │   ├── services/
+│       │   │   └── plan.service.js
+│       │   ├── repositories/
+│       │   │   └── plan.repository.js
+│       │   ├── validations/
+│       │   │   └── plan.validation.js
+│       │   ├── routes/
+│       │   │   └── plan.routes.js
+│       │   └── plan.module.js
+│       │
+│       ├── subscriptions/
+│       │   ├── models/
+│       │   │   ├── subscription.model.js
+│       │   │   └── subscriptionInvoice.model.js
+│       │   ├── controllers/
+│       │   │   └── subscription.controller.js
+│       │   ├── services/
+│       │   │   └── subscription.service.js
+│       │   ├── repositories/
+│       │   │   └── subscription.repository.js
+│       │   ├── validations/
+│       │   │   └── subscription.validation.js
+│       │   ├── routes/
+│       │   │   └── subscription.routes.js
+│       │   └── subscription.module.js
+│       │
+│       └── usage/
+│           ├── controllers/
+│           │   └── usage.controller.js
+│           ├── services/
+│           │   └── usage.service.js
+│           ├── routes/
+│           │   └── usage.routes.js
+│           └── usage.module.js
+
+
+
 
 src/modules/
 ├── core/

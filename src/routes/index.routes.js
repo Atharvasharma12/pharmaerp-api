@@ -1,9 +1,17 @@
 import { Router } from "express";
-import coreModule from "../modules/core/core.module.js";
+
 import { API_PREFIX } from "../constants/app.constant.js";
+
+import coreModule from "../modules/core/core.module.js";
+import organizationModule from "../modules/organization/organization.module.js";
+import subscriptionModule from "../modules/subscription/subscription.module.js";
 
 const router = Router();
 
 router.use(API_PREFIX + coreModule.path, coreModule.router);
+
+router.use(API_PREFIX + organizationModule.path, organizationModule.router);
+
+router.use(API_PREFIX + subscriptionModule.path, subscriptionModule.router);
 
 export default router;

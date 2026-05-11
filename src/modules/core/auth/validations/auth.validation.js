@@ -1,18 +1,6 @@
 import Joi from "joi";
 
 export const registerSchema = Joi.object({
-  username: Joi.string()
-    .trim()
-    .lowercase()
-    .min(3)
-    .max(40)
-    .pattern(/^[a-z0-9._-]+$/)
-    .required()
-    .messages({
-      "string.pattern.base":
-        "Username can only contain letters, numbers, dot, underscore and hyphen",
-    }),
-
   email: Joi.string().trim().lowercase().email().max(200).required(),
 
   password: Joi.string().min(6).max(128).required(),
@@ -29,7 +17,8 @@ export const registerSchema = Joi.object({
 });
 
 export const loginSchema = Joi.object({
-  identifier: Joi.string().trim().lowercase().required(),
+  email: Joi.string().trim().lowercase().email().required(),
+
   password: Joi.string().required(),
 });
 
@@ -39,6 +28,7 @@ export const forgotPasswordSchema = Joi.object({
 
 export const resetPasswordSchema = Joi.object({
   token: Joi.string().trim().required(),
+
   password: Joi.string().min(6).max(128).required(),
 });
 
@@ -52,5 +42,21 @@ export const changePasswordSchema = Joi.object({
     .invalid(Joi.ref("oldPassword"))
     .messages({
       "any.invalid": "New password must be different from old password",
+    }),
+});
+
+export const sendEmailOtpSchema = Joi.object({
+  email: Joi.string().trim().lowercase().email().required(),
+});
+
+export const verifyEmailOtpSchema = Joi.object({
+  email: Joi.string().trim().lowercase().email().required(),
+
+  otp: Joi.string()
+    .trim()
+    .pattern(/^[0-9]{6}$/)
+    .required()
+    .messages({
+      "string.pattern.base": "OTP must be a 6 digit number",
     }),
 });

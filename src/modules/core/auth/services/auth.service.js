@@ -9,8 +9,16 @@ import {
   buildAuthPayload,
 } from "../../../../utils/jwt.js";
 
+const hashValue = (value) => {
+  return crypto.createHash("sha256").update(String(value)).digest("hex");
+};
+
+const generateOtp = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
 const register = async (payload) => {
-  const { username, email, password, fullName, phone } = payload;
+  const { email, password, fullName, phone } = payload;
 
   const existingEmail = await authRepository.findUserByEmail(email);
 
@@ -18,14 +26,7 @@ const register = async (payload) => {
     throw new ApiError(400, "Email already exists");
   }
 
-  const existingUsername = await authRepository.findUserByUsername(username);
-
-  if (existingUsername) {
-    throw new ApiError(400, "Username already exists");
-  }
-
   const user = await authRepository.createUser({
-    username,
     email,
     password,
     fullName,
@@ -44,8 +45,8 @@ const register = async (payload) => {
   };
 };
 
-const login = async ({ identifier, password }) => {
-  const user = await authRepository.findUserByEmailOrUsername(identifier, {
+const login = async ({ email, password }) => {
+  const user = await authRepository.findUserByEmail(email, {
     select: "+password",
   });
 
@@ -99,7 +100,7 @@ const forgotPassword = async ({ email }) => {
 };
 
 const resetPassword = async ({ token, password }) => {
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+  const tokenHash = hashValue(token);
 
   const user = await authRepository.findUserByResetToken(tokenHash);
 
@@ -142,10 +143,57 @@ const changePassword = async ({ userId, oldPassword, newPassword }) => {
   };
 };
 
+const sendEmailOtp = async ({ email }) => {
+  const user = await authRepository.findUserByEmail(email, {
+    select: "+emailOtpHash +emailOtpExpiresAt",
+  });
+
+  if (!user || !user.isActive) {
+    return {
+      success: true,
+    };
+  }
+
+  const otp = generateOtp();
+
+  user.emailOtpHash = hashValue(otp);
+  user.emailOtpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+  await authRepository.saveUser(user);
+
+  return {
+    success: true,
+    otp,
+  };
+};
+
+const verifyEmailOtp = async ({ email, otp }) => {
+  const otpHash = hashValue(otp);
+
+  const user = await authRepository.findUserByEmailOtp(email, otpHash);
+
+  if (!user) {
+    throw new ApiError(400, "Invalid or expired OTP");
+  }
+
+  user.emailVerified = true;
+  user.emailOtpHash = null;
+  user.emailOtpExpiresAt = null;
+
+  await authRepository.saveUser(user);
+
+  return {
+    success: true,
+    user: user.toSafeObject(),
+  };
+};
+
 export default {
   register,
   login,
   forgotPassword,
   resetPassword,
   changePassword,
+  sendEmailOtp,
+  verifyEmailOtp,
 };

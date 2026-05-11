@@ -13,43 +13,18 @@ const findUserById = async (userId, options = {}) => {
   }).select(options.select || "");
 };
 
-const findUsers = async (filter = {}, options = {}) => {
-  const {
-    page = 1,
-    limit = 10,
-    sort = { createdAt: -1 },
-    select = "",
-  } = options;
-
-  const skip = (page - 1) * limit;
-
-  const query = {
+const findUserByEmail = async (email, options = {}) => {
+  return User.findOne({
+    email: String(email).trim().toLowerCase(),
     isDeleted: false,
-    ...filter,
-  };
-
-  const [users, total] = await Promise.all([
-    User.find(query).select(select).sort(sort).skip(skip).limit(limit),
-
-    User.countDocuments(query),
-  ]);
-
-  return {
-    users,
-    pagination: {
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit),
-    },
-  };
+  }).select(options.select || "");
 };
 
-const updateUserById = async (userId, payload) => {
-  return User.findByIdAndUpdate(userId, payload, {
-    new: true,
-    runValidators: true,
-  });
+const findUserByPhone = async (phone, options = {}) => {
+  return User.findOne({
+    phone: String(phone).trim(),
+    isDeleted: false,
+  }).select(options.select || "");
 };
 
 const saveUser = async (user) => {
@@ -57,22 +32,30 @@ const saveUser = async (user) => {
 };
 
 const deleteUserById = async (userId) => {
-  return User.findByIdAndUpdate(
-    userId,
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return null;
+  }
+
+  return User.findOneAndUpdate(
+    {
+      _id: userId,
+      isDeleted: false,
+    },
     {
       isDeleted: true,
       isActive: false,
     },
     {
       new: true,
+      runValidators: true,
     },
   );
 };
 
 export default {
   findUserById,
-  findUsers,
-  updateUserById,
+  findUserByEmail,
+  findUserByPhone,
   saveUser,
   deleteUserById,
 };

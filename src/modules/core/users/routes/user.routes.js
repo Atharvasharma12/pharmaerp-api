@@ -8,20 +8,20 @@ import {
   updateMyProfile,
   updateMyAvatar,
   removeMyAvatar,
-  getUsers,
-  getUserById,
-  updateUserStatus,
+  updateMyEmail,
+  updateMyPhone,
+  deleteMyAccount,
 } from "../controllers/user.controller.js";
 
 import {
   updateProfileSchema,
   updateAvatarSchema,
-  updateUserStatusSchema,
+  updateEmailSchema,
+  updatePhoneSchema,
 } from "../validations/user.validation.js";
 
 const router = Router();
 
-// my profile
 router.get("/me", authMiddleware, getMyProfile);
 
 router.patch(
@@ -40,16 +40,20 @@ router.patch(
 
 router.delete("/me/avatar", authMiddleware, removeMyAvatar);
 
-// users
-router.get("/", authMiddleware, getUsers);
-
-router.get("/:userId", authMiddleware, getUserById);
+router.patch(
+  "/me/email",
+  authMiddleware,
+  validate(updateEmailSchema),
+  updateMyEmail,
+);
 
 router.patch(
-  "/:userId/status",
+  "/me/phone",
   authMiddleware,
-  validate(updateUserStatusSchema),
-  updateUserStatus,
+  validate(updatePhoneSchema),
+  updateMyPhone,
 );
+
+router.delete("/me", authMiddleware, deleteMyAccount);
 
 export default router;

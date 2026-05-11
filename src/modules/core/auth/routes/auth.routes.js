@@ -10,6 +10,8 @@ import {
   forgotPassword,
   resetPassword,
   changePassword,
+  sendEmailOtp,
+  verifyEmailOtp,
 } from "../controllers/auth.controller.js";
 
 import {
@@ -18,6 +20,8 @@ import {
   forgotPasswordSchema,
   resetPasswordSchema,
   changePasswordSchema,
+  sendEmailOtpSchema,
+  verifyEmailOtpSchema,
 } from "../validations/auth.validation.js";
 
 const router = Router();
@@ -30,6 +34,14 @@ router.post("/login", validate(loginSchema), login);
 router.post("/forgot-password", validate(forgotPasswordSchema), forgotPassword);
 
 router.post("/reset-password", validate(resetPasswordSchema), resetPassword);
+
+router.post("/send-email-otp", validate(sendEmailOtpSchema), sendEmailOtp);
+
+router.post(
+  "/verify-email-otp",
+  validate(verifyEmailOtpSchema),
+  verifyEmailOtp,
+);
 
 // protected
 router.post(

@@ -19,7 +19,7 @@ const updateMyProfile = async (userId, payload) => {
     throw new ApiError(404, "User not found");
   }
 
-  const allowedFields = ["fullName", "phone"];
+  const allowedFields = ["fullName"];
 
   allowedFields.forEach((field) => {
     if (payload[field] !== undefined) {
@@ -60,64 +60,72 @@ const removeMyAvatar = async (userId) => {
   return user.toSafeObject();
 };
 
-const getUsers = async (query) => {
-  const page = Number(query.page) || 1;
-
-  const limit = Number(query.limit) || 10;
-
-  const search = query.search || "";
-
-  const filter = {};
-
-  if (search) {
-    filter.$or = [
-      {
-        fullName: {
-          $regex: search,
-          $options: "i",
-        },
-      },
-      {
-        email: {
-          $regex: search,
-          $options: "i",
-        },
-      },
-      {
-        username: {
-          $regex: search,
-          $options: "i",
-        },
-      },
-    ];
-  }
-
-  return userRepository.findUsers(filter, {
-    page,
-    limit,
-  });
-};
-
-const getUserById = async (userId) => {
+const updateMyEmail = async (userId, email) => {
   const user = await userRepository.findUserById(userId);
 
   if (!user) {
     throw new ApiError(404, "User not found");
   }
 
+  const normalizedEmail = String(email).trim().toLowerCase();
+
+  if (user.email === normalizedEmail) {
+    throw new ApiError(400, "New email must be different from current email");
+  }
+
+  const existingUser = await userRepository.findUserByEmail(normalizedEmail);
+
+  if (existingUser) {
+    throw new ApiError(400, "Email already exists");
+  }
+
+  user.email = normalizedEmail;
+  user.emailVerified = false;
+
+  await userRepository.saveUser(user);
+
   return user.toSafeObject();
 };
 
-const updateUserStatus = async (userId, isActive) => {
-  const user = await userRepository.updateUserById(userId, {
-    isActive,
-  });
+const updateMyPhone = async (userId, phone) => {
+  const user = await userRepository.findUserById(userId);
 
   if (!user) {
     throw new ApiError(404, "User not found");
   }
 
+  const normalizedPhone = phone ? String(phone).trim() : null;
+
+  if (user.phone === normalizedPhone) {
+    throw new ApiError(400, "New phone must be different from current phone");
+  }
+
+  if (normalizedPhone) {
+    const existingUser = await userRepository.findUserByPhone(normalizedPhone);
+
+    if (existingUser) {
+      throw new ApiError(400, "Phone already exists");
+    }
+  }
+
+  user.phone = normalizedPhone;
+  user.phoneVerified = false;
+
+  await userRepository.saveUser(user);
+
   return user.toSafeObject();
+};
+
+const deleteMyAccount = async (userId) => {
+  const user = await userRepository.deleteUserById(userId);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return {
+    success: true,
+  };
 };
 
 export default {
@@ -125,7 +133,7 @@ export default {
   updateMyProfile,
   updateMyAvatar,
   removeMyAvatar,
-  getUsers,
-  getUserById,
-  updateUserStatus,
+  updateMyEmail,
+  updateMyPhone,
+  deleteMyAccount,
 };

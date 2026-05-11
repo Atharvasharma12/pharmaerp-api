@@ -25,19 +25,6 @@ const userSchema = new mongoose.Schema(
       trim: true,
     },
 
-    username: {
-      type: String,
-      required: [true, "Username is required"],
-      trim: true,
-      lowercase: true,
-      minlength: [3, "Username must be at least 3 characters"],
-      maxlength: [40, "Username cannot exceed 40 characters"],
-      match: [
-        /^[a-z0-9._-]+$/,
-        "Username can only contain letters, numbers, dot, underscore and hyphen",
-      ],
-    },
-
     email: {
       type: String,
       required: [true, "Email is required"],
@@ -117,6 +104,18 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+
+    emailOtpHash: {
+      type: String,
+      default: null,
+      select: false,
+    },
+
+    emailOtpExpiresAt: {
+      type: Date,
+      default: null,
+      select: false,
+    },
   },
   {
     timestamps: true,
@@ -128,7 +127,11 @@ const generateUserCode = async () => {
 
   while (true) {
     const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const exists = await User.exists({ userCode: code, isDeleted: false });
+
+    const exists = await User.exists({
+      userCode: code,
+      isDeleted: false,
+    });
 
     if (!exists) return code;
   }
@@ -175,6 +178,8 @@ userSchema.methods.toSafeObject = function () {
   delete user.password;
   delete user.resetPasswordTokenHash;
   delete user.resetPasswordExpiresAt;
+  delete user.emailOtpHash;
+  delete user.emailOtpExpiresAt;
   delete user.__v;
 
   return user;
@@ -190,14 +195,6 @@ userSchema.index(
 
 userSchema.index(
   { email: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { isDeleted: false },
-  },
-);
-
-userSchema.index(
-  { username: 1 },
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },

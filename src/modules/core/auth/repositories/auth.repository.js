@@ -1,3 +1,5 @@
+import mongoose from "mongoose";
+
 import User from "../../users/models/user.model.js";
 
 const findUserByEmail = async (email, options = {}) => {
@@ -7,31 +9,14 @@ const findUserByEmail = async (email, options = {}) => {
   }).select(options.select || "");
 };
 
-const findUserByUsername = async (username, options = {}) => {
-  return User.findOne({
-    username: String(username).trim().toLowerCase(),
-    isDeleted: false,
-  }).select(options.select || "");
-};
-
 const findUserById = async (userId, options = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return null;
+  }
+
   return User.findOne({
     _id: userId,
     isDeleted: false,
-  }).select(options.select || "");
-};
-
-const findUserByEmailOrUsername = async (identifier, options = {}) => {
-  return User.findOne({
-    isDeleted: false,
-    $or: [
-      {
-        email: String(identifier).trim().toLowerCase(),
-      },
-      {
-        username: String(identifier).trim().toLowerCase(),
-      },
-    ],
   }).select(options.select || "");
 };
 
@@ -61,13 +46,24 @@ const findUserByResetToken = async (tokenHash) => {
   }).select("+password +resetPasswordTokenHash +resetPasswordExpiresAt");
 };
 
+const findUserByEmailOtp = async (email, otpHash) => {
+  return User.findOne({
+    email: String(email).trim().toLowerCase(),
+    emailOtpHash: otpHash,
+    emailOtpExpiresAt: {
+      $gt: new Date(),
+    },
+    isDeleted: false,
+    isActive: true,
+  }).select("+emailOtpHash +emailOtpExpiresAt");
+};
+
 export default {
   findUserByEmail,
-  findUserByUsername,
   findUserById,
-  findUserByEmailOrUsername,
   createUser,
   updateUser,
   saveUser,
   findUserByResetToken,
+  findUserByEmailOtp,
 };
