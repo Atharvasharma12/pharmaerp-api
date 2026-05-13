@@ -12,7 +12,6 @@ import {
   getSubscriptionById,
   getWorkspaceCurrentSubscription,
   getWorkspaceSubscriptions,
-  getSubscriptions,
   cancelSubscription,
   syncActiveSeatCount,
   validateSeatAvailability,
@@ -25,6 +24,8 @@ import {
   downgradeSubscriptionSchema,
   changeSeatQuantitySchema,
   cancelSubscriptionSchema,
+  subscriptionIdParamSchema,
+  workspaceIdParamSchema,
 } from "../validations/subscription.validation.js";
 
 const router = Router();
@@ -59,16 +60,34 @@ router.post(
 
 router.post("/cancel", validate(cancelSubscriptionSchema), cancelSubscription);
 
-router.get("/", getSubscriptions);
+router.get(
+  "/workspace/:workspaceId/current",
+  validate(workspaceIdParamSchema, "params"),
+  getWorkspaceCurrentSubscription,
+);
 
-router.get("/:subscriptionId", getSubscriptionById);
+router.get(
+  "/workspace/:workspaceId/history",
+  validate(workspaceIdParamSchema, "params"),
+  getWorkspaceSubscriptions,
+);
 
-router.get("/workspace/:workspaceId/current", getWorkspaceCurrentSubscription);
+router.post(
+  "/workspace/:workspaceId/sync-seats",
+  validate(workspaceIdParamSchema, "params"),
+  syncActiveSeatCount,
+);
 
-router.get("/workspace/:workspaceId/history", getWorkspaceSubscriptions);
+router.get(
+  "/workspace/:workspaceId/check-seats",
+  validate(workspaceIdParamSchema, "params"),
+  validateSeatAvailability,
+);
 
-router.post("/workspace/:workspaceId/sync-seats", syncActiveSeatCount);
-
-router.get("/workspace/:workspaceId/check-seats", validateSeatAvailability);
+router.get(
+  "/:subscriptionId",
+  validate(subscriptionIdParamSchema, "params"),
+  getSubscriptionById,
+);
 
 export default router;

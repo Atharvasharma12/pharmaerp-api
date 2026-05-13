@@ -40,7 +40,6 @@ const planSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
-      index: true,
     },
 
     name: {
@@ -94,7 +93,7 @@ const planSchema = new mongoose.Schema(
 
     features: {
       type: featureSchema,
-      default: () => DEFAULT_PLAN_FEATURES,
+      default: () => ({ ...DEFAULT_PLAN_FEATURES }),
     },
 
     isPopular: {
@@ -118,6 +117,18 @@ const planSchema = new mongoose.Schema(
     sortOrder: {
       type: Number,
       default: 0,
+    },
+
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PlatformUser",
+      default: null,
+    },
+
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PlatformUser",
+      default: null,
     },
 
     isDeleted: {
@@ -204,6 +215,14 @@ planSchema.index(
 planSchema.index({
   status: 1,
   isDeleted: 1,
+});
+
+planSchema.index({
+  createdBy: 1,
+});
+
+planSchema.index({
+  updatedBy: 1,
 });
 
 const Plan = mongoose.models.Plan || mongoose.model("Plan", planSchema);

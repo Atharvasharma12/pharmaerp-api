@@ -41,7 +41,6 @@ const subscriptionSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
-      index: true,
     },
 
     workspaceId: {

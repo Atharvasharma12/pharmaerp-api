@@ -1,10 +1,6 @@
 import Joi from "joi";
 
-import {
-  SUBSCRIPTION_STATUS,
-  SUBSCRIPTION_PAYMENT_STATUS,
-  SUBSCRIPTION_BILLING_CYCLE,
-} from "../constants/subscription.constant.js";
+import { SUBSCRIPTION_BILLING_CYCLE } from "../constants/subscription.constant.js";
 
 const objectId = Joi.string()
   .trim()
@@ -71,18 +67,6 @@ export const cancelSubscriptionSchema = Joi.object({
   subscriptionId: objectId.required(),
 
   reason: Joi.string().trim().max(500).allow(null, "").optional(),
-});
-
-export const updateSubscriptionStatusSchema = Joi.object({
-  status: Joi.string()
-    .valid(...Object.values(SUBSCRIPTION_STATUS))
-    .required(),
-});
-
-export const updatePaymentStatusSchema = Joi.object({
-  paymentStatus: Joi.string()
-    .valid(...Object.values(SUBSCRIPTION_PAYMENT_STATUS))
-    .required(),
 });
 
 export const subscriptionIdParamSchema = Joi.object({

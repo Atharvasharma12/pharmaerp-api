@@ -80,9 +80,24 @@ export const updateSeatQuantity = asyncHandler(async (req, res) => {
     );
 });
 
+export const cancelSubscription = asyncHandler(async (req, res) => {
+  const subscription = await subscriptionService.cancelSubscription(
+    req.body.subscriptionId,
+    req.user._id,
+    req.body.reason,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "Subscription cancelled successfully", subscription),
+    );
+});
+
 export const getSubscriptionById = asyncHandler(async (req, res) => {
   const subscription = await subscriptionService.getSubscriptionById(
     req.params.subscriptionId,
+    req.user._id,
   );
 
   return res
@@ -97,6 +112,7 @@ export const getWorkspaceCurrentSubscription = asyncHandler(
     const subscription =
       await subscriptionService.getWorkspaceCurrentSubscription(
         req.params.workspaceId,
+        req.user._id,
       );
 
     return res
@@ -114,6 +130,7 @@ export const getWorkspaceCurrentSubscription = asyncHandler(
 export const getWorkspaceSubscriptions = asyncHandler(async (req, res) => {
   const subscriptions = await subscriptionService.getWorkspaceSubscriptions(
     req.params.workspaceId,
+    req.user._id,
   );
 
   return res
@@ -127,33 +144,10 @@ export const getWorkspaceSubscriptions = asyncHandler(async (req, res) => {
     );
 });
 
-export const getSubscriptions = asyncHandler(async (req, res) => {
-  const subscriptions = await subscriptionService.getSubscriptions(req.query);
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, "Subscriptions fetched successfully", subscriptions),
-    );
-});
-
-export const cancelSubscription = asyncHandler(async (req, res) => {
-  const subscription = await subscriptionService.cancelSubscription(
-    req.body.subscriptionId,
-    req.user._id,
-    req.body.reason,
-  );
-
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, "Subscription cancelled successfully", subscription),
-    );
-});
-
 export const syncActiveSeatCount = asyncHandler(async (req, res) => {
   const subscription = await seatService.syncActiveSeatCount(
     req.params.workspaceId,
+    req.user._id,
   );
 
   return res
@@ -171,6 +165,7 @@ export const validateSeatAvailability = asyncHandler(async (req, res) => {
   const result = await seatService.validateSeatAvailability(
     req.params.workspaceId,
     Number(req.query.requestedSeats || 1),
+    req.user._id,
   );
 
   return res

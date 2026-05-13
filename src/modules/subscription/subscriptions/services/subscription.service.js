@@ -32,9 +32,7 @@ const buildPlanSnapshot = (plan) => {
   };
 };
 
-const purchaseSubscription = async (userId, payload) => {
-  const { workspaceId, planId, billingCycle, seatQuantity, currency } = payload;
-
+const validateWorkspaceAccess = async (workspaceId, userId) => {
   const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
 
   if (!workspace) {
@@ -50,9 +48,23 @@ const purchaseSubscription = async (userId, payload) => {
     throw new ApiError(403, "You do not have access to this workspace");
   }
 
+  return member;
+};
+
+const validateWorkspaceOwner = async (workspaceId, userId) => {
+  const member = await validateWorkspaceAccess(workspaceId, userId);
+
   if (!member.isOwner) {
-    throw new ApiError(403, "Only workspace owner can purchase subscription");
+    throw new ApiError(403, "Only workspace owner can perform this action");
   }
+
+  return member;
+};
+
+const purchaseSubscription = async (userId, payload) => {
+  const { workspaceId, planId, billingCycle, seatQuantity, currency } = payload;
+
+  await validateWorkspaceOwner(workspaceId, userId);
 
   const existingSubscription =
     await subscriptionRepository.findActiveSubscriptionByWorkspace(workspaceId);
@@ -114,7 +126,7 @@ const purchaseSubscription = async (userId, payload) => {
   return subscription.toSafeObject();
 };
 
-const getSubscriptionById = async (subscriptionId) => {
+const getSubscriptionById = async (subscriptionId, userId) => {
   const subscription = await subscriptionRepository.findSubscriptionById(
     subscriptionId,
     {
@@ -126,10 +138,14 @@ const getSubscriptionById = async (subscriptionId) => {
     throw new ApiError(404, "Subscription not found");
   }
 
+  await validateWorkspaceAccess(subscription.workspaceId._id, userId);
+
   return subscription.toSafeObject();
 };
 
-const getWorkspaceCurrentSubscription = async (workspaceId) => {
+const getWorkspaceCurrentSubscription = async (workspaceId, userId) => {
+  await validateWorkspaceAccess(workspaceId, userId);
+
   const subscription =
     await subscriptionRepository.findCurrentSubscriptionByWorkspace(
       workspaceId,
@@ -145,21 +161,15 @@ const getWorkspaceCurrentSubscription = async (workspaceId) => {
   return subscription.toSafeObject();
 };
 
-const getWorkspaceSubscriptions = async (workspaceId) => {
+const getWorkspaceSubscriptions = async (workspaceId, userId) => {
+  await validateWorkspaceAccess(workspaceId, userId);
+
   const subscriptions = await subscriptionRepository.getWorkspaceSubscriptions(
     workspaceId,
     {
       populate: "workspaceId planId purchasedBy",
     },
   );
-
-  return subscriptions.map((subscription) => subscription.toSafeObject());
-};
-
-const getSubscriptions = async (filters = {}) => {
-  const subscriptions = await subscriptionRepository.getSubscriptions(filters, {
-    populate: "workspaceId planId purchasedBy",
-  });
 
   return subscriptions.map((subscription) => subscription.toSafeObject());
 };
@@ -172,18 +182,7 @@ const cancelSubscription = async (subscriptionId, userId, reason) => {
     throw new ApiError(404, "Subscription not found");
   }
 
-  const member = await workspaceRepository.findWorkspaceMember(
-    subscription.workspaceId,
-    userId,
-  );
-
-  if (!member) {
-    throw new ApiError(403, "You do not have access to this workspace");
-  }
-
-  if (!member.isOwner) {
-    throw new ApiError(403, "Only workspace owner can cancel subscription");
-  }
+  await validateWorkspaceOwner(subscription.workspaceId, userId);
 
   subscription.status = SUBSCRIPTION_STATUS.CANCELLED;
 
@@ -226,7 +225,6 @@ export default {
   getSubscriptionById,
   getWorkspaceCurrentSubscription,
   getWorkspaceSubscriptions,
-  getSubscriptions,
   cancelSubscription,
   markExpiredSubscriptions,
   validateWorkspaceSubscriptionAccess,

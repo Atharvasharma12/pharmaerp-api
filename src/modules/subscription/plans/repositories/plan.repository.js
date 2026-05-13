@@ -29,14 +29,6 @@ const findPlanByCode = async (planCode, options = {}) => {
   }).select(options.select || "");
 };
 
-const createPlan = async (payload) => {
-  return Plan.create(payload);
-};
-
-const savePlan = async (plan) => {
-  return plan.save();
-};
-
 const getPlans = async (filters = {}, options = {}) => {
   const query = {
     isDeleted: false,
@@ -48,6 +40,10 @@ const getPlans = async (filters = {}, options = {}) => {
 
   if (filters.type) {
     query.type = filters.type;
+  }
+
+  if (filters.billingCycle) {
+    query.billingCycle = filters.billingCycle;
   }
 
   return Plan.find(query)
@@ -64,35 +60,10 @@ const getActivePlans = async (options = {}) => {
     .select(options.select || "");
 };
 
-const deletePlanById = async (planId) => {
-  if (!mongoose.Types.ObjectId.isValid(planId)) {
-    return null;
-  }
-
-  return Plan.findOneAndUpdate(
-    {
-      _id: planId,
-      isDeleted: false,
-    },
-    {
-      isDeleted: true,
-      deletedAt: new Date(),
-      status: PLAN_STATUS.ARCHIVED,
-    },
-    {
-      new: true,
-      runValidators: true,
-    },
-  );
-};
-
 export default {
   findPlanById,
   findPlanBySlug,
   findPlanByCode,
-  createPlan,
-  savePlan,
   getPlans,
   getActivePlans,
-  deletePlanById,
 };

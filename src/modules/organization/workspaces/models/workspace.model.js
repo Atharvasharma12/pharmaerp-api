@@ -92,7 +92,6 @@ const workspaceSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
-      index: true,
     },
 
     name: {

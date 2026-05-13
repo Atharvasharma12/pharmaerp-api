@@ -561,3 +561,232 @@ src/modules/
     ├── package.json
     ├── README.md
     └── nodemon.json
+
+
+
+
+
+src/
+├── modules/
+│
+│   ├── platform/
+│   │   │
+│   │   ├── platform.routes.js
+│   │   ├── platform.module.js
+│   │   │
+│   │   ├── auth/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformAuth.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformAuth.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformAuth.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformAuth.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformAuth.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformAuth.constant.js
+│   │   │   │
+│   │   │   └── platformAuth.module.js
+│   │   │
+│   │   ├── users/
+│   │   │   ├── models/
+│   │   │   │   └── platformUser.model.js
+│   │   │   │
+│   │   │   ├── controllers/
+│   │   │   │   └── platformUser.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformUser.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformUser.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformUser.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformUser.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformRole.constant.js
+│   │   │   │
+│   │   │   └── platformUser.module.js
+│   │   │
+│   │   ├── dashboard/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformDashboard.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformDashboard.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformDashboard.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformDashboard.routes.js
+│   │   │   │
+│   │   │   └── platformDashboard.module.js
+│   │   │
+│   │   ├── customers/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformCustomer.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformCustomer.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformCustomer.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformCustomer.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformCustomer.validation.js
+│   │   │   │
+│   │   │   └── platformCustomer.module.js
+│   │   │
+│   │   ├── plans/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformPlan.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformPlan.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformPlan.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformPlan.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformPlan.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformPlan.constant.js
+│   │   │   │
+│   │   │   └── platformPlan.module.js
+│   │   │
+│   │   ├── subscriptions/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformSubscription.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformSubscription.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformSubscription.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformSubscription.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformSubscription.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformSubscription.constant.js
+│   │   │   │
+│   │   │   └── platformSubscription.module.js
+│   │   │
+│   │   ├── global-catalog/
+│   │   │   │
+│   │   │   ├── medicines/
+│   │   │   │   ├── models/
+│   │   │   │   │   └── globalMedicine.model.js
+│   │   │   │   │
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── globalMedicine.controller.js
+│   │   │   │   │
+│   │   │   │   ├── services/
+│   │   │   │   │   └── globalMedicine.service.js
+│   │   │   │   │
+│   │   │   │   ├── repositories/
+│   │   │   │   │   └── globalMedicine.repository.js
+│   │   │   │   │
+│   │   │   │   ├── routes/
+│   │   │   │   │   └── globalMedicine.routes.js
+│   │   │   │   │
+│   │   │   │   ├── validations/
+│   │   │   │   │   └── globalMedicine.validation.js
+│   │   │   │   │
+│   │   │   │   └── globalMedicine.module.js
+│   │   │   │
+│   │   │   ├── categories/
+│   │   │   │   ├── models/
+│   │   │   │   │   └── globalCategory.model.js
+│   │   │   │   │
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── globalCategory.controller.js
+│   │   │   │   │
+│   │   │   │   ├── services/
+│   │   │   │   │   └── globalCategory.service.js
+│   │   │   │   │
+│   │   │   │   ├── repositories/
+│   │   │   │   │   └── globalCategory.repository.js
+│   │   │   │   │
+│   │   │   │   ├── routes/
+│   │   │   │   │   └── globalCategory.routes.js
+│   │   │   │   │
+│   │   │   │   ├── validations/
+│   │   │   │   │   └── globalCategory.validation.js
+│   │   │   │   │
+│   │   │   │   └── globalCategory.module.js
+│   │   │   │
+│   │   │   ├── globalCatalog.routes.js
+│   │   │   └── globalCatalog.module.js
+│   │   │
+│   │   ├── audit-logs/
+│   │   │   ├── models/
+│   │   │   │   └── platformAuditLog.model.js
+│   │   │   │
+│   │   │   ├── controllers/
+│   │   │   │   └── platformAuditLog.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformAuditLog.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformAuditLog.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformAuditLog.routes.js
+│   │   │   │
+│   │   │   └── platformAuditLog.module.js
+│   │
+│
+├── middlewares/
+│   ├── platformAuth.middleware.js
+│   ├── platformRole.middleware.js
+│   ├── platformAudit.middleware.js
+│   └── platformActivity.middleware.js
+│
+├── constants/
+│   ├── platformRoles.constant.js
+│   ├── platformStatus.constant.js
+│   └── platformPermissions.constant.js
+│
+└── utils/
+    └── platform/
+        ├── platformJwt.js
+        ├── platformLogger.js
+        ├── platformHelpers.js
+        ├── generateWorkspaceReport.js
+        ├── generateSubscriptionAnalytics.js
+        ├── calculatePlatformRevenue.js
+        └── platformCookies.js
+
+
+/api/v1/platform/auth/login
+/api/v1/platform/users
+/api/v1/platform/dashboard
+/api/v1/platform/customers
+/api/v1/platform/plans
+/api/v1/platform/subscriptions
+/api/v1/platform/global-catalog/medicines
+/api/v1/platform/audit-logs

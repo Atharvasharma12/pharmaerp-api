@@ -93,40 +93,6 @@ const getWorkspaceSubscriptions = async (workspaceId, options = {}) => {
     .select(options.select || "");
 };
 
-const getSubscriptions = async (filters = {}, options = {}) => {
-  const query = {
-    isDeleted: false,
-  };
-
-  if (
-    filters.workspaceId &&
-    mongoose.Types.ObjectId.isValid(filters.workspaceId)
-  ) {
-    query.workspaceId = filters.workspaceId;
-  }
-
-  if (filters.planId && mongoose.Types.ObjectId.isValid(filters.planId)) {
-    query.planId = filters.planId;
-  }
-
-  if (filters.status) {
-    query.status = filters.status;
-  }
-
-  if (filters.paymentStatus) {
-    query.paymentStatus = filters.paymentStatus;
-  }
-
-  if (filters.billingCycle) {
-    query.billingCycle = filters.billingCycle;
-  }
-
-  return Subscription.find(query)
-    .sort(options.sort || { createdAt: -1 })
-    .populate(options.populate || "")
-    .select(options.select || "");
-};
-
 const markExpiredSubscriptions = async () => {
   return Subscription.updateMany(
     {
@@ -144,28 +110,6 @@ const markExpiredSubscriptions = async () => {
   );
 };
 
-const deleteSubscriptionById = async (subscriptionId, deletedBy) => {
-  if (!mongoose.Types.ObjectId.isValid(subscriptionId)) {
-    return null;
-  }
-
-  return Subscription.findOneAndUpdate(
-    {
-      _id: subscriptionId,
-      isDeleted: false,
-    },
-    {
-      isDeleted: true,
-      deletedAt: new Date(),
-      deletedBy,
-    },
-    {
-      new: true,
-      runValidators: true,
-    },
-  );
-};
-
 export default {
   findSubscriptionById,
   findSubscriptionByCode,
@@ -174,7 +118,5 @@ export default {
   createSubscription,
   saveSubscription,
   getWorkspaceSubscriptions,
-  getSubscriptions,
   markExpiredSubscriptions,
-  deleteSubscriptionById,
 };
