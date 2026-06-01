@@ -792,42 +792,110 @@ src/
 /api/v1/platform/audit-logs
 
 
-✅ Best SaaS UX for Indian ERP
-Recommended Flow
+src/modules/organization/
+│
+├── companies/
+│   ├── models/
+│   │   └── company.model.js
+│   │
+│   ├── repositories/
+│   │   └── company.repository.js
+│   │
+│   ├── services/
+│   │   └── company.service.js
+│   │
+│   ├── controllers/
+│   │   └── company.controller.js
+│   │
+│   ├── validations/
+│   │   └── company.validation.js
+│   │
+│   ├── routes/
+│   │   └── company.routes.js
+│   │
+│   ├── constants/
+│   │   └── company.constant.js
+│   │
+│   └── company.module.js
 
-Signup
-   ↓
-Email/OTP Verification
-   ↓
-Create Workspace
-   ↓
-Basic Onboarding
-   ↓
-Start Free Trial
-   ↓
-Enter ERP Dashboard
-   ↓
-Upgrade Plan Later
+
+src/modules/organization/branches/
+│
+├── models/
+│   └── branch.model.js
+│
+├── repositories/
+│   └── branch.repository.js
+│
+├── services/
+│   └── branch.service.js
+│
+├── controllers/
+│   └── branch.controller.js
+│
+├── validations/
+│   └── branch.validation.js
+│
+├── routes/
+│   └── branch.routes.js
+│
+├── constants/
+│   └── branch.constant.js
+│
+└── branch.module.js
 
 
-Create Account
-↓
-Verify Email / OTP
-↓
-Create Workspace
-↓
-Business Setup
-↓
-Add Team Members
-↓
-Import Inventory
-↓
-Start Free Trial
-↓
-Welcome to PharmaERP
-↓
-Open Dashboard
+Access Control folder structure:
+
+src/modules/core/access-control/
+│
+├── models/
+│   ├── role.model.js
+│   └── memberAccess.model.js
+│
+├── repositories/
+│   ├── role.repository.js
+│   └── memberAccess.repository.js
+│
+├── services/
+│   ├── role.service.js
+│   └── memberAccess.service.js
+│
+├── controllers/
+│   ├── role.controller.js
+│   └── memberAccess.controller.js
+│
+├── validations/
+│   ├── role.validation.js
+│   └── memberAccess.validation.js
+│
+├── constants/
+│   ├── role.constant.js
+│   └── permission.constant.js
+│
+├── routes/
+│   └── access-control.routes.js
+│
+└── access-control.module.js
+
+Possible seed/helper for default roles (optional):
+
+6. src/modules/core/access-control/helpers/createDefaultRoles.js
+
+Files you will need later
+1. memberAccess.model.js
+2. memberAccess.repository.js
+3. memberAccess.service.js
+4. memberAccess.controller.js
+5. memberAccess.validation.js
+
+And update:
+
+6. access-control.routes.js
+7. permission.middleware.js
 
 
 
 The ERP system follows a Workspace → Company → Branch hierarchy. A Workspace represents a customer organization (pharmacy business) and serves as the top-level tenant. Within a workspace, the customer can create one or more Companies, and each company can manage multiple Branches. Users belong to a workspace and can be granted access to specific companies and branches based on their roles and permissions. Company-level data includes business information such as GST number, drug licenses, trade licenses, PAN, tax configurations, billing settings, and other statutory or compliance-related details, since these are shared across all branches of that company. Branch-level data includes inventory, stock, batches, purchases, sales, POS operations, and day-to-day pharmacy activities, as stock and transactions are maintained separately for each branch. We are building a multi-tenant Retail Pharmacy ERP SaaS platform that enables customers to centrally manage companies, branches, users, compliance, inventory, sales, purchases, billing, subscriptions, and reporting within a scalable and secure architecture.
+
+

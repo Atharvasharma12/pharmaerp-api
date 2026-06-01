@@ -73,10 +73,32 @@ const findWorkspaceMember = async (workspaceId, userId, options = {}) => {
     return null;
   }
 
-  return WorkspaceMember.findOne({
+  const query = WorkspaceMember.findOne({
     workspaceId,
     userId,
-  }).select(options.select || "");
+  });
+
+  if (options.populate) {
+    query.populate(options.populate);
+  }
+
+  return query.select(options.select || "");
+};
+
+const findWorkspaceMemberById = async (memberId, options = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(memberId)) {
+    return null;
+  }
+
+  const query = WorkspaceMember.findOne({
+    _id: memberId,
+  });
+
+  if (options.populate) {
+    query.populate(options.populate);
+  }
+
+  return query.select(options.select || "");
 };
 
 const getWorkspaceMembers = async (workspaceId, options = {}) => {
@@ -84,10 +106,22 @@ const getWorkspaceMembers = async (workspaceId, options = {}) => {
     return [];
   }
 
-  return WorkspaceMember.find({
+  const query = WorkspaceMember.find({
     workspaceId,
-  })
-    .populate(options.populate || "")
+  });
+
+  if (options.status) {
+    query.where({
+      status: options.status,
+    });
+  }
+
+  if (options.populate) {
+    query.populate(options.populate);
+  }
+
+  return query
+    .sort(options.sort || { createdAt: -1 })
     .select(options.select || "");
 };
 
@@ -96,11 +130,21 @@ const getUserWorkspaceMembers = async (userId, options = {}) => {
     return [];
   }
 
-  return WorkspaceMember.find({
+  const query = WorkspaceMember.find({
     userId,
     status: options.status || WORKSPACE_MEMBER_STATUS.ACTIVE,
-  })
-    .populate(options.populate || "workspaceId")
+  });
+
+  if (options.populate === false) {
+    return query
+      .sort(options.sort || { createdAt: -1 })
+      .select(options.select || "");
+  }
+
+  query.populate(options.populate || "workspaceId roleId");
+
+  return query
+    .sort(options.sort || { createdAt: -1 })
     .select(options.select || "");
 };
 
@@ -133,6 +177,36 @@ const removeWorkspaceMember = async (workspaceId, userId, removedBy) => {
   );
 };
 
+const updateWorkspaceMemberRole = async (
+  workspaceId,
+  userId,
+  roleId,
+  updatedBy,
+) => {
+  if (
+    !mongoose.Types.ObjectId.isValid(workspaceId) ||
+    !mongoose.Types.ObjectId.isValid(userId) ||
+    !mongoose.Types.ObjectId.isValid(roleId)
+  ) {
+    return null;
+  }
+
+  return WorkspaceMember.findOneAndUpdate(
+    {
+      workspaceId,
+      userId,
+    },
+    {
+      roleId,
+      updatedBy,
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+};
+
 const countActiveWorkspaceMembers = async (workspaceId) => {
   if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
     return 0;
@@ -154,9 +228,11 @@ export default {
 
   createWorkspaceMember,
   findWorkspaceMember,
+  findWorkspaceMemberById,
   getWorkspaceMembers,
   getUserWorkspaceMembers,
   saveWorkspaceMember,
   removeWorkspaceMember,
+  updateWorkspaceMemberRole,
   countActiveWorkspaceMembers,
 };

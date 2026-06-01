@@ -1,4 +1,4 @@
-# 🏥 Retail Pharmacy ERP Backend
+# 🏥 ERP Backend
 
 A modular Node.js backend for retail pharmacy ERP operations. This backend supports two main frontend applications:
 

@@ -18,6 +18,13 @@ const workspaceMemberSchema = new mongoose.Schema(
       index: true,
     },
 
+    roleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Role",
+      default: null,
+      index: true,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -101,6 +108,11 @@ workspaceMemberSchema.index({
 workspaceMemberSchema.index({
   workspaceId: 1,
   isOwner: 1,
+});
+
+workspaceMemberSchema.index({
+  workspaceId: 1,
+  roleId: 1,
 });
 
 const WorkspaceMember =

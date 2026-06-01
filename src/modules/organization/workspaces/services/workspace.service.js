@@ -1,11 +1,14 @@
 import ApiError from "../../../../utils/ApiError.js";
 
 import workspaceRepository from "../repositories/workspace.repository.js";
+import roleService from "../../../core/access-control/services/role.service.js";
 
 import {
   WORKSPACE_STATUS,
   WORKSPACE_MEMBER_STATUS,
 } from "../constants/workspace.constant.js";
+
+import { SYSTEM_ROLES } from "../../../core/access-control/constants/role.constant.js";
 
 const createSlug = (name) => {
   return String(name)
@@ -38,9 +41,18 @@ const createWorkspace = async (userId, payload) => {
     settings,
   });
 
+  await roleService.createDefaultRolesForWorkspace(workspace._id, userId);
+
+  const ownerRole = await roleService.getOwnerRoleForWorkspace(workspace._id);
+
+  if (!ownerRole) {
+    throw new ApiError(500, "Owner role could not be created");
+  }
+
   await workspaceRepository.createWorkspaceMember({
     workspaceId: workspace._id,
     userId,
+    roleId: ownerRole._id,
     createdBy: userId,
     status: WORKSPACE_MEMBER_STATUS.ACTIVE,
     isOwner: true,
@@ -175,7 +187,9 @@ const getWorkspaceMembers = async (workspaceId, userId) => {
     throw new ApiError(403, "You do not have access to this workspace");
   }
 
-  const members = await workspaceRepository.getWorkspaceMembers(workspaceId);
+  const members = await workspaceRepository.getWorkspaceMembers(workspaceId, {
+    populate: "roleId",
+  });
 
   return members.map((workspaceMember) => workspaceMember.toSafeObject());
 };
@@ -206,9 +220,23 @@ const addWorkspaceMember = async (workspaceId, userId, payload) => {
     throw new ApiError(400, "User is already a member of this workspace");
   }
 
+  let roleId = payload.roleId || null;
+
+  if (!roleId) {
+    const staffRole = await roleService.getRoleByCodeForWorkspace(
+      workspaceId,
+      SYSTEM_ROLES.STAFF,
+    );
+
+    if (staffRole) {
+      roleId = staffRole._id;
+    }
+  }
+
   const member = await workspaceRepository.createWorkspaceMember({
     workspaceId,
     userId: payload.userId,
+    roleId,
     createdBy: userId,
     status: WORKSPACE_MEMBER_STATUS.ACTIVE,
     isOwner: false,
