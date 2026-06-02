@@ -34,6 +34,40 @@ const featureSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const featureItemSchema = new mongoose.Schema(
+  {
+    key: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+    },
+
+    label: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    value: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+
+    included: {
+      type: Boolean,
+      default: true,
+    },
+
+    sortOrder: {
+      type: Number,
+      default: 0,
+    },
+  },
+  { _id: false },
+);
+
 const planSchema = new mongoose.Schema(
   {
     planCode: {
@@ -94,6 +128,11 @@ const planSchema = new mongoose.Schema(
     features: {
       type: featureSchema,
       default: () => ({ ...DEFAULT_PLAN_FEATURES }),
+    },
+
+    featureItems: {
+      type: [featureItemSchema],
+      default: [],
     },
 
     isPopular: {

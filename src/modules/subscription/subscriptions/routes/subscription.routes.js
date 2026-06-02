@@ -5,6 +5,7 @@ import authMiddleware from "../../../../middlewares/auth.middleware.js";
 
 import {
   purchaseSubscription,
+  startTrialSubscription,
   renewSubscription,
   upgradeSubscription,
   scheduleDowngrade,
@@ -19,6 +20,7 @@ import {
 
 import {
   purchaseSubscriptionSchema,
+  startTrialSubscriptionSchema,
   renewSubscriptionSchema,
   upgradeSubscriptionSchema,
   downgradeSubscriptionSchema,
@@ -36,6 +38,12 @@ router.post(
   "/purchase",
   validate(purchaseSubscriptionSchema),
   purchaseSubscription,
+);
+
+router.post(
+  "/trial",
+  validate(startTrialSubscriptionSchema),
+  startTrialSubscription,
 );
 
 router.post("/renew", validate(renewSubscriptionSchema), renewSubscription);

@@ -32,6 +32,12 @@ const buildPlanSnapshot = (plan) => {
   };
 };
 
+const addDays = (date, days) => {
+  const result = new Date(date);
+  result.setDate(result.getDate() + Number(days || 0));
+  return result;
+};
+
 const validateWorkspaceAccess = async (workspaceId, userId) => {
   const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
 
@@ -90,10 +96,8 @@ const purchaseSubscription = async (userId, payload) => {
   const expiresAt = calculateSubscriptionExpiry({
     billingCycle,
     startDate: startsAt,
-    trialDays: plan.trialDays || 0,
+    trialDays: 0,
   });
-
-  const isTrial = Boolean(plan.trialDays && plan.trialDays > 0);
 
   const subscription = await subscriptionRepository.createSubscription({
     workspaceId,
@@ -113,14 +117,85 @@ const purchaseSubscription = async (userId, payload) => {
 
     currency: currency || "INR",
 
-    status: isTrial ? SUBSCRIPTION_STATUS.TRIAL : SUBSCRIPTION_STATUS.ACTIVE,
+    status: SUBSCRIPTION_STATUS.ACTIVE,
 
     paymentStatus: SUBSCRIPTION_PAYMENT_STATUS.PAID,
 
     startsAt,
     expiresAt,
 
-    trialEndsAt: isTrial ? expiresAt : null,
+    trialEndsAt: null,
+    trialUsed: false,
+    trialStartedAt: null,
+    trialPlanId: null,
+  });
+
+  return subscription.toSafeObject();
+};
+
+const startTrialSubscription = async (userId, payload) => {
+  const { workspaceId, planId, seatQuantity = 1 } = payload;
+
+  await validateWorkspaceOwner(workspaceId, userId);
+
+  const existingSubscription =
+    await subscriptionRepository.findActiveSubscriptionByWorkspace(workspaceId);
+
+  if (existingSubscription) {
+    throw new ApiError(400, "Workspace already has an active subscription");
+  }
+
+  const usedTrial =
+    await subscriptionRepository.findTrialUsedByWorkspace(workspaceId);
+
+  if (usedTrial) {
+    throw new ApiError(400, "Trial already used for this workspace");
+  }
+
+  const plan = await planRepository.findPlanById(planId);
+
+  if (!plan) {
+    throw new ApiError(404, "Plan not found");
+  }
+
+  if (!plan.trialDays || plan.trialDays <= 0) {
+    throw new ApiError(400, "This plan does not have trial days");
+  }
+
+  const startsAt = new Date();
+  const expiresAt = addDays(startsAt, plan.trialDays);
+
+  const subscription = await subscriptionRepository.createSubscription({
+    workspaceId,
+    planId: plan._id,
+    purchasedBy: userId,
+
+    currentPlanSnapshot: buildPlanSnapshot(plan),
+
+    billingCycle: plan.billingCycle,
+    pricePerUser: plan.pricePerUser,
+
+    seatQuantity,
+    activeSeatCount: 1,
+
+    subtotalAmount: 0,
+    discountAmount: 0,
+    taxAmount: 0,
+    totalAmount: 0,
+
+    currency: "INR",
+
+    status: SUBSCRIPTION_STATUS.TRIAL,
+
+    paymentStatus: SUBSCRIPTION_PAYMENT_STATUS.PAID,
+
+    startsAt,
+    expiresAt,
+
+    trialEndsAt: expiresAt,
+    trialUsed: true,
+    trialStartedAt: startsAt,
+    trialPlanId: plan._id,
   });
 
   return subscription.toSafeObject();
@@ -222,6 +297,7 @@ const validateWorkspaceSubscriptionAccess = async (workspaceId) => {
 
 export default {
   purchaseSubscription,
+  startTrialSubscription,
   getSubscriptionById,
   getWorkspaceCurrentSubscription,
   getWorkspaceSubscriptions,

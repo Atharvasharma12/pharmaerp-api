@@ -66,18 +66,6 @@ export const getWorkspaceMembers = asyncHandler(async (req, res) => {
     );
 });
 
-export const addWorkspaceMember = asyncHandler(async (req, res) => {
-  const member = await workspaceService.addWorkspaceMember(
-    req.params.workspaceId,
-    req.user._id,
-    req.body,
-  );
-
-  return res
-    .status(201)
-    .json(new ApiResponse(201, "Workspace member added successfully", member));
-});
-
 export const updateWorkspaceMemberStatus = asyncHandler(async (req, res) => {
   const member = await workspaceService.updateWorkspaceMemberStatus(
     req.params.workspaceId,

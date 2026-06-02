@@ -196,6 +196,23 @@ const subscriptionSchema = new mongoose.Schema(
       default: null,
     },
 
+    trialUsed: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    trialStartedAt: {
+      type: Date,
+      default: null,
+    },
+
+    trialPlanId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Plan",
+      default: null,
+    },
+
     renewedAt: {
       type: Date,
       default: null,
@@ -306,6 +323,11 @@ subscriptionSchema.index(
     },
   },
 );
+
+subscriptionSchema.index({
+  workspaceId: 1,
+  trialUsed: 1,
+});
 
 subscriptionSchema.index({ workspaceId: 1, isDeleted: 1 });
 

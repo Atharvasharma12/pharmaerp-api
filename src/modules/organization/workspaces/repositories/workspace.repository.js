@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import Workspace from "../models/workspace.model.js";
 import WorkspaceMember from "../models/workspaceMember.model.js";
+import User from "../../../core/users/models/user.model.js";
 
 import { WORKSPACE_MEMBER_STATUS } from "../constants/workspace.constant.js";
 
@@ -76,6 +77,32 @@ const findWorkspaceMember = async (workspaceId, userId, options = {}) => {
   const query = WorkspaceMember.findOne({
     workspaceId,
     userId,
+  });
+
+  if (options.populate) {
+    query.populate(options.populate);
+  }
+
+  return query.select(options.select || "");
+};
+
+const findWorkspaceMemberByEmail = async (workspaceId, email, options = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
+    return null;
+  }
+
+  const user = await User.findOne({
+    email: String(email).trim().toLowerCase(),
+    isDeleted: false,
+  }).select("_id");
+
+  if (!user) {
+    return null;
+  }
+
+  const query = WorkspaceMember.findOne({
+    workspaceId,
+    userId: user._id,
   });
 
   if (options.populate) {
@@ -228,6 +255,7 @@ export default {
 
   createWorkspaceMember,
   findWorkspaceMember,
+  findWorkspaceMemberByEmail,
   findWorkspaceMemberById,
   getWorkspaceMembers,
   getUserWorkspaceMembers,

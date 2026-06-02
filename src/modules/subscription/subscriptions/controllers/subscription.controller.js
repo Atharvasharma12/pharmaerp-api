@@ -20,6 +20,23 @@ export const purchaseSubscription = asyncHandler(async (req, res) => {
     );
 });
 
+export const startTrialSubscription = asyncHandler(async (req, res) => {
+  const subscription = await subscriptionService.startTrialSubscription(
+    req.user._id,
+    req.body,
+  );
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(
+        201,
+        "Trial subscription started successfully",
+        subscription,
+      ),
+    );
+});
+
 export const renewSubscription = asyncHandler(async (req, res) => {
   const subscription = await renewalService.renewSubscription(
     req.user._id,

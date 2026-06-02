@@ -25,6 +25,13 @@ const workspaceMemberSchema = new mongoose.Schema(
       index: true,
     },
 
+    joinedViaInvitationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WorkspaceInvitation",
+      default: null,
+      index: true,
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -113,6 +120,11 @@ workspaceMemberSchema.index({
 workspaceMemberSchema.index({
   workspaceId: 1,
   roleId: 1,
+});
+
+workspaceMemberSchema.index({
+  workspaceId: 1,
+  joinedViaInvitationId: 1,
 });
 
 const WorkspaceMember =

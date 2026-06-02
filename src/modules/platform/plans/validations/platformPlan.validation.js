@@ -24,6 +24,18 @@ const featureSchema = Joi.object({
   prioritySupport: Joi.boolean().optional(),
 });
 
+const featureItemSchema = Joi.object({
+  key: Joi.string().trim().lowercase().required(),
+
+  label: Joi.string().trim().required(),
+
+  value: Joi.string().trim().required(),
+
+  included: Joi.boolean().optional(),
+
+  sortOrder: Joi.number().integer().min(0).optional(),
+});
+
 export const createPlatformPlanSchema = Joi.object({
   name: Joi.string().trim().min(2).max(120).required(),
 
@@ -46,6 +58,8 @@ export const createPlatformPlanSchema = Joi.object({
     .required(),
 
   features: featureSchema.optional(),
+
+  featureItems: Joi.array().items(featureItemSchema).default([]).optional(),
 
   isPopular: Joi.boolean().optional(),
 
@@ -80,6 +94,8 @@ export const updatePlatformPlanSchema = Joi.object({
     .optional(),
 
   features: featureSchema.optional(),
+
+  featureItems: Joi.array().items(featureItemSchema).optional(),
 
   isPopular: Joi.boolean().optional(),
 

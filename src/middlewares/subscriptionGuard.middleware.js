@@ -47,12 +47,18 @@ const subscriptionGuardMiddleware = asyncHandler(async (req, res, next) => {
   }
 
   req.subscription = subscription;
-
   req.subscriptionId = subscription._id.toString();
 
   req.subscriptionPlan = subscription.currentPlanSnapshot || null;
-
   req.subscriptionModules = subscription.currentPlanSnapshot?.modules || [];
+
+  req.subscriptionSeatQuantity = subscription.seatQuantity || 0;
+  req.subscriptionActiveSeatCount = subscription.activeSeatCount || 0;
+
+  req.subscriptionSeatInfo = {
+    seatQuantity: subscription.seatQuantity || 0,
+    activeSeatCount: subscription.activeSeatCount || 0,
+  };
 
   next();
 });

@@ -1,14 +1,14 @@
 import ApiError from "../../../../utils/ApiError.js";
 
 import workspaceRepository from "../repositories/workspace.repository.js";
+import workspaceInvitationService from "./workspaceInvitation.service.js";
 import roleService from "../../../core/access-control/services/role.service.js";
+import memberAccessService from "../../../core/access-control/services/memberAccess.service.js";
 
 import {
   WORKSPACE_STATUS,
   WORKSPACE_MEMBER_STATUS,
 } from "../constants/workspace.constant.js";
-
-import { SYSTEM_ROLES } from "../../../core/access-control/constants/role.constant.js";
 
 const createSlug = (name) => {
   return String(name)
@@ -49,7 +49,7 @@ const createWorkspace = async (userId, payload) => {
     throw new ApiError(500, "Owner role could not be created");
   }
 
-  await workspaceRepository.createWorkspaceMember({
+  const ownerMember = await workspaceRepository.createWorkspaceMember({
     workspaceId: workspace._id,
     userId,
     roleId: ownerRole._id,
@@ -57,6 +57,17 @@ const createWorkspace = async (userId, payload) => {
     status: WORKSPACE_MEMBER_STATUS.ACTIVE,
     isOwner: true,
     isPrimary: true,
+  });
+
+  await memberAccessService.createDefaultAccessForMember({
+    workspaceId: workspace._id,
+    workspaceMemberId: ownerMember._id,
+    userId,
+    createdBy: userId,
+    accessAllCompanies: true,
+    accessAllBranches: true,
+    companyIds: [],
+    branchIds: [],
   });
 
   return workspace.toSafeObject();
@@ -195,56 +206,7 @@ const getWorkspaceMembers = async (workspaceId, userId) => {
 };
 
 const addWorkspaceMember = async (workspaceId, userId, payload) => {
-  const currentMember = await workspaceRepository.findWorkspaceMember(
-    workspaceId,
-    userId,
-  );
-
-  if (
-    !currentMember ||
-    currentMember.status !== WORKSPACE_MEMBER_STATUS.ACTIVE
-  ) {
-    throw new ApiError(403, "You do not have access to this workspace");
-  }
-
-  if (!currentMember.isOwner) {
-    throw new ApiError(403, "Only workspace owner can add members");
-  }
-
-  const existingMember = await workspaceRepository.findWorkspaceMember(
-    workspaceId,
-    payload.userId,
-  );
-
-  if (existingMember) {
-    throw new ApiError(400, "User is already a member of this workspace");
-  }
-
-  let roleId = payload.roleId || null;
-
-  if (!roleId) {
-    const staffRole = await roleService.getRoleByCodeForWorkspace(
-      workspaceId,
-      SYSTEM_ROLES.STAFF,
-    );
-
-    if (staffRole) {
-      roleId = staffRole._id;
-    }
-  }
-
-  const member = await workspaceRepository.createWorkspaceMember({
-    workspaceId,
-    userId: payload.userId,
-    roleId,
-    createdBy: userId,
-    status: WORKSPACE_MEMBER_STATUS.ACTIVE,
-    isOwner: false,
-    isPrimary: false,
-    notes: payload.notes,
-  });
-
-  return member.toSafeObject();
+  return workspaceInvitationService.inviteMember(workspaceId, userId, payload);
 };
 
 const updateWorkspaceMemberStatus = async (

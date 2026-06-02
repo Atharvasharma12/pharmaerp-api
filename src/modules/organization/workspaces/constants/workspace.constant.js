@@ -11,6 +11,13 @@ export const WORKSPACE_MEMBER_STATUS = {
   SUSPENDED: "suspended",
 };
 
+export const WORKSPACE_INVITATION_STATUS = {
+  PENDING: "pending",
+  ACCEPTED: "accepted",
+  CANCELLED: "cancelled",
+  EXPIRED: "expired",
+};
+
 export const WORKSPACE_TYPE = {
   PHARMACY: "pharmacy",
   CLINIC: "clinic",
@@ -27,3 +34,7 @@ export const DEFAULT_WORKSPACE_SETTINGS = {
 };
 
 export const WORKSPACE_CODE_PREFIX = "WS";
+
+export const WORKSPACE_INVITATION_EXPIRY_HOURS = 72;
+
+export const WORKSPACE_OWNER_LIMIT = 1;

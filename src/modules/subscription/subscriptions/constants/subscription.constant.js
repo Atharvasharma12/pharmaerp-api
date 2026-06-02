@@ -22,6 +22,7 @@ export const SUBSCRIPTION_BILLING_CYCLE = {
 
 export const SUBSCRIPTION_ACTION = {
   PURCHASE: "purchase",
+  START_TRIAL: "start_trial",
   RENEW: "renew",
   UPGRADE: "upgrade",
   DOWNGRADE: "downgrade",

@@ -792,6 +792,40 @@ src/
 /api/v1/platform/audit-logs
 
 
+
+├── modules/
+│   ├── organization/
+│   │   ├── workspaces/
+│   │   │   ├── models/
+│   │   │   │   ├── workspace.model.js
+│   │   │   │   ├── workspaceMember.model.js
+│   │   │   │   └── workspaceInvitation.model.js
+│   │   │   │
+│   │   │   ├── controllers/
+│   │   │   │   ├── workspace.controller.js
+│   │   │   │   └── workspaceInvitation.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   ├── workspace.service.js
+│   │   │   │   └── workspaceInvitation.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   ├── workspace.repository.js
+│   │   │   │   └── workspaceInvitation.repository.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   ├── workspace.validation.js
+│   │   │   │   └── workspaceInvitation.validation.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── workspace.routes.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── workspace.constant.js
+│   │   │   │
+│   │   │   └── workspace.module.js
+
+
 src/modules/organization/
 │
 ├── companies/
