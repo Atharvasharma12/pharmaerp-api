@@ -10,6 +10,8 @@ import {
   removeMyAvatar,
   updateMyEmail,
   updateMyPhone,
+  getMyActiveContext,
+  updateMyActiveContext,
   deleteMyAccount,
 } from "../controllers/user.controller.js";
 
@@ -18,42 +20,33 @@ import {
   updateAvatarSchema,
   updateEmailSchema,
   updatePhoneSchema,
+  updateActiveContextSchema,
 } from "../validations/user.validation.js";
 
 const router = Router();
 
-router.get("/me", authMiddleware, getMyProfile);
+router.use(authMiddleware);
+
+router.get("/me", getMyProfile);
+
+router.patch("/me", validate(updateProfileSchema), updateMyProfile);
+
+router.patch("/me/avatar", validate(updateAvatarSchema), updateMyAvatar);
+
+router.delete("/me/avatar", removeMyAvatar);
+
+router.patch("/me/email", validate(updateEmailSchema), updateMyEmail);
+
+router.patch("/me/phone", validate(updatePhoneSchema), updateMyPhone);
+
+router.get("/me/active-context", getMyActiveContext);
 
 router.patch(
-  "/me",
-  authMiddleware,
-  validate(updateProfileSchema),
-  updateMyProfile,
+  "/me/active-context",
+  validate(updateActiveContextSchema),
+  updateMyActiveContext,
 );
 
-router.patch(
-  "/me/avatar",
-  authMiddleware,
-  validate(updateAvatarSchema),
-  updateMyAvatar,
-);
-
-router.delete("/me/avatar", authMiddleware, removeMyAvatar);
-
-router.patch(
-  "/me/email",
-  authMiddleware,
-  validate(updateEmailSchema),
-  updateMyEmail,
-);
-
-router.patch(
-  "/me/phone",
-  authMiddleware,
-  validate(updatePhoneSchema),
-  updateMyPhone,
-);
-
-router.delete("/me", authMiddleware, deleteMyAccount);
+router.delete("/me", deleteMyAccount);
 
 export default router;

@@ -2,6 +2,7 @@ import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 import companyRepository from "../modules/organization/companies/repositories/company.repository.js";
+import memberAccessService from "../modules/core/access-control/services/memberAccess.service.js";
 
 import { COMPANY_STATUS } from "../modules/organization/companies/constants/company.constant.js";
 
@@ -37,6 +38,16 @@ const companyContextMiddleware = asyncHandler(async (req, res, next) => {
 
   if (company.status !== COMPANY_STATUS.ACTIVE) {
     throw new ApiError(403, "Company is not active");
+  }
+
+  const hasCompanyAccess = await memberAccessService.hasCompanyAccess(
+    req.workspaceId,
+    req.user._id,
+    company._id,
+  );
+
+  if (!hasCompanyAccess) {
+    throw new ApiError(403, "You do not have access to this company");
   }
 
   req.company = company;

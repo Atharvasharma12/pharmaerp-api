@@ -51,6 +51,28 @@ export const updateMyPhone = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Phone updated successfully", user));
 });
 
+export const getMyActiveContext = asyncHandler(async (req, res) => {
+  const activeContext = await userService.getMyActiveContext(req.user._id);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Active context fetched successfully",
+        activeContext,
+      ),
+    );
+});
+
+export const updateMyActiveContext = asyncHandler(async (req, res) => {
+  const user = await userService.updateMyActiveContext(req.user._id, req.body);
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Active context updated successfully", user));
+});
+
 export const deleteMyAccount = asyncHandler(async (req, res) => {
   await userService.deleteMyAccount(req.user._id);
 

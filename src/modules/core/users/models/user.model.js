@@ -18,6 +18,34 @@ const IMAGE_SCHEMA = new mongoose.Schema(
   { _id: false },
 );
 
+const ACTIVE_CONTEXT_SCHEMA = new mongoose.Schema(
+  {
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
+      default: null,
+    },
+
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+    },
+
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+    },
+
+    updatedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const userSchema = new mongoose.Schema(
   {
     userCode: {
@@ -68,6 +96,16 @@ const userSchema = new mongoose.Schema(
     avatar: {
       type: IMAGE_SCHEMA,
       default: null,
+    },
+
+    activeContext: {
+      type: ACTIVE_CONTEXT_SCHEMA,
+      default: () => ({
+        workspaceId: null,
+        companyId: null,
+        branchId: null,
+        updatedAt: null,
+      }),
     },
 
     isActive: {
@@ -211,6 +249,10 @@ userSchema.index(
     },
   },
 );
+
+userSchema.index({ "activeContext.workspaceId": 1 });
+userSchema.index({ "activeContext.companyId": 1 });
+userSchema.index({ "activeContext.branchId": 1 });
 
 const User = mongoose.models.User || mongoose.model("User", userSchema);
 

@@ -31,6 +31,56 @@ const saveUser = async (user) => {
   return user.save();
 };
 
+const updateActiveContext = async (userId, activeContext) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return null;
+  }
+
+  return User.findOneAndUpdate(
+    {
+      _id: userId,
+      isDeleted: false,
+    },
+    {
+      activeContext: {
+        workspaceId: activeContext.workspaceId || null,
+        companyId: activeContext.companyId || null,
+        branchId: activeContext.branchId || null,
+        updatedAt: new Date(),
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+};
+
+const clearActiveContext = async (userId) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    return null;
+  }
+
+  return User.findOneAndUpdate(
+    {
+      _id: userId,
+      isDeleted: false,
+    },
+    {
+      activeContext: {
+        workspaceId: null,
+        companyId: null,
+        branchId: null,
+        updatedAt: new Date(),
+      },
+    },
+    {
+      new: true,
+      runValidators: true,
+    },
+  );
+};
+
 const deleteUserById = async (userId) => {
   if (!mongoose.Types.ObjectId.isValid(userId)) {
     return null;
@@ -56,6 +106,11 @@ export default {
   findUserById,
   findUserByEmail,
   findUserByPhone,
+
   saveUser,
+
+  updateActiveContext,
+  clearActiveContext,
+
   deleteUserById,
 };

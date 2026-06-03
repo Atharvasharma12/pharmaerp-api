@@ -2,6 +2,19 @@ import ApiError from "../../../../utils/ApiError.js";
 
 import userRepository from "../repositories/user.repository.js";
 
+import workspaceRepository from "../../../organization/workspaces/repositories/workspace.repository.js";
+import companyRepository from "../../../organization/companies/repositories/company.repository.js";
+import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
+import memberAccessService from "../../access-control/services/memberAccess.service.js";
+
+import {
+  WORKSPACE_STATUS,
+  WORKSPACE_MEMBER_STATUS,
+} from "../../../organization/workspaces/constants/workspace.constant.js";
+
+import { COMPANY_STATUS } from "../../../organization/companies/constants/company.constant.js";
+import { BRANCH_STATUS } from "../../../organization/branches/constants/branch.constant.js";
+
 const getMyProfile = async (userId) => {
   const user = await userRepository.findUserById(userId);
 
@@ -116,6 +129,171 @@ const updateMyPhone = async (userId, phone) => {
   return user.toSafeObject();
 };
 
+const getMyActiveContext = async (userId) => {
+  const user = await userRepository.findUserById(userId);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return (
+    user.activeContext || {
+      workspaceId: null,
+      companyId: null,
+      branchId: null,
+      updatedAt: null,
+    }
+  );
+};
+
+const validateWorkspaceContext = async (userId, workspaceId) => {
+  const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
+
+  if (!workspace || workspace.status === WORKSPACE_STATUS.DELETED) {
+    throw new ApiError(404, "Workspace not found");
+  }
+
+  if (workspace.status !== WORKSPACE_STATUS.ACTIVE) {
+    throw new ApiError(403, "Workspace is not active");
+  }
+
+  const member = await workspaceRepository.findWorkspaceMember(
+    workspace._id,
+    userId,
+  );
+
+  if (!member) {
+    throw new ApiError(403, "You are not a member of this workspace");
+  }
+
+  if (member.status !== WORKSPACE_MEMBER_STATUS.ACTIVE) {
+    throw new ApiError(403, "Workspace member is not active");
+  }
+
+  return {
+    workspace,
+    member,
+  };
+};
+
+const validateCompanyContext = async (userId, workspaceId, companyId) => {
+  const company = await companyRepository.findCompanyByIdAndWorkspace(
+    companyId,
+    workspaceId,
+  );
+
+  if (!company || company.status === COMPANY_STATUS.DELETED) {
+    throw new ApiError(404, "Company not found");
+  }
+
+  if (company.status !== COMPANY_STATUS.ACTIVE) {
+    throw new ApiError(403, "Company is not active");
+  }
+
+  const hasCompanyAccess = await memberAccessService.hasCompanyAccess(
+    workspaceId,
+    userId,
+    company._id,
+  );
+
+  if (!hasCompanyAccess) {
+    throw new ApiError(403, "You do not have access to this company");
+  }
+
+  return company;
+};
+
+const validateBranchContext = async (
+  userId,
+  workspaceId,
+  companyId,
+  branchId,
+) => {
+  const branch = await branchRepository.findBranchByIdAndCompany(
+    branchId,
+    companyId,
+  );
+
+  if (!branch || branch.status === BRANCH_STATUS.DELETED) {
+    throw new ApiError(404, "Branch not found");
+  }
+
+  if (branch.workspaceId.toString() !== workspaceId.toString()) {
+    throw new ApiError(403, "Branch does not belong to this workspace");
+  }
+
+  if (branch.status !== BRANCH_STATUS.ACTIVE) {
+    throw new ApiError(403, "Branch is not active");
+  }
+
+  const hasBranchAccess = await memberAccessService.hasBranchAccess(
+    workspaceId,
+    userId,
+    branch._id,
+  );
+
+  if (!hasBranchAccess) {
+    throw new ApiError(403, "You do not have access to this branch");
+  }
+
+  return branch;
+};
+
+const updateMyActiveContext = async (userId, payload) => {
+  const { workspaceId, companyId, branchId } = payload;
+
+  if (!workspaceId) {
+    const user = await userRepository.clearActiveContext(userId);
+
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    return user.toSafeObject();
+  }
+
+  await validateWorkspaceContext(userId, workspaceId);
+
+  let activeContext = {
+    workspaceId,
+    companyId: null,
+    branchId: null,
+  };
+
+  if (companyId) {
+    await validateCompanyContext(userId, workspaceId, companyId);
+
+    activeContext = {
+      ...activeContext,
+      companyId,
+    };
+  }
+
+  if (branchId) {
+    if (!companyId) {
+      throw new ApiError(
+        400,
+        "Company id is required when branch id is provided",
+      );
+    }
+
+    await validateBranchContext(userId, workspaceId, companyId, branchId);
+
+    activeContext = {
+      ...activeContext,
+      branchId,
+    };
+  }
+
+  const user = await userRepository.updateActiveContext(userId, activeContext);
+
+  if (!user) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return user.toSafeObject();
+};
+
 const deleteMyAccount = async (userId) => {
   const user = await userRepository.deleteUserById(userId);
 
@@ -135,5 +313,9 @@ export default {
   removeMyAvatar,
   updateMyEmail,
   updateMyPhone,
+
+  getMyActiveContext,
+  updateMyActiveContext,
+
   deleteMyAccount,
 };

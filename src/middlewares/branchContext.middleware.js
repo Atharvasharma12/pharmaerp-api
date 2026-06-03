@@ -2,6 +2,7 @@ import ApiError from "../utils/ApiError.js";
 import asyncHandler from "../utils/asyncHandler.js";
 
 import branchRepository from "../modules/organization/branches/repositories/branch.repository.js";
+import memberAccessService from "../modules/core/access-control/services/memberAccess.service.js";
 
 import { BRANCH_STATUS } from "../modules/organization/branches/constants/branch.constant.js";
 
@@ -45,6 +46,16 @@ const branchContextMiddleware = asyncHandler(async (req, res, next) => {
 
   if (branch.status !== BRANCH_STATUS.ACTIVE) {
     throw new ApiError(403, "Branch is not active");
+  }
+
+  const hasBranchAccess = await memberAccessService.hasBranchAccess(
+    req.workspaceId,
+    req.user._id,
+    branch._id,
+  );
+
+  if (!hasBranchAccess) {
+    throw new ApiError(403, "You do not have access to this branch");
   }
 
   req.branch = branch;
