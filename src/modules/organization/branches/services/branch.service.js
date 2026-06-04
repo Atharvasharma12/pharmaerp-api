@@ -102,15 +102,17 @@ const createBranch = async (workspaceId, companyId, userId, payload) => {
     phone: payload.phone,
 
     address: payload.address,
-    logo: payload.logo,
 
-    contactPerson: payload.contactPerson,
-
-    gstin: payload.gstin,
-    drugLicenseNumber: payload.drugLicenseNumber,
+    license: payload.license,
+    pharmacist: payload.pharmacist,
+    emergencyContact: payload.emergencyContact,
 
     billingSettings: payload.billingSettings,
     inventorySettings: payload.inventorySettings,
+
+    workingHours: payload.workingHours,
+    facilities: payload.facilities,
+
     settings: payload.settings,
 
     isPrimary: payload.isPrimary || false,
@@ -204,12 +206,13 @@ const updateBranch = async (
     "email",
     "phone",
     "address",
-    "logo",
-    "contactPerson",
-    "gstin",
-    "drugLicenseNumber",
+    "license",
+    "pharmacist",
+    "emergencyContact",
     "billingSettings",
     "inventorySettings",
+    "workingHours",
+    "facilities",
     "settings",
     "status",
     "isPrimary",

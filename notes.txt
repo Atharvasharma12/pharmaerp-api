@@ -929,6 +929,256 @@ And update:
 7. permission.middleware.js
 
 
+src/modules/finance/
+│
+├── finance.routes.js
+├── finance.module.js
+│
+├── chart-of-accounts/
+│   ├── models/
+│   │   └── account.model.js
+│   ├── repositories/
+│   │   └── account.repository.js
+│   ├── services/
+│   │   └── account.service.js
+│   ├── controllers/
+│   │   └── account.controller.js
+│   ├── validations/
+│   │   └── account.validation.js
+│   ├── routes/
+│   │   └── account.routes.js
+│   ├── constants/
+│   │   └── account.constant.js
+│   └── account.module.js
+│
+├── journal-vouchers/
+│   ├── models/
+│   │   ├── journalVoucher.model.js
+│   │   └── journalEntry.model.js
+│   ├── repositories/
+│   │   └── journalVoucher.repository.js
+│   ├── services/
+│   │   └── journalVoucher.service.js
+│   ├── controllers/
+│   │   └── journalVoucher.controller.js
+│   ├── validations/
+│   │   └── journalVoucher.validation.js
+│   ├── routes/
+│   │   └── journalVoucher.routes.js
+│   ├── constants/
+│   │   └── journalVoucher.constant.js
+│   └── journalVoucher.module.js
+│
+├── ledger/
+│   ├── models/
+│   │   └── ledgerEntry.model.js
+│   ├── repositories/
+│   │   └── ledger.repository.js
+│   ├── services/
+│   │   └── ledger.service.js
+│   ├── controllers/
+│   │   └── ledger.controller.js
+│   ├── validations/
+│   │   └── ledger.validation.js
+│   ├── routes/
+│   │   └── ledger.routes.js
+│   ├── constants/
+│   │   └── ledger.constant.js
+│   └── ledger.module.js
+│
+├── financial-periods/
+│   ├── models/
+│   │   ├── financialYear.model.js
+│   │   └── accountingPeriod.model.js
+│   ├── repositories/
+│   │   └── financialPeriod.repository.js
+│   ├── services/
+│   │   └── financialPeriod.service.js
+│   ├── controllers/
+│   │   └── financialPeriod.controller.js
+│   ├── validations/
+│   │   └── financialPeriod.validation.js
+│   ├── routes/
+│   │   └── financialPeriod.routes.js
+│   ├── constants/
+│   │   └── financialPeriod.constant.js
+│   └── financialPeriod.module.js
+│
+├── transactions/
+│   ├── models/
+│   │   └── transaction.model.js
+│   ├── repositories/
+│   │   └── transaction.repository.js
+│   ├── services/
+│   │   └── transaction.service.js
+│   ├── controllers/
+│   │   └── transaction.controller.js
+│   ├── validations/
+│   │   └── transaction.validation.js
+│   ├── routes/
+│   │   └── transaction.routes.js
+│   ├── constants/
+│   │   └── transaction.constant.js
+│   └── transaction.module.js
+│
+├── payments/
+│   ├── models/
+│   │   └── payment.model.js
+│   ├── repositories/
+│   │   └── payment.repository.js
+│   ├── services/
+│   │   └── payment.service.js
+│   ├── controllers/
+│   │   └── payment.controller.js
+│   ├── validations/
+│   │   └── payment.validation.js
+│   ├── routes/
+│   │   └── payment.routes.js
+│   ├── constants/
+│   │   └── payment.constant.js
+│   └── payment.module.js
+│
+├── expenses/
+│   ├── models/
+│   │   └── expense.model.js
+│   ├── repositories/
+│   │   └── expense.repository.js
+│   ├── services/
+│   │   └── expense.service.js
+│   ├── controllers/
+│   │   └── expense.controller.js
+│   ├── validations/
+│   │   └── expense.validation.js
+│   ├── routes/
+│   │   └── expense.routes.js
+│   ├── constants/
+│   │   └── expense.constant.js
+│   └── expense.module.js
+│
+├── income/
+│   ├── models/
+│   │   └── income.model.js
+│   ├── repositories/
+│   │   └── income.repository.js
+│   ├── services/
+│   │   └── income.service.js
+│   ├── controllers/
+│   │   └── income.controller.js
+│   ├── validations/
+│   │   └── income.validation.js
+│   ├── routes/
+│   │   └── income.routes.js
+│   ├── constants/
+│   │   └── income.constant.js
+│   └── income.module.js
+│
+├── cash-management/
+│   ├── models/
+│   │   ├── cashRegister.model.js
+│   │   ├── cashSession.model.js
+│   │   └── cashDenomination.model.js
+│   ├── repositories/
+│   │   └── cashManagement.repository.js
+│   ├── services/
+│   │   └── cashManagement.service.js
+│   ├── controllers/
+│   │   └── cashManagement.controller.js
+│   ├── validations/
+│   │   └── cashManagement.validation.js
+│   ├── routes/
+│   │   └── cashManagement.routes.js
+│   ├── constants/
+│   │   └── cashManagement.constant.js
+│   └── cashManagement.module.js
+│
+├── bank-reconciliation/
+│   ├── models/
+│   │   ├── bankStatement.model.js
+│   │   └── bankReconciliation.model.js
+│   ├── repositories/
+│   │   └── bankReconciliation.repository.js
+│   ├── services/
+│   │   └── bankReconciliation.service.js
+│   ├── controllers/
+│   │   └── bankReconciliation.controller.js
+│   ├── validations/
+│   │   └── bankReconciliation.validation.js
+│   ├── routes/
+│   │   └── bankReconciliation.routes.js
+│   ├── constants/
+│   │   └── bankReconciliation.constant.js
+│   └── bankReconciliation.module.js
+│
+├── gst-accounting/
+│   ├── models/
+│   │   ├── gstLedger.model.js
+│   │   └── gstReturnSummary.model.js
+│   ├── repositories/
+│   │   └── gstAccounting.repository.js
+│   ├── services/
+│   │   └── gstAccounting.service.js
+│   ├── controllers/
+│   │   └── gstAccounting.controller.js
+│   ├── validations/
+│   │   └── gstAccounting.validation.js
+│   ├── routes/
+│   │   └── gstAccounting.routes.js
+│   ├── constants/
+│   │   └── gstAccounting.constant.js
+│   └── gstAccounting.module.js
+│
+├── trial-balance/
+│   ├── controllers/
+│   │   └── trialBalance.controller.js
+│   ├── services/
+│   │   └── trialBalance.service.js
+│   ├── repositories/
+│   │   └── trialBalance.repository.js
+│   ├── routes/
+│   │   └── trialBalance.routes.js
+│   ├── validations/
+│   │   └── trialBalance.validation.js
+│   └── trialBalance.module.js
+│
+├── profit-loss/
+│   ├── controllers/
+│   │   └── profitLoss.controller.js
+│   ├── services/
+│   │   └── profitLoss.service.js
+│   ├── repositories/
+│   │   └── profitLoss.repository.js
+│   ├── routes/
+│   │   └── profitLoss.routes.js
+│   ├── validations/
+│   │   └── profitLoss.validation.js
+│   └── profitLoss.module.js
+│
+├── balance-sheet/
+│   ├── controllers/
+│   │   └── balanceSheet.controller.js
+│   ├── services/
+│   │   └── balanceSheet.service.js
+│   ├── repositories/
+│   │   └── balanceSheet.repository.js
+│   ├── routes/
+│   │   └── balanceSheet.routes.js
+│   ├── validations/
+│   │   └── balanceSheet.validation.js
+│   └── balanceSheet.module.js
+│
+└── reports/
+    ├── controllers/
+    │   └── financeReport.controller.js
+    ├── services/
+    │   └── financeReport.service.js
+    ├── repositories/
+    │   └── financeReport.repository.js
+    ├── routes/
+    │   └── financeReport.routes.js
+    ├── validations/
+    │   └── financeReport.validation.js
+    └── financeReport.module.js
+
 
 The ERP system follows a Workspace → Company → Branch hierarchy. A Workspace represents a customer organization (pharmacy business) and serves as the top-level tenant. Within a workspace, the customer can create one or more Companies, and each company can manage multiple Branches. Users belong to a workspace and can be granted access to specific companies and branches based on their roles and permissions. Company-level data includes business information such as GST number, drug licenses, trade licenses, PAN, tax configurations, billing settings, and other statutory or compliance-related details, since these are shared across all branches of that company. Branch-level data includes inventory, stock, batches, purchases, sales, POS operations, and day-to-day pharmacy activities, as stock and transactions are maintained separately for each branch. We are building a multi-tenant Retail Pharmacy ERP SaaS platform that enables customers to centrally manage companies, branches, users, compliance, inventory, sales, purchases, billing, subscriptions, and reporting within a scalable and secure architecture.
 

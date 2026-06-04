@@ -45,6 +45,10 @@ const findCompanyBySlug = async (workspaceId, slug, options = {}) => {
 };
 
 const findCompanyByCode = async (companyCode, options = {}) => {
+  if (!companyCode) {
+    return null;
+  }
+
   return Company.findOne({
     companyCode: String(companyCode).trim().toUpperCase(),
     isDeleted: false,

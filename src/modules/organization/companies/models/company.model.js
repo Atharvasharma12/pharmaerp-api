@@ -5,7 +5,6 @@ import {
   COMPANY_TYPE,
   COMPANY_LICENSE_STATUS,
   COMPANY_GST_TYPE,
-  COMPANY_BILLING_TYPE,
   DEFAULT_COMPANY_SETTINGS,
   COMPANY_CODE_PREFIX,
 } from "../constants/company.constant.js";
@@ -43,6 +42,11 @@ const ADDRESS_SCHEMA = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    district: {
+      type: String,
+      trim: true,
+      default: null,
+    },
     state: {
       type: String,
       trim: true,
@@ -62,12 +66,128 @@ const ADDRESS_SCHEMA = new mongoose.Schema(
   { _id: false },
 );
 
-const LICENSE_SCHEMA = new mongoose.Schema(
+const PHONE_SCHEMA = new mongoose.Schema(
   {
-    licenseNumber: {
+    mobile: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid mobile number"],
+      default: null,
+    },
+    whatsapp: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid WhatsApp number"],
+      default: null,
+    },
+    landline: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
+const PERSON_SCHEMA = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
+      default: null,
+    },
+    mobile: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid mobile number"],
+      default: null,
+    },
+    aadhaar: {
+      type: String,
+      trim: true,
+      match: [/^[0-9]{12}$/, "Invalid Aadhaar number"],
+      default: null,
+    },
+    pan: {
       type: String,
       trim: true,
       uppercase: true,
+      match: [/^[A-Z]{5}[0-9]{4}[A-Z]$/, "Invalid PAN number"],
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
+const PHARMACIST_SCHEMA = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    registrationNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+    },
+    mobile: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid pharmacist mobile number"],
+      default: null,
+    },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid pharmacist email"],
+      default: null,
+    },
+    registrationExpiryDate: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
+const LICENSE_SCHEMA = new mongoose.Schema(
+  {
+    licenseType: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    retailLicenseNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+    },
+    wholesaleLicenseNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+    },
+    drugLicenseNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+    },
+    fssaiNumber: {
+      type: String,
+      trim: true,
       default: null,
     },
     issuedAt: {
@@ -98,10 +218,10 @@ const TAX_SETTINGS_SCHEMA = new mongoose.Schema(
       enum: Object.values(COMPANY_GST_TYPE),
       default: COMPANY_GST_TYPE.REGULAR,
     },
-    billingType: {
+    gstJurisdiction: {
       type: String,
-      enum: Object.values(COMPANY_BILLING_TYPE),
-      default: COMPANY_BILLING_TYPE.GST,
+      trim: true,
+      default: null,
     },
     defaultGstRate: {
       type: Number,
@@ -141,17 +261,75 @@ const BILLING_SETTINGS_SCHEMA = new mongoose.Schema(
       default: 1,
       min: [1, "Purchase start number must be at least 1"],
     },
-    salesReturnPrefix: {
+    creditNotePrefix: {
       type: String,
       trim: true,
       uppercase: true,
-      default: "SR",
+      default: "CRN",
     },
-    purchaseReturnPrefix: {
+    debitNotePrefix: {
       type: String,
       trim: true,
       uppercase: true,
-      default: "PR",
+      default: "DBN",
+    },
+    barcodeFormat: {
+      type: String,
+      trim: true,
+      default: "Code128",
+    },
+    roundingType: {
+      type: String,
+      trim: true,
+      default: "2 Decimal Places",
+    },
+    printCompanyLogoOnInvoice: {
+      type: Boolean,
+      default: true,
+    },
+    footerMessage: {
+      type: String,
+      trim: true,
+      maxlength: [300, "Footer message cannot exceed 300 characters"],
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
+const BUSINESS_SETTINGS_SCHEMA = new mongoose.Schema(
+  {
+    allowNegativeStock: {
+      type: Boolean,
+      default: false,
+    },
+    enableBatchWiseInventory: {
+      type: Boolean,
+      default: true,
+    },
+    enableExpiryTracking: {
+      type: Boolean,
+      default: true,
+    },
+    enableScheduleHTracking: {
+      type: Boolean,
+      default: true,
+    },
+    enableNarcoticDrugTracking: {
+      type: Boolean,
+      default: true,
+    },
+    enableSmsNotifications: {
+      type: Boolean,
+      default: true,
+    },
+    enableWhatsappNotifications: {
+      type: Boolean,
+      default: true,
+    },
+    enableEmailNotifications: {
+      type: Boolean,
+      default: true,
     },
   },
   { _id: false },
@@ -159,16 +337,16 @@ const BILLING_SETTINGS_SCHEMA = new mongoose.Schema(
 
 const SETTINGS_SCHEMA = new mongoose.Schema(
   {
-    timezone: {
-      type: String,
-      trim: true,
-      default: DEFAULT_COMPANY_SETTINGS.timezone,
-    },
     currency: {
       type: String,
       trim: true,
       uppercase: true,
       default: DEFAULT_COMPANY_SETTINGS.currency,
+    },
+    timezone: {
+      type: String,
+      trim: true,
+      default: DEFAULT_COMPANY_SETTINGS.timezone,
     },
     dateFormat: {
       type: String,
@@ -179,34 +357,6 @@ const SETTINGS_SCHEMA = new mongoose.Schema(
       type: String,
       trim: true,
       default: DEFAULT_COMPANY_SETTINGS.timeFormat,
-    },
-    allowNegativeStock: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.allowNegativeStock,
-    },
-    allowBackdatedEntries: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.allowBackdatedEntries,
-    },
-    enableBatchTracking: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.enableBatchTracking,
-    },
-    enableExpiryTracking: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.enableExpiryTracking,
-    },
-    enablePurchaseModule: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.enablePurchaseModule,
-    },
-    enableSalesModule: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.enableSalesModule,
-    },
-    enableInventoryModule: {
-      type: Boolean,
-      default: DEFAULT_COMPANY_SETTINGS.enableInventoryModule,
     },
   },
   { _id: false },
@@ -268,16 +418,22 @@ const companySchema = new mongoose.Schema(
       default: null,
     },
 
-    phone: {
+    phones: {
+      type: PHONE_SCHEMA,
+      default: () => ({}),
+    },
+
+    website: {
       type: String,
       trim: true,
-      match: [/^[6-9][0-9]{9}$/, "Invalid phone number"],
+      lowercase: true,
+      maxlength: [250, "Website cannot exceed 250 characters"],
       default: null,
     },
 
     address: {
       type: ADDRESS_SCHEMA,
-      default: null,
+      default: () => ({}),
     },
 
     gstin: {
@@ -299,19 +455,19 @@ const companySchema = new mongoose.Schema(
       default: null,
     },
 
-    drugLicense: {
-      type: LICENSE_SCHEMA,
-      default: null,
+    owner: {
+      type: PERSON_SCHEMA,
+      default: () => ({}),
     },
 
-    foodLicense: {
-      type: LICENSE_SCHEMA,
-      default: null,
+    pharmacist: {
+      type: PHARMACIST_SCHEMA,
+      default: () => ({}),
     },
 
-    tradeLicense: {
+    license: {
       type: LICENSE_SCHEMA,
-      default: null,
+      default: () => ({}),
     },
 
     taxSettings: {
@@ -324,9 +480,14 @@ const companySchema = new mongoose.Schema(
       default: () => ({}),
     },
 
+    businessSettings: {
+      type: BUSINESS_SETTINGS_SCHEMA,
+      default: () => ({}),
+    },
+
     settings: {
       type: SETTINGS_SCHEMA,
-      default: () => DEFAULT_COMPANY_SETTINGS,
+      default: () => ({}),
     },
 
     status: {
@@ -404,9 +565,7 @@ companySchema.methods.toSafeObject = function () {
 };
 
 companySchema.index(
-  {
-    companyCode: 1,
-  },
+  { companyCode: 1 },
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },
@@ -414,10 +573,7 @@ companySchema.index(
 );
 
 companySchema.index(
-  {
-    workspaceId: 1,
-    slug: 1,
-  },
+  { workspaceId: 1, slug: 1 },
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },
@@ -425,10 +581,7 @@ companySchema.index(
 );
 
 companySchema.index(
-  {
-    workspaceId: 1,
-    gstin: 1,
-  },
+  { workspaceId: 1, gstin: 1 },
   {
     unique: true,
     partialFilterExpression: {

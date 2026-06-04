@@ -3,16 +3,9 @@ import Joi from "joi";
 import {
   BRANCH_STATUS,
   BRANCH_TYPE,
-  BRANCH_BILLING_TYPE,
   BRANCH_INVENTORY_MODE,
   BRANCH_PRICE_MODE,
 } from "../constants/branch.constant.js";
-
-const imageSchema = Joi.object({
-  publicId: Joi.string().trim().allow(null, "").optional(),
-
-  url: Joi.string().trim().uri().required(),
-});
 
 const addressSchema = Joi.object({
   addressLine1: Joi.string().trim().max(200).allow(null, "").optional(),
@@ -21,23 +14,49 @@ const addressSchema = Joi.object({
 
   city: Joi.string().trim().max(100).allow(null, "").optional(),
 
+  district: Joi.string().trim().max(100).allow(null, "").optional(),
+
   state: Joi.string().trim().max(100).allow(null, "").optional(),
 
   country: Joi.string().trim().max(100).allow(null, "").optional(),
 
   pincode: Joi.string().trim().max(20).allow(null, "").optional(),
+
+  googleMapLocation: Joi.string().trim().max(500).allow(null, "").optional(),
 });
 
-const contactPersonSchema = Joi.object({
+const licenseSchema = Joi.object({
+  drugLicenseNumber: Joi.string()
+    .trim()
+    .uppercase()
+    .max(100)
+    .allow(null, "")
+    .optional(),
+
+  drugLicenseType: Joi.string().trim().max(100).allow(null, "").optional(),
+
+  fssaiNumber: Joi.string().trim().max(100).allow(null, "").optional(),
+
+  expiresAt: Joi.date().allow(null).optional(),
+});
+
+const pharmacistSchema = Joi.object({
   name: Joi.string().trim().max(120).allow(null, "").optional(),
 
-  phone: Joi.string()
+  registrationNumber: Joi.string()
+    .trim()
+    .uppercase()
+    .max(100)
+    .allow(null, "")
+    .optional(),
+
+  mobile: Joi.string()
     .trim()
     .pattern(/^[6-9][0-9]{9}$/)
     .allow(null, "")
     .optional()
     .messages({
-      "string.pattern.base": "Invalid phone number",
+      "string.pattern.base": "Invalid pharmacist mobile number",
     }),
 
   email: Joi.string()
@@ -47,30 +66,39 @@ const contactPersonSchema = Joi.object({
     .max(200)
     .allow(null, "")
     .optional(),
+});
 
-  designation: Joi.string().trim().max(120).allow(null, "").optional(),
+const emergencyContactSchema = Joi.object({
+  name: Joi.string().trim().max(120).allow(null, "").optional(),
+
+  mobile: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid emergency contact mobile number",
+    }),
+
+  relationship: Joi.string().trim().max(100).allow(null, "").optional(),
 });
 
 const billingSettingsSchema = Joi.object({
-  billingType: Joi.string()
-    .valid(...Object.values(BRANCH_BILLING_TYPE))
-    .optional(),
+  invoicePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  invoicePrefix: Joi.string().trim().max(20).optional(),
+  purchasePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  invoiceStartNumber: Joi.number().integer().min(1).optional(),
+  salesReturnPrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  billPrefix: Joi.string().trim().max(20).optional(),
+  purchaseReturnPrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  billStartNumber: Joi.number().integer().min(1).optional(),
+  creditNotePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  purchasePrefix: Joi.string().trim().max(20).optional(),
+  debitNotePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  purchaseStartNumber: Joi.number().integer().min(1).optional(),
+  startingInvoiceNumber: Joi.number().integer().min(1).optional(),
 
-  salesReturnPrefix: Joi.string().trim().max(20).optional(),
-
-  purchaseReturnPrefix: Joi.string().trim().max(20).optional(),
+  startingPurchaseNumber: Joi.number().integer().min(1).optional(),
 });
 
 const inventorySettingsSchema = Joi.object({
@@ -91,6 +119,30 @@ const inventorySettingsSchema = Joi.object({
   enableExpiryTracking: Joi.boolean().optional(),
 
   enableRackTracking: Joi.boolean().optional(),
+
+  enableStockTracking: Joi.boolean().optional(),
+});
+
+const workingHoursSchema = Joi.object({
+  openingTime: Joi.string().trim().max(20).allow(null, "").optional(),
+
+  closingTime: Joi.string().trim().max(20).allow(null, "").optional(),
+
+  weeklyOff: Joi.string().trim().max(50).allow(null, "").optional(),
+
+  workingDays: Joi.array().items(Joi.string().trim().max(30)).optional(),
+});
+
+const facilitiesSchema = Joi.object({
+  homeDelivery: Joi.boolean().optional(),
+
+  whatsappOrders: Joi.boolean().optional(),
+
+  onlineOrders: Joi.boolean().optional(),
+
+  coldStorageAvailable: Joi.boolean().optional(),
+
+  twentyFourSevenService: Joi.boolean().optional(),
 });
 
 const settingsSchema = Joi.object({
@@ -101,16 +153,6 @@ const settingsSchema = Joi.object({
   dateFormat: Joi.string().trim().max(30).optional(),
 
   timeFormat: Joi.string().trim().valid("12h", "24h").optional(),
-
-  enablePurchaseModule: Joi.boolean().optional(),
-
-  enableSalesModule: Joi.boolean().optional(),
-
-  enableInventoryModule: Joi.boolean().optional(),
-
-  enablePosBilling: Joi.boolean().optional(),
-
-  defaultGstRate: Joi.number().min(0).max(100).optional(),
 });
 
 export const createBranchSchema = Joi.object({
@@ -139,30 +181,19 @@ export const createBranchSchema = Joi.object({
 
   address: addressSchema.optional(),
 
-  logo: imageSchema.allow(null).optional(),
+  license: licenseSchema.optional(),
 
-  contactPerson: contactPersonSchema.allow(null).optional(),
+  pharmacist: pharmacistSchema.optional(),
 
-  gstin: Joi.string()
-    .trim()
-    .uppercase()
-    .pattern(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/)
-    .allow(null, "")
-    .optional()
-    .messages({
-      "string.pattern.base": "Invalid GSTIN",
-    }),
-
-  drugLicenseNumber: Joi.string()
-    .trim()
-    .uppercase()
-    .max(100)
-    .allow(null, "")
-    .optional(),
+  emergencyContact: emergencyContactSchema.optional(),
 
   billingSettings: billingSettingsSchema.optional(),
 
   inventorySettings: inventorySettingsSchema.optional(),
+
+  workingHours: workingHoursSchema.optional(),
+
+  facilities: facilitiesSchema.optional(),
 
   settings: settingsSchema.optional(),
 
@@ -195,30 +226,19 @@ export const updateBranchSchema = Joi.object({
 
   address: addressSchema.allow(null).optional(),
 
-  logo: imageSchema.allow(null).optional(),
+  license: licenseSchema.allow(null).optional(),
 
-  contactPerson: contactPersonSchema.allow(null).optional(),
+  pharmacist: pharmacistSchema.allow(null).optional(),
 
-  gstin: Joi.string()
-    .trim()
-    .uppercase()
-    .pattern(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/)
-    .allow(null, "")
-    .optional()
-    .messages({
-      "string.pattern.base": "Invalid GSTIN",
-    }),
-
-  drugLicenseNumber: Joi.string()
-    .trim()
-    .uppercase()
-    .max(100)
-    .allow(null, "")
-    .optional(),
+  emergencyContact: emergencyContactSchema.allow(null).optional(),
 
   billingSettings: billingSettingsSchema.optional(),
 
   inventorySettings: inventorySettingsSchema.optional(),
+
+  workingHours: workingHoursSchema.allow(null).optional(),
+
+  facilities: facilitiesSchema.optional(),
 
   settings: settingsSchema.optional(),
 

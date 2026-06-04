@@ -5,26 +5,9 @@ import {
   BRANCH_TYPE,
   BRANCH_CODE_PREFIX,
   DEFAULT_BRANCH_SETTINGS,
-  BRANCH_BILLING_TYPE,
   BRANCH_INVENTORY_MODE,
   BRANCH_PRICE_MODE,
 } from "../constants/branch.constant.js";
-
-const IMAGE_SCHEMA = new mongoose.Schema(
-  {
-    publicId: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    url: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-  },
-  { _id: false },
-);
 
 const ADDRESS_SCHEMA = new mongoose.Schema(
   {
@@ -39,6 +22,11 @@ const ADDRESS_SCHEMA = new mongoose.Schema(
       default: null,
     },
     city: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    district: {
       type: String,
       trim: true,
       default: null,
@@ -58,21 +46,32 @@ const ADDRESS_SCHEMA = new mongoose.Schema(
       trim: true,
       default: null,
     },
+    googleMapLocation: {
+      type: String,
+      trim: true,
+      default: null,
+    },
   },
   { _id: false },
 );
 
-const CONTACT_PERSON_SCHEMA = new mongoose.Schema(
+const PHARMACIST_SCHEMA = new mongoose.Schema(
   {
     name: {
       type: String,
       trim: true,
       default: null,
     },
-    phone: {
+    registrationNumber: {
       type: String,
       trim: true,
-      match: [/^[6-9][0-9]{9}$/, "Invalid phone number"],
+      uppercase: true,
+      default: null,
+    },
+    mobile: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid pharmacist mobile number"],
       default: null,
     },
     email: {
@@ -83,7 +82,24 @@ const CONTACT_PERSON_SCHEMA = new mongoose.Schema(
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
       default: null,
     },
-    designation: {
+  },
+  { _id: false },
+);
+
+const EMERGENCY_CONTACT_SCHEMA = new mongoose.Schema(
+  {
+    name: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    mobile: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid emergency contact mobile number"],
+      default: null,
+    },
+    relationship: {
       type: String,
       trim: true,
       default: null,
@@ -92,45 +108,45 @@ const CONTACT_PERSON_SCHEMA = new mongoose.Schema(
   { _id: false },
 );
 
+const LICENSE_SCHEMA = new mongoose.Schema(
+  {
+    drugLicenseNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: null,
+    },
+    drugLicenseType: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    fssaiNumber: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    expiresAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const BILLING_SETTINGS_SCHEMA = new mongoose.Schema(
   {
-    billingType: {
-      type: String,
-      enum: Object.values(BRANCH_BILLING_TYPE),
-      default: BRANCH_BILLING_TYPE.GST,
-    },
     invoicePrefix: {
       type: String,
       trim: true,
       uppercase: true,
       default: "INV",
     },
-    invoiceStartNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Invoice start number must be at least 1"],
-    },
-    billPrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "BILL",
-    },
-    billStartNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Bill start number must be at least 1"],
-    },
     purchasePrefix: {
       type: String,
       trim: true,
       uppercase: true,
       default: "PUR",
-    },
-    purchaseStartNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Purchase start number must be at least 1"],
     },
     salesReturnPrefix: {
       type: String,
@@ -143,6 +159,28 @@ const BILLING_SETTINGS_SCHEMA = new mongoose.Schema(
       trim: true,
       uppercase: true,
       default: "PR",
+    },
+    creditNotePrefix: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "CN",
+    },
+    debitNotePrefix: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      default: "DBN",
+    },
+    startingInvoiceNumber: {
+      type: Number,
+      default: 1,
+      min: [1, "Starting invoice number must be at least 1"],
+    },
+    startingPurchaseNumber: {
+      type: Number,
+      default: 1,
+      min: [1, "Starting purchase number must be at least 1"],
     },
   },
   { _id: false },
@@ -180,6 +218,61 @@ const INVENTORY_SETTINGS_SCHEMA = new mongoose.Schema(
       type: Boolean,
       default: DEFAULT_BRANCH_SETTINGS.enableRackTracking,
     },
+    enableStockTracking: {
+      type: Boolean,
+      default: true,
+    },
+  },
+  { _id: false },
+);
+
+const WORKING_HOURS_SCHEMA = new mongoose.Schema(
+  {
+    openingTime: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    closingTime: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    weeklyOff: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    workingDays: {
+      type: [String],
+      default: [],
+    },
+  },
+  { _id: false },
+);
+
+const FACILITIES_SCHEMA = new mongoose.Schema(
+  {
+    homeDelivery: {
+      type: Boolean,
+      default: false,
+    },
+    whatsappOrders: {
+      type: Boolean,
+      default: false,
+    },
+    onlineOrders: {
+      type: Boolean,
+      default: false,
+    },
+    coldStorageAvailable: {
+      type: Boolean,
+      default: false,
+    },
+    twentyFourSevenService: {
+      type: Boolean,
+      default: false,
+    },
   },
   { _id: false },
 );
@@ -206,28 +299,6 @@ const SETTINGS_SCHEMA = new mongoose.Schema(
       type: String,
       trim: true,
       default: DEFAULT_BRANCH_SETTINGS.timeFormat,
-    },
-    enablePurchaseModule: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enablePurchaseModule,
-    },
-    enableSalesModule: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enableSalesModule,
-    },
-    enableInventoryModule: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enableInventoryModule,
-    },
-    enablePosBilling: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enablePosBilling,
-    },
-    defaultGstRate: {
-      type: Number,
-      default: DEFAULT_BRANCH_SETTINGS.defaultGstRate,
-      min: [0, "GST rate cannot be negative"],
-      max: [100, "GST rate cannot exceed 100"],
     },
   },
   { _id: false },
@@ -282,9 +353,10 @@ const branchSchema = new mongoose.Schema(
       index: true,
     },
 
-    logo: {
-      type: IMAGE_SCHEMA,
-      default: null,
+    isPrimary: {
+      type: Boolean,
+      default: false,
+      index: true,
     },
 
     email: {
@@ -305,30 +377,22 @@ const branchSchema = new mongoose.Schema(
 
     address: {
       type: ADDRESS_SCHEMA,
-      default: null,
+      default: () => ({}),
     },
 
-    contactPerson: {
-      type: CONTACT_PERSON_SCHEMA,
-      default: null,
+    license: {
+      type: LICENSE_SCHEMA,
+      default: () => ({}),
     },
 
-    gstin: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      match: [
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/,
-        "Invalid GSTIN",
-      ],
-      default: null,
+    pharmacist: {
+      type: PHARMACIST_SCHEMA,
+      default: () => ({}),
     },
 
-    drugLicenseNumber: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: null,
+    emergencyContact: {
+      type: EMERGENCY_CONTACT_SCHEMA,
+      default: () => ({}),
     },
 
     billingSettings: {
@@ -341,21 +405,25 @@ const branchSchema = new mongoose.Schema(
       default: () => ({}),
     },
 
+    workingHours: {
+      type: WORKING_HOURS_SCHEMA,
+      default: () => ({}),
+    },
+
+    facilities: {
+      type: FACILITIES_SCHEMA,
+      default: () => ({}),
+    },
+
     settings: {
       type: SETTINGS_SCHEMA,
-      default: () => DEFAULT_BRANCH_SETTINGS,
+      default: () => ({}),
     },
 
     status: {
       type: String,
       enum: Object.values(BRANCH_STATUS),
       default: BRANCH_STATUS.ACTIVE,
-      index: true,
-    },
-
-    isPrimary: {
-      type: Boolean,
-      default: false,
       index: true,
     },
 
@@ -427,9 +495,7 @@ branchSchema.methods.toSafeObject = function () {
 };
 
 branchSchema.index(
-  {
-    branchCode: 1,
-  },
+  { branchCode: 1 },
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },

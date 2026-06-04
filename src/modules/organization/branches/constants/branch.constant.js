@@ -28,21 +28,8 @@ export const DEFAULT_BRANCH_SETTINGS = {
 
   enableBatchTracking: true,
   enableExpiryTracking: true,
-
   enableRackTracking: true,
-
-  enablePurchaseModule: true,
-  enableSalesModule: true,
-  enableInventoryModule: true,
-
-  enablePosBilling: true,
-
-  defaultGstRate: 0,
-};
-
-export const BRANCH_BILLING_TYPE = {
-  GST: "gst",
-  NON_GST: "non_gst",
+  enableStockTracking: true,
 };
 
 export const BRANCH_INVENTORY_MODE = {

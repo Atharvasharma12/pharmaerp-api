@@ -69,10 +69,9 @@ export const assignRoleToMember = asyncHandler(async (req, res) => {
   const member = await roleService.assignRoleToMember(
     req.workspaceId,
     req.user._id,
-    req.body.memberUserId,
+    req.params.memberUserId,
     req.body.roleId,
   );
-
   return res
     .status(200)
     .json(new ApiResponse(200, "Role assigned successfully", member));

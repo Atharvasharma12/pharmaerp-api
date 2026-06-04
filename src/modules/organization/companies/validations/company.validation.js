@@ -5,13 +5,12 @@ import {
   COMPANY_TYPE,
   COMPANY_LICENSE_STATUS,
   COMPANY_GST_TYPE,
-  COMPANY_BILLING_TYPE,
 } from "../constants/company.constant.js";
 
 const imageSchema = Joi.object({
   publicId: Joi.string().trim().allow(null, "").optional(),
 
-  url: Joi.string().trim().uri().required(),
+  url: Joi.string().trim().uri().allow(null, "").optional(),
 });
 
 const addressSchema = Joi.object({
@@ -21,6 +20,8 @@ const addressSchema = Joi.object({
 
   city: Joi.string().trim().max(100).allow(null, "").optional(),
 
+  district: Joi.string().trim().max(100).allow(null, "").optional(),
+
   state: Joi.string().trim().max(100).allow(null, "").optional(),
 
   country: Joi.string().trim().max(100).allow(null, "").optional(),
@@ -28,8 +29,123 @@ const addressSchema = Joi.object({
   pincode: Joi.string().trim().max(20).allow(null, "").optional(),
 });
 
+const phoneSchema = Joi.object({
+  mobile: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid mobile number",
+    }),
+
+  whatsapp: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid WhatsApp number",
+    }),
+
+  landline: Joi.string().trim().max(30).allow(null, "").optional(),
+});
+
+const personSchema = Joi.object({
+  name: Joi.string().trim().max(120).allow(null, "").optional(),
+
+  email: Joi.string()
+    .trim()
+    .lowercase()
+    .email()
+    .max(200)
+    .allow(null, "")
+    .optional(),
+
+  mobile: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid mobile number",
+    }),
+
+  aadhaar: Joi.string()
+    .trim()
+    .pattern(/^[0-9]{12}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid Aadhaar number",
+    }),
+
+  pan: Joi.string()
+    .trim()
+    .uppercase()
+    .pattern(/^[A-Z]{5}[0-9]{4}[A-Z]$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid PAN number",
+    }),
+});
+
+const pharmacistSchema = Joi.object({
+  name: Joi.string().trim().max(120).allow(null, "").optional(),
+
+  registrationNumber: Joi.string()
+    .trim()
+    .uppercase()
+    .max(100)
+    .allow(null, "")
+    .optional(),
+
+  mobile: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid pharmacist mobile number",
+    }),
+
+  email: Joi.string()
+    .trim()
+    .lowercase()
+    .email()
+    .max(200)
+    .allow(null, "")
+    .optional(),
+
+  registrationExpiryDate: Joi.date().allow(null).optional(),
+});
+
 const licenseSchema = Joi.object({
-  licenseNumber: Joi.string().trim().max(100).allow(null, "").optional(),
+  licenseType: Joi.string().trim().max(100).allow(null, "").optional(),
+
+  retailLicenseNumber: Joi.string()
+    .trim()
+    .uppercase()
+    .max(100)
+    .allow(null, "")
+    .optional(),
+
+  wholesaleLicenseNumber: Joi.string()
+    .trim()
+    .uppercase()
+    .max(100)
+    .allow(null, "")
+    .optional(),
+
+  drugLicenseNumber: Joi.string()
+    .trim()
+    .uppercase()
+    .max(100)
+    .allow(null, "")
+    .optional(),
+
+  fssaiNumber: Joi.string().trim().max(100).allow(null, "").optional(),
 
   issuedAt: Joi.date().allow(null).optional(),
 
@@ -47,9 +163,7 @@ const taxSettingsSchema = Joi.object({
     .valid(...Object.values(COMPANY_GST_TYPE))
     .optional(),
 
-  billingType: Joi.string()
-    .valid(...Object.values(COMPANY_BILLING_TYPE))
-    .optional(),
+  gstJurisdiction: Joi.string().trim().max(150).allow(null, "").optional(),
 
   defaultGstRate: Joi.number().min(0).max(100).optional(),
 
@@ -57,41 +171,53 @@ const taxSettingsSchema = Joi.object({
 });
 
 const billingSettingsSchema = Joi.object({
-  invoicePrefix: Joi.string().trim().max(20).optional(),
+  invoicePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
   invoiceStartNumber: Joi.number().integer().min(1).optional(),
 
-  purchasePrefix: Joi.string().trim().max(20).optional(),
+  purchasePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
   purchaseStartNumber: Joi.number().integer().min(1).optional(),
 
-  salesReturnPrefix: Joi.string().trim().max(20).optional(),
+  creditNotePrefix: Joi.string().trim().uppercase().max(20).optional(),
 
-  purchaseReturnPrefix: Joi.string().trim().max(20).optional(),
+  debitNotePrefix: Joi.string().trim().uppercase().max(20).optional(),
+
+  barcodeFormat: Joi.string().trim().max(50).optional(),
+
+  roundingType: Joi.string().trim().max(50).optional(),
+
+  printCompanyLogoOnInvoice: Joi.boolean().optional(),
+
+  footerMessage: Joi.string().trim().max(300).allow(null, "").optional(),
+});
+
+const businessSettingsSchema = Joi.object({
+  allowNegativeStock: Joi.boolean().optional(),
+
+  enableBatchWiseInventory: Joi.boolean().optional(),
+
+  enableExpiryTracking: Joi.boolean().optional(),
+
+  enableScheduleHTracking: Joi.boolean().optional(),
+
+  enableNarcoticDrugTracking: Joi.boolean().optional(),
+
+  enableSmsNotifications: Joi.boolean().optional(),
+
+  enableWhatsappNotifications: Joi.boolean().optional(),
+
+  enableEmailNotifications: Joi.boolean().optional(),
 });
 
 const settingsSchema = Joi.object({
-  timezone: Joi.string().trim().max(80).optional(),
-
   currency: Joi.string().trim().uppercase().length(3).optional(),
+
+  timezone: Joi.string().trim().max(80).optional(),
 
   dateFormat: Joi.string().trim().max(30).optional(),
 
   timeFormat: Joi.string().trim().valid("12h", "24h").optional(),
-
-  allowNegativeStock: Joi.boolean().optional(),
-
-  allowBackdatedEntries: Joi.boolean().optional(),
-
-  enableBatchTracking: Joi.boolean().optional(),
-
-  enableExpiryTracking: Joi.boolean().optional(),
-
-  enablePurchaseModule: Joi.boolean().optional(),
-
-  enableSalesModule: Joi.boolean().optional(),
-
-  enableInventoryModule: Joi.boolean().optional(),
 });
 
 export const createCompanySchema = Joi.object({
@@ -101,6 +227,8 @@ export const createCompanySchema = Joi.object({
     .valid(...Object.values(COMPANY_TYPE))
     .optional(),
 
+  logo: imageSchema.allow(null).optional(),
+
   email: Joi.string()
     .trim()
     .lowercase()
@@ -109,18 +237,17 @@ export const createCompanySchema = Joi.object({
     .allow(null, "")
     .optional(),
 
-  phone: Joi.string()
+  phones: phoneSchema.optional(),
+
+  website: Joi.string()
     .trim()
-    .pattern(/^[6-9][0-9]{9}$/)
+    .lowercase()
+    .uri()
+    .max(250)
     .allow(null, "")
-    .optional()
-    .messages({
-      "string.pattern.base": "Invalid phone number",
-    }),
+    .optional(),
 
   address: addressSchema.optional(),
-
-  logo: imageSchema.allow(null).optional(),
 
   gstin: Joi.string()
     .trim()
@@ -142,15 +269,17 @@ export const createCompanySchema = Joi.object({
       "string.pattern.base": "Invalid PAN number",
     }),
 
-  drugLicense: licenseSchema.allow(null).optional(),
+  owner: personSchema.optional(),
 
-  foodLicense: licenseSchema.allow(null).optional(),
+  pharmacist: pharmacistSchema.optional(),
 
-  tradeLicense: licenseSchema.allow(null).optional(),
+  license: licenseSchema.optional(),
 
   taxSettings: taxSettingsSchema.optional(),
 
   billingSettings: billingSettingsSchema.optional(),
+
+  businessSettings: businessSettingsSchema.optional(),
 
   settings: settingsSchema.optional(),
 });
@@ -162,6 +291,8 @@ export const updateCompanySchema = Joi.object({
     .valid(...Object.values(COMPANY_TYPE))
     .optional(),
 
+  logo: imageSchema.allow(null).optional(),
+
   email: Joi.string()
     .trim()
     .lowercase()
@@ -170,18 +301,17 @@ export const updateCompanySchema = Joi.object({
     .allow(null, "")
     .optional(),
 
-  phone: Joi.string()
+  phones: phoneSchema.allow(null).optional(),
+
+  website: Joi.string()
     .trim()
-    .pattern(/^[6-9][0-9]{9}$/)
+    .lowercase()
+    .uri()
+    .max(250)
     .allow(null, "")
-    .optional()
-    .messages({
-      "string.pattern.base": "Invalid phone number",
-    }),
+    .optional(),
 
   address: addressSchema.allow(null).optional(),
-
-  logo: imageSchema.allow(null).optional(),
 
   gstin: Joi.string()
     .trim()
@@ -203,15 +333,17 @@ export const updateCompanySchema = Joi.object({
       "string.pattern.base": "Invalid PAN number",
     }),
 
-  drugLicense: licenseSchema.allow(null).optional(),
+  owner: personSchema.allow(null).optional(),
 
-  foodLicense: licenseSchema.allow(null).optional(),
+  pharmacist: pharmacistSchema.allow(null).optional(),
 
-  tradeLicense: licenseSchema.allow(null).optional(),
+  license: licenseSchema.allow(null).optional(),
 
   taxSettings: taxSettingsSchema.optional(),
 
   billingSettings: billingSettingsSchema.optional(),
+
+  businessSettings: businessSettingsSchema.optional(),
 
   settings: settingsSchema.optional(),
 

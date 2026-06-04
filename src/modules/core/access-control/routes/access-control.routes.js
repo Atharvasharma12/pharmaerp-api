@@ -54,8 +54,8 @@ router.patch("/roles/:roleId", validate(updateRoleSchema), updateRole);
 router.delete("/roles/:roleId", deleteRole);
 
 // Member Role Assignment
-router.post(
-  "/roles/assign-member",
+router.patch(
+  "/members/:memberUserId/role",
   validate(assignRoleToMemberSchema),
   assignRoleToMember,
 );
