@@ -13,6 +13,7 @@ import {
   WORKSPACE_INVITATION_STATUS,
   WORKSPACE_INVITATION_EXPIRY_HOURS,
 } from "../constants/workspace.constant.js";
+import { sendEmail } from "../../../../utils/sendEmail.js";
 
 const INVITATION_EXPIRY_HOURS = 72;
 
@@ -106,12 +107,69 @@ const inviteMember = async (workspaceId, invitedBy, payload) => {
 
   const invitationLink = `${process.env.FRONTEND_URL}/workspace-invitations/${rawToken}`;
 
-  console.log("====================================");
-  console.log("WORKSPACE INVITATION");
-  console.log("Workspace:", workspaceId);
-  console.log("Email:", email);
-  console.log("Invitation Link:", invitationLink);
-  console.log("====================================");
+  await sendEmail({
+    to: email,
+    subject: "You're invited to join a Workspace",
+    html: `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+      <h2>Workspace Invitation</h2>
+
+      <p>You have been invited to join a workspace.</p>
+
+      <p>
+        Click the button below to accept the invitation:
+      </p>
+
+      <p>
+        <a
+          href="${invitationLink}"
+          style="
+            display:inline-block;
+            background:#2563eb;
+            color:#ffffff;
+            padding:12px 24px;
+            text-decoration:none;
+            border-radius:6px;
+          "
+        >
+          Accept Invitation
+        </a>
+      </p>
+
+      <p>
+        If the button doesn't work, use this link:
+      </p>
+
+      <p>
+        <a href="${invitationLink}">
+          ${invitationLink}
+        </a>
+      </p>
+
+      <p>
+        This invitation will expire in ${INVITATION_EXPIRY_HOURS} hours.
+      </p>
+
+      ${
+        payload.notes ? `<p><strong>Message:</strong> ${payload.notes}</p>` : ""
+      }
+
+      <hr />
+
+      <p style="color:#666;font-size:12px;">
+        If you were not expecting this invitation, you can safely ignore this email.
+      </p>
+    </div>
+  `,
+    text: `
+You have been invited to join a workspace.
+
+Accept invitation:
+${invitationLink}
+
+This invitation expires in ${INVITATION_EXPIRY_HOURS} hours.
+  `,
+  });
 
   return invitation.toSafeObject();
 };

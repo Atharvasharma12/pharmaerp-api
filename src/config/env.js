@@ -12,6 +12,8 @@ const env = {
 
   API_PREFIX: process.env.API_PREFIX || "/api/v1",
 
+  FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
+
   // database
   DB_URI: process.env.DB_URI || "",
 
@@ -27,6 +29,11 @@ const env = {
 
   // cors
   CORS_ORIGIN: process.env.CORS_ORIGIN || "*",
+
+  // email
+  RESEND_API_KEY: process.env.RESEND_API_KEY || "",
+
+  MAIL_FROM: process.env.MAIL_FROM || "Pharma ERP <onboarding@resend.dev>",
 };
 
 export default env;

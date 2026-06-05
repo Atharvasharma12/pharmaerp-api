@@ -87,7 +87,7 @@ const createDefaultRolesForWorkspace = async (workspaceId, userId) => {
       description: SYSTEM_ROLE_DESCRIPTIONS[roleCode],
       permissions: DEFAULT_ROLE_PERMISSIONS[roleCode] || [],
       isSystem: true,
-      isEditable: false,
+      isEditable: true,
       status: ROLE_STATUS.ACTIVE,
       createdBy: userId,
     });
@@ -167,8 +167,8 @@ const updateRole = async (roleId, workspaceId, userId, payload) => {
     throw new ApiError(404, "Role not found");
   }
 
-  if (role.isSystem && !role.isEditable) {
-    throw new ApiError(400, "System role cannot be updated");
+  if (!role.isEditable) {
+    throw new ApiError(400, "This role cannot be updated");
   }
 
   const allowedFields = ["name", "description", "permissions", "status"];
