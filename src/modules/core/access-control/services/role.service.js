@@ -167,6 +167,10 @@ const updateRole = async (roleId, workspaceId, userId, payload) => {
     throw new ApiError(404, "Role not found");
   }
 
+  if (role.code === SYSTEM_ROLES.OWNER) {
+    throw new ApiError(400, "Owner role cannot be updated");
+  }
+
   if (!role.isEditable) {
     throw new ApiError(400, "This role cannot be updated");
   }

@@ -58,12 +58,7 @@ const createCompany = async (workspaceId, userId, payload) => {
     gstin,
     pan,
     owner,
-    pharmacist,
     license,
-    taxSettings,
-    billingSettings,
-    businessSettings,
-    settings,
   } = payload;
 
   const slug = createSlug(name);
@@ -101,12 +96,7 @@ const createCompany = async (workspaceId, userId, payload) => {
     gstin,
     pan,
     owner,
-    pharmacist,
     license,
-    taxSettings,
-    billingSettings,
-    businessSettings,
-    settings,
     createdBy: userId,
   });
 
@@ -159,12 +149,7 @@ const updateCompany = async (companyId, workspaceId, userId, payload) => {
     "gstin",
     "pan",
     "owner",
-    "pharmacist",
     "license",
-    "taxSettings",
-    "billingSettings",
-    "businessSettings",
-    "settings",
     "status",
   ];
 

@@ -26,13 +26,6 @@ export const WORKSPACE_TYPE = {
   OTHER: "other",
 };
 
-export const DEFAULT_WORKSPACE_SETTINGS = {
-  timezone: "Asia/Kolkata",
-  currency: "INR",
-  dateFormat: "DD/MM/YYYY",
-  timeFormat: "12h",
-};
-
 export const WORKSPACE_CODE_PREFIX = "WS";
 
 export const WORKSPACE_INVITATION_EXPIRY_HOURS = 72;

@@ -19,7 +19,7 @@ const createSlug = (name) => {
 };
 
 const createWorkspace = async (userId, payload) => {
-  const { name, type, email, phone, address, logo, settings } = payload;
+  const { name, type, logo } = payload;
 
   const slug = createSlug(name);
 
@@ -34,11 +34,7 @@ const createWorkspace = async (userId, payload) => {
     slug,
     type,
     ownerId: userId,
-    email,
-    phone,
-    address,
     logo,
-    settings,
   });
 
   await roleService.createDefaultRolesForWorkspace(workspace._id, userId);
@@ -123,15 +119,7 @@ const updateWorkspace = async (workspaceId, userId, payload) => {
     throw new ApiError(404, "Workspace not found");
   }
 
-  const allowedFields = [
-    "name",
-    "type",
-    "email",
-    "phone",
-    "address",
-    "logo",
-    "settings",
-  ];
+  const allowedFields = ["name", "type", "logo"];
 
   if (payload.name && payload.name !== workspace.name) {
     const slug = createSlug(payload.name);

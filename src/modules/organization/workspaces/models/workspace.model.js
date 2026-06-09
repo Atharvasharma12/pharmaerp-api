@@ -3,7 +3,6 @@ import mongoose from "mongoose";
 import {
   WORKSPACE_STATUS,
   WORKSPACE_TYPE,
-  DEFAULT_WORKSPACE_SETTINGS,
   WORKSPACE_CODE_PREFIX,
 } from "../constants/workspace.constant.js";
 
@@ -18,69 +17,6 @@ const IMAGE_SCHEMA = new mongoose.Schema(
       type: String,
       trim: true,
       default: null,
-    },
-  },
-  { _id: false },
-);
-
-const ADDRESS_SCHEMA = new mongoose.Schema(
-  {
-    addressLine1: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    addressLine2: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    city: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    state: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    country: {
-      type: String,
-      trim: true,
-      default: "India",
-    },
-    pincode: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-  },
-  { _id: false },
-);
-
-const SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    timezone: {
-      type: String,
-      trim: true,
-      default: DEFAULT_WORKSPACE_SETTINGS.timezone,
-    },
-    currency: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: DEFAULT_WORKSPACE_SETTINGS.currency,
-    },
-    dateFormat: {
-      type: String,
-      trim: true,
-      default: DEFAULT_WORKSPACE_SETTINGS.dateFormat,
-    },
-    timeFormat: {
-      type: String,
-      trim: true,
-      default: DEFAULT_WORKSPACE_SETTINGS.timeFormat,
     },
   },
   { _id: false },
@@ -131,32 +67,6 @@ const workspaceSchema = new mongoose.Schema(
     logo: {
       type: IMAGE_SCHEMA,
       default: null,
-    },
-
-    email: {
-      type: String,
-      trim: true,
-      lowercase: true,
-      maxlength: [200, "Email cannot exceed 200 characters"],
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid email address"],
-      default: null,
-    },
-
-    phone: {
-      type: String,
-      trim: true,
-      match: [/^[6-9][0-9]{9}$/, "Invalid phone number"],
-      default: null,
-    },
-
-    address: {
-      type: ADDRESS_SCHEMA,
-      default: null,
-    },
-
-    settings: {
-      type: SETTINGS_SCHEMA,
-      default: () => DEFAULT_WORKSPACE_SETTINGS,
     },
 
     status: {

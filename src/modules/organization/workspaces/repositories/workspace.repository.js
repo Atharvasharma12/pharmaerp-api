@@ -4,7 +4,10 @@ import Workspace from "../models/workspace.model.js";
 import WorkspaceMember from "../models/workspaceMember.model.js";
 import User from "../../../core/users/models/user.model.js";
 
-import { WORKSPACE_MEMBER_STATUS } from "../constants/workspace.constant.js";
+import {
+  WORKSPACE_STATUS,
+  WORKSPACE_MEMBER_STATUS,
+} from "../constants/workspace.constant.js";
 
 const findWorkspaceById = async (workspaceId, options = {}) => {
   if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
@@ -51,7 +54,7 @@ const deleteWorkspaceById = async (workspaceId, deletedBy) => {
     },
     {
       isDeleted: true,
-      status: "deleted",
+      status: WORKSPACE_STATUS.DELETED,
       deletedAt: new Date(),
       deletedBy,
     },

@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 
 import Company from "../models/company.model.js";
 
+import { COMPANY_STATUS } from "../constants/company.constant.js";
+
 const findCompanyById = async (companyId, options = {}) => {
   if (!mongoose.Types.ObjectId.isValid(companyId)) {
     return null;
@@ -104,7 +106,7 @@ const deleteCompanyById = async (companyId, workspaceId, deletedBy) => {
     },
     {
       isDeleted: true,
-      status: "deleted",
+      status: COMPANY_STATUS.DELETED,
       deletedAt: new Date(),
       deletedBy,
     },

@@ -4,9 +4,6 @@ import {
   BRANCH_STATUS,
   BRANCH_TYPE,
   BRANCH_CODE_PREFIX,
-  DEFAULT_BRANCH_SETTINGS,
-  BRANCH_INVENTORY_MODE,
-  BRANCH_PRICE_MODE,
 } from "../constants/branch.constant.js";
 
 const ADDRESS_SCHEMA = new mongoose.Schema(
@@ -47,6 +44,29 @@ const ADDRESS_SCHEMA = new mongoose.Schema(
       default: null,
     },
     googleMapLocation: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
+const PHONE_SCHEMA = new mongoose.Schema(
+  {
+    mobile: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid mobile number"],
+      default: null,
+    },
+    whatsapp: {
+      type: String,
+      trim: true,
+      match: [/^[6-9][0-9]{9}$/, "Invalid WhatsApp number"],
+      default: null,
+    },
+    landline: {
       type: String,
       trim: true,
       default: null,
@@ -134,176 +154,6 @@ const LICENSE_SCHEMA = new mongoose.Schema(
   { _id: false },
 );
 
-const BILLING_SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    invoicePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "INV",
-    },
-    purchasePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "PUR",
-    },
-    salesReturnPrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "SR",
-    },
-    purchaseReturnPrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "PR",
-    },
-    creditNotePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "CN",
-    },
-    debitNotePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "DBN",
-    },
-    startingInvoiceNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Starting invoice number must be at least 1"],
-    },
-    startingPurchaseNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Starting purchase number must be at least 1"],
-    },
-  },
-  { _id: false },
-);
-
-const INVENTORY_SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    inventoryMode: {
-      type: String,
-      enum: Object.values(BRANCH_INVENTORY_MODE),
-      default: BRANCH_INVENTORY_MODE.INDEPENDENT,
-    },
-    priceMode: {
-      type: String,
-      enum: Object.values(BRANCH_PRICE_MODE),
-      default: BRANCH_PRICE_MODE.COMPANY_DEFAULT,
-    },
-    allowNegativeStock: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.allowNegativeStock,
-    },
-    allowBackdatedEntries: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.allowBackdatedEntries,
-    },
-    enableBatchTracking: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enableBatchTracking,
-    },
-    enableExpiryTracking: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enableExpiryTracking,
-    },
-    enableRackTracking: {
-      type: Boolean,
-      default: DEFAULT_BRANCH_SETTINGS.enableRackTracking,
-    },
-    enableStockTracking: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  { _id: false },
-);
-
-const WORKING_HOURS_SCHEMA = new mongoose.Schema(
-  {
-    openingTime: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    closingTime: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    weeklyOff: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    workingDays: {
-      type: [String],
-      default: [],
-    },
-  },
-  { _id: false },
-);
-
-const FACILITIES_SCHEMA = new mongoose.Schema(
-  {
-    homeDelivery: {
-      type: Boolean,
-      default: false,
-    },
-    whatsappOrders: {
-      type: Boolean,
-      default: false,
-    },
-    onlineOrders: {
-      type: Boolean,
-      default: false,
-    },
-    coldStorageAvailable: {
-      type: Boolean,
-      default: false,
-    },
-    twentyFourSevenService: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  { _id: false },
-);
-
-const SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    timezone: {
-      type: String,
-      trim: true,
-      default: DEFAULT_BRANCH_SETTINGS.timezone,
-    },
-    currency: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: DEFAULT_BRANCH_SETTINGS.currency,
-    },
-    dateFormat: {
-      type: String,
-      trim: true,
-      default: DEFAULT_BRANCH_SETTINGS.dateFormat,
-    },
-    timeFormat: {
-      type: String,
-      trim: true,
-      default: DEFAULT_BRANCH_SETTINGS.timeFormat,
-    },
-  },
-  { _id: false },
-);
-
 const branchSchema = new mongoose.Schema(
   {
     workspaceId: {
@@ -368,11 +218,9 @@ const branchSchema = new mongoose.Schema(
       default: null,
     },
 
-    phone: {
-      type: String,
-      trim: true,
-      match: [/^[6-9][0-9]{9}$/, "Invalid phone number"],
-      default: null,
+    phones: {
+      type: PHONE_SCHEMA,
+      default: () => ({}),
     },
 
     address: {
@@ -392,31 +240,6 @@ const branchSchema = new mongoose.Schema(
 
     emergencyContact: {
       type: EMERGENCY_CONTACT_SCHEMA,
-      default: () => ({}),
-    },
-
-    billingSettings: {
-      type: BILLING_SETTINGS_SCHEMA,
-      default: () => ({}),
-    },
-
-    inventorySettings: {
-      type: INVENTORY_SETTINGS_SCHEMA,
-      default: () => ({}),
-    },
-
-    workingHours: {
-      type: WORKING_HOURS_SCHEMA,
-      default: () => ({}),
-    },
-
-    facilities: {
-      type: FACILITIES_SCHEMA,
-      default: () => ({}),
-    },
-
-    settings: {
-      type: SETTINGS_SCHEMA,
       default: () => ({}),
     },
 

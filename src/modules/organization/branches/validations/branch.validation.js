@@ -1,11 +1,28 @@
 import Joi from "joi";
 
-import {
-  BRANCH_STATUS,
-  BRANCH_TYPE,
-  BRANCH_INVENTORY_MODE,
-  BRANCH_PRICE_MODE,
-} from "../constants/branch.constant.js";
+import { BRANCH_STATUS, BRANCH_TYPE } from "../constants/branch.constant.js";
+
+const phoneSchema = Joi.object({
+  mobile: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid mobile number",
+    }),
+
+  whatsapp: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional()
+    .messages({
+      "string.pattern.base": "Invalid WhatsApp number",
+    }),
+
+  landline: Joi.string().trim().max(30).allow(null, "").optional(),
+});
 
 const addressSchema = Joi.object({
   addressLine1: Joi.string().trim().max(200).allow(null, "").optional(),
@@ -83,84 +100,14 @@ const emergencyContactSchema = Joi.object({
   relationship: Joi.string().trim().max(100).allow(null, "").optional(),
 });
 
-const billingSettingsSchema = Joi.object({
-  invoicePrefix: Joi.string().trim().uppercase().max(20).optional(),
-
-  purchasePrefix: Joi.string().trim().uppercase().max(20).optional(),
-
-  salesReturnPrefix: Joi.string().trim().uppercase().max(20).optional(),
-
-  purchaseReturnPrefix: Joi.string().trim().uppercase().max(20).optional(),
-
-  creditNotePrefix: Joi.string().trim().uppercase().max(20).optional(),
-
-  debitNotePrefix: Joi.string().trim().uppercase().max(20).optional(),
-
-  startingInvoiceNumber: Joi.number().integer().min(1).optional(),
-
-  startingPurchaseNumber: Joi.number().integer().min(1).optional(),
-});
-
-const inventorySettingsSchema = Joi.object({
-  inventoryMode: Joi.string()
-    .valid(...Object.values(BRANCH_INVENTORY_MODE))
-    .optional(),
-
-  priceMode: Joi.string()
-    .valid(...Object.values(BRANCH_PRICE_MODE))
-    .optional(),
-
-  allowNegativeStock: Joi.boolean().optional(),
-
-  allowBackdatedEntries: Joi.boolean().optional(),
-
-  enableBatchTracking: Joi.boolean().optional(),
-
-  enableExpiryTracking: Joi.boolean().optional(),
-
-  enableRackTracking: Joi.boolean().optional(),
-
-  enableStockTracking: Joi.boolean().optional(),
-});
-
-const workingHoursSchema = Joi.object({
-  openingTime: Joi.string().trim().max(20).allow(null, "").optional(),
-
-  closingTime: Joi.string().trim().max(20).allow(null, "").optional(),
-
-  weeklyOff: Joi.string().trim().max(50).allow(null, "").optional(),
-
-  workingDays: Joi.array().items(Joi.string().trim().max(30)).optional(),
-});
-
-const facilitiesSchema = Joi.object({
-  homeDelivery: Joi.boolean().optional(),
-
-  whatsappOrders: Joi.boolean().optional(),
-
-  onlineOrders: Joi.boolean().optional(),
-
-  coldStorageAvailable: Joi.boolean().optional(),
-
-  twentyFourSevenService: Joi.boolean().optional(),
-});
-
-const settingsSchema = Joi.object({
-  timezone: Joi.string().trim().max(80).optional(),
-
-  currency: Joi.string().trim().uppercase().length(3).optional(),
-
-  dateFormat: Joi.string().trim().max(30).optional(),
-
-  timeFormat: Joi.string().trim().valid("12h", "24h").optional(),
-});
-
 export const createBranchSchema = Joi.object({
   name: Joi.string().trim().min(2).max(160).required(),
 
   type: Joi.string()
     .valid(...Object.values(BRANCH_TYPE))
     .optional(),
+
+  isPrimary: Joi.boolean().optional(),
 
   email: Joi.string()
     .trim()
@@ -170,14 +117,7 @@ export const createBranchSchema = Joi.object({
     .allow(null, "")
     .optional(),
 
-  phone: Joi.string()
-    .trim()
-    .pattern(/^[6-9][0-9]{9}$/)
-    .allow(null, "")
-    .optional()
-    .messages({
-      "string.pattern.base": "Invalid phone number",
-    }),
+  phones: phoneSchema.optional(),
 
   address: addressSchema.optional(),
 
@@ -186,18 +126,6 @@ export const createBranchSchema = Joi.object({
   pharmacist: pharmacistSchema.optional(),
 
   emergencyContact: emergencyContactSchema.optional(),
-
-  billingSettings: billingSettingsSchema.optional(),
-
-  inventorySettings: inventorySettingsSchema.optional(),
-
-  workingHours: workingHoursSchema.optional(),
-
-  facilities: facilitiesSchema.optional(),
-
-  settings: settingsSchema.optional(),
-
-  isPrimary: Joi.boolean().optional(),
 });
 
 export const updateBranchSchema = Joi.object({
@@ -207,6 +135,8 @@ export const updateBranchSchema = Joi.object({
     .valid(...Object.values(BRANCH_TYPE))
     .optional(),
 
+  isPrimary: Joi.boolean().optional(),
+
   email: Joi.string()
     .trim()
     .lowercase()
@@ -215,14 +145,7 @@ export const updateBranchSchema = Joi.object({
     .allow(null, "")
     .optional(),
 
-  phone: Joi.string()
-    .trim()
-    .pattern(/^[6-9][0-9]{9}$/)
-    .allow(null, "")
-    .optional()
-    .messages({
-      "string.pattern.base": "Invalid phone number",
-    }),
+  phones: phoneSchema.allow(null).optional(),
 
   address: addressSchema.allow(null).optional(),
 
@@ -232,19 +155,7 @@ export const updateBranchSchema = Joi.object({
 
   emergencyContact: emergencyContactSchema.allow(null).optional(),
 
-  billingSettings: billingSettingsSchema.optional(),
-
-  inventorySettings: inventorySettingsSchema.optional(),
-
-  workingHours: workingHoursSchema.allow(null).optional(),
-
-  facilities: facilitiesSchema.optional(),
-
-  settings: settingsSchema.optional(),
-
   status: Joi.string()
     .valid(...Object.values(BRANCH_STATUS))
     .optional(),
-
-  isPrimary: Joi.boolean().optional(),
 });

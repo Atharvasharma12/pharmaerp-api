@@ -28,6 +28,19 @@ export const getCompanyBranches = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Branches fetched successfully", branches));
 });
 
+export const getWorkspaceBranches = asyncHandler(async (req, res) => {
+  const branches = await branchService.getWorkspaceBranches(
+    req.workspaceId,
+    req.user._id,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "Workspace branches fetched successfully", branches),
+    );
+});
+
 export const getBranchById = asyncHandler(async (req, res) => {
   const branch = await branchService.getBranchById(
     req.params.branchId,

@@ -24,7 +24,6 @@ import {
 import {
   createWorkspaceSchema,
   updateWorkspaceSchema,
-  addWorkspaceMemberSchema,
   updateWorkspaceMemberStatusSchema,
 } from "../validations/workspace.validation.js";
 

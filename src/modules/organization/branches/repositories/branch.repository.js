@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 
 import Branch from "../models/branch.model.js";
 
+import { BRANCH_STATUS } from "../constants/branch.constant.js";
+
 const findBranchById = async (branchId, options = {}) => {
   if (!mongoose.Types.ObjectId.isValid(branchId)) {
     return null;
@@ -120,7 +122,7 @@ const deleteBranchById = async (
     },
     {
       isDeleted: true,
-      status: "deleted",
+      status: BRANCH_STATUS.DELETED,
       deletedAt: new Date(),
       deletedBy,
     },

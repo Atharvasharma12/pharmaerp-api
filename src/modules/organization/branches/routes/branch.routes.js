@@ -9,6 +9,7 @@ import validate from "../../../../middlewares/validate.middleware.js";
 import {
   createBranch,
   getCompanyBranches,
+  getWorkspaceBranches,
   getBranchById,
   updateBranch,
   deleteBranch,
@@ -24,6 +25,20 @@ const router = Router();
 router.use(authMiddleware);
 
 router.use(workspaceContextMiddleware);
+
+/*
+|--------------------------------------------------------------------------
+| Workspace Level Routes
+|--------------------------------------------------------------------------
+*/
+
+router.get("/workspace/all", getWorkspaceBranches);
+
+/*
+|--------------------------------------------------------------------------
+| Company Level Routes
+|--------------------------------------------------------------------------
+*/
 
 router.use(companyContextMiddleware);
 

@@ -4,8 +4,6 @@ import {
   COMPANY_STATUS,
   COMPANY_TYPE,
   COMPANY_LICENSE_STATUS,
-  COMPANY_GST_TYPE,
-  DEFAULT_COMPANY_SETTINGS,
   COMPANY_CODE_PREFIX,
 } from "../constants/company.constant.js";
 
@@ -126,40 +124,6 @@ const PERSON_SCHEMA = new mongoose.Schema(
   { _id: false },
 );
 
-const PHARMACIST_SCHEMA = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    registrationNumber: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: null,
-    },
-    mobile: {
-      type: String,
-      trim: true,
-      match: [/^[6-9][0-9]{9}$/, "Invalid pharmacist mobile number"],
-      default: null,
-    },
-    email: {
-      type: String,
-      trim: true,
-      lowercase: true,
-      match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Invalid pharmacist email"],
-      default: null,
-    },
-    registrationExpiryDate: {
-      type: Date,
-      default: null,
-    },
-  },
-  { _id: false },
-);
-
 const LICENSE_SCHEMA = new mongoose.Schema(
   {
     licenseType: {
@@ -174,12 +138,6 @@ const LICENSE_SCHEMA = new mongoose.Schema(
       default: null,
     },
     wholesaleLicenseNumber: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: null,
-    },
-    drugLicenseNumber: {
       type: String,
       trim: true,
       uppercase: true,
@@ -206,157 +164,6 @@ const LICENSE_SCHEMA = new mongoose.Schema(
     document: {
       type: IMAGE_SCHEMA,
       default: null,
-    },
-  },
-  { _id: false },
-);
-
-const TAX_SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    gstType: {
-      type: String,
-      enum: Object.values(COMPANY_GST_TYPE),
-      default: COMPANY_GST_TYPE.REGULAR,
-    },
-    gstJurisdiction: {
-      type: String,
-      trim: true,
-      default: null,
-    },
-    defaultGstRate: {
-      type: Number,
-      default: DEFAULT_COMPANY_SETTINGS.defaultGstRate,
-      min: [0, "GST rate cannot be negative"],
-      max: [100, "GST rate cannot exceed 100"],
-    },
-    isGstInclusive: {
-      type: Boolean,
-      default: false,
-    },
-  },
-  { _id: false },
-);
-
-const BILLING_SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    invoicePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "INV",
-    },
-    invoiceStartNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Invoice start number must be at least 1"],
-    },
-    purchasePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "PUR",
-    },
-    purchaseStartNumber: {
-      type: Number,
-      default: 1,
-      min: [1, "Purchase start number must be at least 1"],
-    },
-    creditNotePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "CRN",
-    },
-    debitNotePrefix: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "DBN",
-    },
-    barcodeFormat: {
-      type: String,
-      trim: true,
-      default: "Code128",
-    },
-    roundingType: {
-      type: String,
-      trim: true,
-      default: "2 Decimal Places",
-    },
-    printCompanyLogoOnInvoice: {
-      type: Boolean,
-      default: true,
-    },
-    footerMessage: {
-      type: String,
-      trim: true,
-      maxlength: [300, "Footer message cannot exceed 300 characters"],
-      default: null,
-    },
-  },
-  { _id: false },
-);
-
-const BUSINESS_SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    allowNegativeStock: {
-      type: Boolean,
-      default: false,
-    },
-    enableBatchWiseInventory: {
-      type: Boolean,
-      default: true,
-    },
-    enableExpiryTracking: {
-      type: Boolean,
-      default: true,
-    },
-    enableScheduleHTracking: {
-      type: Boolean,
-      default: true,
-    },
-    enableNarcoticDrugTracking: {
-      type: Boolean,
-      default: true,
-    },
-    enableSmsNotifications: {
-      type: Boolean,
-      default: true,
-    },
-    enableWhatsappNotifications: {
-      type: Boolean,
-      default: true,
-    },
-    enableEmailNotifications: {
-      type: Boolean,
-      default: true,
-    },
-  },
-  { _id: false },
-);
-
-const SETTINGS_SCHEMA = new mongoose.Schema(
-  {
-    currency: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: DEFAULT_COMPANY_SETTINGS.currency,
-    },
-    timezone: {
-      type: String,
-      trim: true,
-      default: DEFAULT_COMPANY_SETTINGS.timezone,
-    },
-    dateFormat: {
-      type: String,
-      trim: true,
-      default: DEFAULT_COMPANY_SETTINGS.dateFormat,
-    },
-    timeFormat: {
-      type: String,
-      trim: true,
-      default: DEFAULT_COMPANY_SETTINGS.timeFormat,
     },
   },
   { _id: false },
@@ -460,33 +267,8 @@ const companySchema = new mongoose.Schema(
       default: () => ({}),
     },
 
-    pharmacist: {
-      type: PHARMACIST_SCHEMA,
-      default: () => ({}),
-    },
-
     license: {
       type: LICENSE_SCHEMA,
-      default: () => ({}),
-    },
-
-    taxSettings: {
-      type: TAX_SETTINGS_SCHEMA,
-      default: () => ({}),
-    },
-
-    billingSettings: {
-      type: BILLING_SETTINGS_SCHEMA,
-      default: () => ({}),
-    },
-
-    businessSettings: {
-      type: BUSINESS_SETTINGS_SCHEMA,
-      default: () => ({}),
-    },
-
-    settings: {
-      type: SETTINGS_SCHEMA,
       default: () => ({}),
     },
 

@@ -16,28 +16,3 @@ export const BRANCH_TYPE = {
 };
 
 export const BRANCH_CODE_PREFIX = "BR";
-
-export const DEFAULT_BRANCH_SETTINGS = {
-  timezone: "Asia/Kolkata",
-  currency: "INR",
-  dateFormat: "DD/MM/YYYY",
-  timeFormat: "12h",
-
-  allowNegativeStock: false,
-  allowBackdatedEntries: false,
-
-  enableBatchTracking: true,
-  enableExpiryTracking: true,
-  enableRackTracking: true,
-  enableStockTracking: true,
-};
-
-export const BRANCH_INVENTORY_MODE = {
-  INDEPENDENT: "independent",
-  SHARED: "shared",
-};
-
-export const BRANCH_PRICE_MODE = {
-  COMPANY_DEFAULT: "company_default",
-  BRANCH_SPECIFIC: "branch_specific",
-};

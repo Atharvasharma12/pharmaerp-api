@@ -97,25 +97,16 @@ const createBranch = async (workspaceId, companyId, userId, payload) => {
     slug,
 
     type: payload.type,
+    isPrimary: payload.isPrimary || false,
 
     email: payload.email,
-    phone: payload.phone,
+    phones: payload.phones,
 
     address: payload.address,
 
     license: payload.license,
     pharmacist: payload.pharmacist,
     emergencyContact: payload.emergencyContact,
-
-    billingSettings: payload.billingSettings,
-    inventorySettings: payload.inventorySettings,
-
-    workingHours: payload.workingHours,
-    facilities: payload.facilities,
-
-    settings: payload.settings,
-
-    isPrimary: payload.isPrimary || false,
 
     createdBy: userId,
   });
@@ -129,6 +120,14 @@ const getCompanyBranches = async (companyId, workspaceId, userId) => {
   await ensureCompanyAccess(companyId, workspaceId);
 
   const branches = await branchRepository.getCompanyBranches(companyId);
+
+  return branches.map((branch) => branch.toSafeObject());
+};
+
+const getWorkspaceBranches = async (workspaceId, userId) => {
+  await ensureWorkspaceAccess(workspaceId, userId);
+
+  const branches = await branchRepository.getWorkspaceBranches(workspaceId);
 
   return branches.map((branch) => branch.toSafeObject());
 };
@@ -203,19 +202,14 @@ const updateBranch = async (
   const allowedFields = [
     "name",
     "type",
+    "isPrimary",
     "email",
-    "phone",
+    "phones",
     "address",
     "license",
     "pharmacist",
     "emergencyContact",
-    "billingSettings",
-    "inventorySettings",
-    "workingHours",
-    "facilities",
-    "settings",
     "status",
-    "isPrimary",
   ];
 
   allowedFields.forEach((field) => {
@@ -274,6 +268,7 @@ const deleteBranch = async (branchId, companyId, workspaceId, userId) => {
 export default {
   createBranch,
   getCompanyBranches,
+  getWorkspaceBranches,
   getBranchById,
   updateBranch,
   deleteBranch,
