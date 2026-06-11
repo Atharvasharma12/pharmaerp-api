@@ -19,6 +19,7 @@ import {
   getWorkspaceInvitations,
   cancelWorkspaceInvitation,
   acceptWorkspaceInvitation,
+  getIncomingUserInvitations,
 } from "../controllers/workspaceInvitation.controller.js";
 
 import {
@@ -46,6 +47,7 @@ router.post(
   validate(inviteWorkspaceMemberSchema),
   inviteWorkspaceMember,
 );
+router.get("/user-inbox/invitations", getIncomingUserInvitations);
 
 router.get("/:workspaceId/invitations", getWorkspaceInvitations);
 

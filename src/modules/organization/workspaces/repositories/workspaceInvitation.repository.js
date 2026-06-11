@@ -1,3 +1,5 @@
+// src/modules/organization/workspaces/repositories/workspaceInvitation.repository.js
+
 import mongoose from "mongoose";
 
 import WorkspaceInvitation from "../models/workspaceInvitation.model.js";
@@ -41,6 +43,19 @@ const findPendingInvitationByEmail = async (
 
   return query.select(options.select || "");
 };
+const findPendingInvitationsByEmailOnly = async (email, options = {}) => {
+  const query = WorkspaceInvitation.find({
+    invitedEmail: String(email).trim().toLowerCase(),
+    status: WORKSPACE_INVITATION_STATUS.PENDING,
+    expiresAt: { $gt: new Date() }, // Only fetch active, non-expired ones
+  });
+
+  if (options.populate) {
+    query.populate(options.populate);
+  }
+
+  return query.sort({ createdAt: -1 });
+};
 
 const findInvitationByTokenHash = async (tokenHash, options = {}) => {
   const query = WorkspaceInvitation.findOne({
@@ -53,10 +68,6 @@ const findInvitationByTokenHash = async (tokenHash, options = {}) => {
   }
 
   return query.select(options.select || "+tokenHash");
-};
-
-const createInvitation = async (payload) => {
-  return WorkspaceInvitation.create(payload);
 };
 
 const saveInvitation = async (invitation) => {
@@ -163,7 +174,7 @@ export default {
   findInvitationById,
   findPendingInvitationByEmail,
   findInvitationByTokenHash,
-  createInvitation,
+  findPendingInvitationsByEmailOnly,
   saveInvitation,
   getWorkspaceInvitations,
   countPendingInvitations,

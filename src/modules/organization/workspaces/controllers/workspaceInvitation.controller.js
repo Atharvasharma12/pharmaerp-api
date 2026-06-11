@@ -38,6 +38,21 @@ export const getWorkspaceInvitations = asyncHandler(async (req, res) => {
     );
 });
 
+export const getIncomingUserInvitations = asyncHandler(async (req, res) => {
+  // Pulling target email directly out of current validated authenticated user session context guard
+  const invitations =
+    await workspaceInvitationService.getIncomingUserInvitations(req.user.email);
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "User personal incoming invitations fetched successfully",
+        invitations,
+      ),
+    );
+});
 export const cancelWorkspaceInvitation = asyncHandler(async (req, res) => {
   const invitation = await workspaceInvitationService.cancelInvitation(
     req.params.workspaceId,

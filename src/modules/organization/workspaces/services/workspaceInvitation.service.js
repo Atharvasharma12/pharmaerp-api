@@ -1,3 +1,5 @@
+// src/modules/organization/workspaces/services/workspaceInvitation.service.js
+
 import ApiError from "../../../../utils/ApiError.js";
 
 import workspaceRepository from "../repositories/workspace.repository.js";
@@ -11,9 +13,13 @@ import { SYSTEM_ROLES } from "../../../core/access-control/constants/role.consta
 import {
   WORKSPACE_MEMBER_STATUS,
   WORKSPACE_INVITATION_STATUS,
-  WORKSPACE_INVITATION_EXPIRY_HOURS,
 } from "../constants/workspace.constant.js";
 import { sendEmail } from "../../../../utils/sendEmail.js";
+import crypto from "crypto";
+
+// Import the model directly to instantiate it before database insertion
+import WorkspaceInvitation from "../models/workspaceInvitation.model.js";
+import mongoose from "mongoose";
 
 const INVITATION_EXPIRY_HOURS = 72;
 
@@ -91,7 +97,9 @@ const inviteMember = async (workspaceId, invitedBy, payload) => {
     }
   }
 
-  const invitation = await workspaceInvitationRepository.createInvitation({
+  // FIX: Create a local document instance instead of running WorkspaceInvitation.create()
+  // This avoids running validations until tokenHash is generated
+  const invitation = new WorkspaceInvitation({
     workspaceId,
     invitedEmail: email,
     roleId,
@@ -101,8 +109,10 @@ const inviteMember = async (workspaceId, invitedBy, payload) => {
     status: WORKSPACE_INVITATION_STATUS.PENDING,
   });
 
+  // Now safely generate the token and apply it to this instance's tokenHash path
   const rawToken = invitation.createInvitationToken();
 
+  // Commit the validated document with tokenHash included to the database
   await workspaceInvitationRepository.saveInvitation(invitation);
 
   const invitationLink = `${process.env.FRONTEND_URL}/workspace-invitations/${rawToken}`;
@@ -191,6 +201,20 @@ const getWorkspaceInvitations = async (workspaceId, userId) => {
 
   return invitations.map((item) => item.toSafeObject());
 };
+const getIncomingUserInvitations = async (userEmail) => {
+  const email = String(userEmail).trim().toLowerCase();
+
+  // Clean up any stale expired items reactively first
+  await workspaceInvitationRepository.markExpiredInvitations();
+
+  const invitations =
+    await workspaceInvitationRepository.findPendingInvitationsByEmailOnly(
+      email,
+      { populate: "workspaceId invitedBy roleId" },
+    );
+
+  return invitations.map((item) => item.toSafeObject());
+};
 
 const cancelInvitation = async (workspaceId, userId, invitationId) => {
   const member = await workspaceRepository.findWorkspaceMember(
@@ -226,16 +250,35 @@ const cancelInvitation = async (workspaceId, userId, invitationId) => {
   return cancelledInvitation.toSafeObject();
 };
 
-const acceptInvitation = async (token, userId) => {
-  const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+const acceptInvitation = async (tokenOrId, userId) => {
+  let invitation;
 
-  const invitation =
-    await workspaceInvitationRepository.findInvitationByTokenHash(tokenHash, {
-      populate: "roleId",
-    });
+  // 1. Check if the parameter passed from the UI is a valid direct Document ObjectId string
+  if (mongoose.Types.ObjectId.isValid(tokenOrId)) {
+    invitation = await workspaceInvitationRepository.findInvitationById(
+      tokenOrId,
+      {
+        populate: "roleId",
+      },
+    );
+  } else {
+    // 2. Fallback: Treat it as a plain-text token hash coming from an email link click
+    const tokenHash = crypto
+      .createHash("sha256")
+      .update(tokenOrId)
+      .digest("hex");
 
+    invitation = await workspaceInvitationRepository.findInvitationByTokenHash(
+      tokenHash,
+      {
+        populate: "roleId",
+      },
+    );
+  }
+
+  // --- Core Validation Checks (Retained from your original controller logic) ---
   if (!invitation) {
-    throw new ApiError(404, "Invitation not found");
+    throw new ApiError(404, "Invitation not found or no longer active");
   }
 
   if (invitation.isExpired()) {
@@ -251,6 +294,7 @@ const acceptInvitation = async (token, userId) => {
     throw new ApiError(400, "Already a member of this workspace");
   }
 
+  // 3. Commit Membership Mapping Record Allocation
   await workspaceRepository.createWorkspaceMember({
     workspaceId: invitation.workspaceId,
     userId,
@@ -261,6 +305,7 @@ const acceptInvitation = async (token, userId) => {
     isPrimary: false,
   });
 
+  // 4. Conclude tracking state flag metrics
   await workspaceInvitationRepository.markInvitationAccepted(
     invitation._id,
     userId,
@@ -268,6 +313,7 @@ const acceptInvitation = async (token, userId) => {
 
   return {
     success: true,
+    workspaceId: invitation.workspaceId,
   };
 };
 
@@ -276,4 +322,5 @@ export default {
   getWorkspaceInvitations,
   cancelInvitation,
   acceptInvitation,
+  getIncomingUserInvitations,
 };

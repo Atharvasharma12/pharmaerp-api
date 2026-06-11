@@ -30,10 +30,12 @@ const env = {
   // cors
   CORS_ORIGIN: process.env.CORS_ORIGIN || "*",
 
-  // email
-  RESEND_API_KEY: process.env.RESEND_API_KEY || "",
-
-  MAIL_FROM: process.env.MAIL_FROM || "Pharma ERP <onboarding@resend.dev>",
+  // email (Brevo API Configuration)
+  BREVO_API_KEY:
+    process.env.BREVO_API_KEY ||
+    "YOUR_BREVO_API_KEY",
+  MAIL_FROM:
+    process.env.MAIL_FROM || "Pharma ERP <devanshupadhyay2611@gmail.com>",
 };
 
 export default env;

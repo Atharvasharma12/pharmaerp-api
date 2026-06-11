@@ -1,16 +1,20 @@
-const validate = (schema) => async (req, res, next) => {
-  try {
-    await schema.validateAsync(req.body, {
-      abortEarly: false,
-    });
+const validate =
+  (schema, source = "body") =>
+  async (req, res, next) => {
+    try {
+      const value = await schema.validateAsync(req[source], {
+        abortEarly: false,
+        stripUnknown: true,
+      });
 
-    next();
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-};
+      req[source] = value;
+      next();
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: error.message,
+      });
+    }
+  };
 
 export default validate;
