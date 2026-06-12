@@ -1,3 +1,5 @@
+// src/features/workspace/services/workspace.service.js
+
 import ApiError from "../../../../utils/ApiError.js";
 
 import workspaceRepository from "../repositories/workspace.repository.js";
@@ -186,8 +188,9 @@ const getWorkspaceMembers = async (workspaceId, userId) => {
     throw new ApiError(403, "You do not have access to this workspace");
   }
 
+  // Updated to pass a space-separated string to populate both fields
   const members = await workspaceRepository.getWorkspaceMembers(workspaceId, {
-    populate: "roleId",
+    populate: "roleId userId",
   });
 
   return members.map((workspaceMember) => workspaceMember.toSafeObject());

@@ -48,12 +48,10 @@ export const updateRoleSchema = Joi.object({
     .optional(),
 });
 
-export const assignRoleToMemberSchema = {
-  params: Joi.object({
-    memberUserId: objectId.required(),
-  }),
+export const assignRoleToMemberParamsSchema = Joi.object({
+  memberUserId: objectId.required(),
+});
 
-  body: Joi.object({
-    roleId: objectId.required(),
-  }),
-};
+export const assignRoleToMemberBodySchema = Joi.object({
+  roleId: objectId.required(),
+});

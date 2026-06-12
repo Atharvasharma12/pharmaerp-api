@@ -28,7 +28,8 @@ import {
 import {
   createRoleSchema,
   updateRoleSchema,
-  assignRoleToMemberSchema,
+  assignRoleToMemberParamsSchema,
+  assignRoleToMemberBodySchema,
 } from "../validations/role.validation.js";
 
 import { updateMemberAccessSchema } from "../validations/memberAccess.validation.js";
@@ -56,7 +57,8 @@ router.delete("/roles/:roleId", deleteRole);
 // Member Role Assignment
 router.patch(
   "/members/:memberUserId/role",
-  validate(assignRoleToMemberSchema),
+  validate(assignRoleToMemberParamsSchema, "params"), // Validates req.params
+  validate(assignRoleToMemberBodySchema, "body"), // Validates req.body
   assignRoleToMember,
 );
 

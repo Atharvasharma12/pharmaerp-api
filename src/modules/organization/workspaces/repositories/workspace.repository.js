@@ -1,3 +1,5 @@
+// src/features/workspace/repositories/workspace.repository.js
+
 import mongoose from "mongoose";
 
 import Workspace from "../models/workspace.model.js";
@@ -131,6 +133,9 @@ const findWorkspaceMemberById = async (memberId, options = {}) => {
   return query.select(options.select || "");
 };
 
+/**
+ * Fetches workspace members and handles multi-field document population
+ */
 const getWorkspaceMembers = async (workspaceId, options = {}) => {
   if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
     return [];
@@ -146,6 +151,7 @@ const getWorkspaceMembers = async (workspaceId, options = {}) => {
     });
   }
 
+  // Dynamically populates multiple collections if passed as a string or array
   if (options.populate) {
     query.populate(options.populate);
   }
