@@ -1180,6 +1180,204 @@ src/modules/finance/
     └── financeReport.module.js
 
 
+src/modules/
+
+├── platform/
+│
+│   └── global-catalog/
+│       │
+│       ├── global-catalog.routes.js
+│       ├── global-catalog.module.js
+│       │
+│       ├── products/
+│       │   │
+│       │   ├── models/
+│       │   │   └── globalProduct.model.js
+│       │   │
+│       │   ├── repositories/
+│       │   │   └── globalProduct.repository.js
+│       │   │
+│       │   ├── services/
+│       │   │   └── globalProduct.service.js
+│       │   │
+│       │   ├── controllers/
+│       │   │   └── globalProduct.controller.js
+│       │   │
+│       │   ├── validations/
+│       │   │   └── globalProduct.validation.js
+│       │   │
+│       │   ├── routes/
+│       │   │   └── globalProduct.routes.js
+│       │   │
+│       │   ├── constants/
+│       │   │   └── globalProduct.constant.js
+│       │   │
+│       │   └── globalProduct.module.js
+│       │
+│       │
+│       ├── hsn-master/
+│       │   │
+│       │   ├── models/
+│       │   │   └── hsnMaster.model.js
+│       │   │
+│       │   ├── repositories/
+│       │   │   └── hsnMaster.repository.js
+│       │   │
+│       │   ├── services/
+│       │   │   └── hsnMaster.service.js
+│       │   │
+│       │   ├── controllers/
+│       │   │   └── hsnMaster.controller.js
+│       │   │
+│       │   ├── validations/
+│       │   │   └── hsnMaster.validation.js
+│       │   │
+│       │   ├── routes/
+│       │   │   └── hsnMaster.routes.js
+│       │   │
+│       │   ├── constants/
+│       │   │   ├── gstRates.constant.js
+│       │   │   └── hsnMaster.constant.js
+│       │   │
+│       │   └── hsnMaster.module.js
+│       │
+│       ├── hsn-mapping/
+│       │   │
+│       │   ├── models/
+│       │   │   ├── hsnCategoryRule.model.js
+│       │   │   ├── hsnKeywordRule.model.js
+│       │   │   └── hsnReviewQueue.model.js
+│       │   │
+│       │   ├── services/
+│       │   │   ├── hsnMapping.service.js
+│       │   │   ├── categoryMapping.service.js
+│       │   │   ├── keywordMapping.service.js
+│       │   │   ├── reviewQueue.service.js
+│       │   │   └── autoMapping.service.js
+│       │   │
+│       │   ├── helpers/
+│       │   │   ├── matchCategoryRule.js
+│       │   │   ├── matchKeywordRule.js
+│       │   │   ├── suggestHsnCode.js
+│       │   │   └── calculateSimilarity.js
+│       │   │
+│       │   ├── jobs/
+│       │   │   ├── runHsnMapping.job.js
+│       │   │   └── reprocessPending.job.js
+│       │   │
+│       │   └── hsnMapping.module.js
+│       │       └── global-catalog.module.js
+
+
+├── catalog/
+│   │
+│   ├── catalog.routes.js
+│   ├── catalog.module.js
+│   │
+│   ├── products/
+│   │   │
+│   │   ├── models/
+│   │   │   └── workspaceProduct.model.js
+│   │   │
+│   │   ├── repositories/
+│   │   │   └── workspaceProduct.repository.js
+│   │   │
+│   │   ├── services/
+│   │   │   └── workspaceProduct.service.js
+│   │   │
+│   │   ├── controllers/
+│   │   │   └── workspaceProduct.controller.js
+│   │   │
+│   │   ├── validations/
+│   │   │   └── workspaceProduct.validation.js
+│   │   │
+│   │   ├── routes/
+│   │   │   └── workspaceProduct.routes.js
+│   │   │
+│   │   ├── constants/
+│   │   │   └── workspaceProduct.constant.js
+│   │   │
+│   │   └── workspaceProduct.module.js
+│   │
+│   │
+│   ├── product-search/
+│   │   │
+│   │   ├── services/
+│   │   │   └── productSearch.service.js
+│   │   │
+│   │   ├── helpers/
+│   │   │   ├── normalizeProductName.js
+│   │   │   ├── generateSearchTokens.js
+│   │   │   ├── productSimilarity.js
+│   │   │   ├── searchGlobalProduct.js
+│   │   │   ├── searchWorkspaceProduct.js
+│   │   │   ├── calculateSimilarity.js
+│   │   │   └── suggestMatches.js
+│   │   │
+│   │   └── productSearch.module.js
+│   │
+│   │
+│   ├── product-resolver/
+│   │   │
+│   │   ├── services/
+│   │   │   └── productResolver.service.js
+│   │   │
+│   │   ├── helpers/
+│   │   │   ├── resolveGlobalProduct.js
+│   │   │   ├── resolveWorkspaceProduct.js
+│   │   │   └── resolveProductReference.js
+│   │   │
+│   │   └── productResolver.module.js
+│   │
+│   │
+│   ├── helpers/
+│   │   ├── buildProductReference.js
+│   │   ├── validateProductSource.js
+│   │   ├── isGlobalProduct.js
+│   │   ├── isWorkspaceProduct.js
+│   │   └── productReference.helper.js
+│   │
+│   │
+│   └── constants/
+│       ├── productSource.constant.js
+│       ├── productType.constant.js
+│       └── productStatus.constant.js
+│
+
+Future Modules That Will Use Products
+
+inventory/
+├── inventory/
+├── batches/
+├── stock-movements/
+
+purchase/
+├── purchases/
+├── purchase-returns/
+
+sales/
+├── sales/
+├── sales-returns/
+
+billing/
+├── pos/
+├── bills/
+
+reports/
+
+All future modules must store product references using:
+
+{
+productSource: "GLOBAL" | "WORKSPACE",
+productId: ObjectId
+}
+
+and retrieve products through:
+
+catalog/product-resolver/
+
+
+
 The ERP system follows a Workspace → Company → Branch hierarchy. A Workspace represents a customer organization (pharmacy business) and serves as the top-level tenant. Within a workspace, the customer can create one or more Companies, and each company can manage multiple Branches. Users belong to a workspace and can be granted access to specific companies and branches based on their roles and permissions. Company-level data includes business information such as GST number, drug licenses, trade licenses, PAN, tax configurations, billing settings, and other statutory or compliance-related details, since these are shared across all branches of that company. Branch-level data includes inventory, stock, batches, purchases, sales, POS operations, and day-to-day pharmacy activities, as stock and transactions are maintained separately for each branch. We are building a multi-tenant Retail Pharmacy ERP SaaS platform that enables customers to centrally manage companies, branches, users, compliance, inventory, sales, purchases, billing, subscriptions, and reporting within a scalable and secure architecture.
 
 
