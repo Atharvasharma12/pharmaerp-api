@@ -17,7 +17,7 @@ const findGlobalProductById = async (productId, options = {}) => {
     _id: productId,
     isDeleted: false,
   })
-    .populate("HsnMaster", "code description gstRate cessRate isActive")
+    .populate("HsnMaster", "code description gstRate isActive")
     .select(options.select || "");
 };
 
@@ -26,7 +26,7 @@ const findGlobalProductByCode = async (globalProductCode, options = {}) => {
     globalProductCode: String(globalProductCode).trim().toUpperCase(),
     isDeleted: false,
   })
-    .populate("HsnMaster", "code description gstRate cessRate isActive")
+    .populate("HsnMaster", "code description gstRate isActive")
     .select(options.select || "");
 };
 
@@ -90,7 +90,7 @@ const getGlobalProducts = async (filters = {}, options = {}) => {
 
   const [products, total] = await Promise.all([
     GlobalProduct.find(query, projection)
-      .populate("HsnMaster", "code description gstRate cessRate isActive")
+      .populate("HsnMaster", "code description gstRate isActive")
       .sort(sort)
       .skip(skip)
       .limit(limit)
