@@ -1,16 +1,3 @@
-/**
- * calculateSimilarity.js
- *
- * Performs detailed character-level similarity comparison between two strings
- * using the Levenshtein distance algorithm.
- *
- * This is the low-level engine used by productSimilarity.js and suggestMatches.js.
- *
- * Example:
- *   "Paracitamol" vs "Paracetamol" → ~0.91 (91%)
- *   "Dolo" vs "Dolo 650"           → ~0.50 (50%)
- *   "Crocin" vs "Crocin"           → 1.00 (100%)
- */
 
 /**
  * Compute the Levenshtein edit distance between two strings.

@@ -95,24 +95,40 @@ const createWorkspaceProduct = async (workspaceId, payload, user) => {
     const searchResult = await productSearchModule.search(
       payload.name,
       workspaceId,
-      { productType: payload.productType || undefined },
     );
 
-    if (searchResult.matched && searchResult.productSource === "GLOBAL") {
-      throw new ApiError(
-        409,
-        `A matching Global Product already exists: "${searchResult.name}". ` +
-        `Use the Global Product instead of creating a workspace product, ` +
-        `or pass force=true to create anyway.`,
-        {
-          matched: true,
-          confidence: searchResult.confidence,
-          productSource: searchResult.productSource,
-          productId: searchResult.productId,
-          productName: searchResult.name,
-          suggestions: searchResult.suggestions,
-        },
-      );
+    if (searchResult.matched) {
+      if (searchResult.productSource === "GLOBAL") {
+        throw new ApiError(
+          409,
+          `A matching Global Product already exists: "${searchResult.name}". ` +
+          `Use the Global Product instead of creating a workspace product, ` +
+          `or pass force=true to create anyway.`,
+          {
+            matched: true,
+            confidence: searchResult.confidence,
+            productSource: searchResult.productSource,
+            productId: searchResult.productId,
+            productName: searchResult.name,
+            suggestions: searchResult.suggestions,
+          },
+        );
+      } else if (searchResult.productSource === "WORKSPACE") {
+        throw new ApiError(
+          409,
+          `A matching Workspace Product already exists: "${searchResult.name}". ` +
+          `Use the existing Workspace Product instead, ` +
+          `or pass force=true to create anyway.`,
+          {
+            matched: true,
+            confidence: searchResult.confidence,
+            productSource: searchResult.productSource,
+            productId: searchResult.productId,
+            productName: searchResult.name,
+            suggestions: searchResult.suggestions,
+          },
+        );
+      }
     }
   }
 
@@ -225,6 +241,30 @@ const updateWorkspaceProduct = async (productId, workspaceId, payload, user) => 
 
   // Re-enforce name uniqueness if name is being changed
   if (payload.name && payload.name.trim() !== product.name) {
+    if (!payload.force) {
+      const searchResult = await productSearchModule.search(
+        payload.name,
+        workspaceId,
+      );
+
+      if (searchResult.matched && searchResult.productId.toString() !== product._id.toString()) {
+        const sourceName = searchResult.productSource === "GLOBAL" ? "Global" : "Workspace";
+        throw new ApiError(
+          409,
+          `A matching ${sourceName} Product already exists: "${searchResult.name}". ` +
+          `Use the existing product instead, or pass force=true to update anyway.`,
+          {
+            matched: true,
+            confidence: searchResult.confidence,
+            productSource: searchResult.productSource,
+            productId: searchResult.productId,
+            productName: searchResult.name,
+            suggestions: searchResult.suggestions,
+          },
+        );
+      }
+    }
+
     const existing =
       await workspaceProductRepository.findWorkspaceProductByName(
         payload.name,

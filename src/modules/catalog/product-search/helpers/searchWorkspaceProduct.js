@@ -29,7 +29,7 @@ const DEFAULT_LIMIT = 10;
  * @returns {Promise<Array<{_id, name, workspaceProductCode, productType}>>}
  */
 const searchWorkspaceProduct = async (query, workspaceId, options = {}) => {
-  const { productType, limit = DEFAULT_LIMIT } = options;
+  const { limit = DEFAULT_LIMIT } = options;
 
   const normalized = normalizeProductName(query);
 
@@ -46,10 +46,6 @@ const searchWorkspaceProduct = async (query, workspaceId, options = {}) => {
     status: "active",
     name: { $regex: new RegExp(primaryToken, "i") },
   };
-
-  if (productType) {
-    filter.productType = productType;
-  }
 
   const results = await WorkspaceProduct.find(filter)
     .limit(limit)

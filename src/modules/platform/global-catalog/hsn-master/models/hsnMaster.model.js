@@ -8,8 +8,6 @@ const hsnMasterSchema = new mongoose.Schema(
     code: {
       type: Number,
       required: true,
-      unique: true,
-      index: true,
       min: 0,
     },
 
@@ -32,7 +30,6 @@ const hsnMasterSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true,
-      index: true,
     },
   },
   {

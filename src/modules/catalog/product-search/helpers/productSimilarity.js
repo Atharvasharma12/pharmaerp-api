@@ -55,6 +55,38 @@ const tokenOverlapScore = (tokensA, tokensB) => {
  * @param {string} candidate - The product name being compared against
  * @returns {number} Confidence percentage (0–100)
  */
+const STOPWORDS = new Set([
+  "tab",
+  "tablet",
+  "tablets",
+  "tabs",
+  "cap",
+  "capsule",
+  "capsules",
+  "caps",
+  "syrup",
+  "injection",
+  "inj",
+  "cream",
+  "gel",
+  "drops",
+  "solution",
+  "suspension",
+  "powder",
+  "sachet",
+  "ointment",
+  "lotion",
+  "spray",
+]);
+
+const stripStopwords = (normalizedName) => {
+  if (!normalizedName) return "";
+  return normalizedName
+    .split(" ")
+    .filter((word) => !STOPWORDS.has(word))
+    .join(" ");
+};
+
 const productSimilarity = (query, candidate) => {
   if (!query || !candidate) return 0;
 
@@ -63,6 +95,18 @@ const productSimilarity = (query, candidate) => {
 
   // Exact match after normalization
   if (normalizedQuery === normalizedCandidate) return 100;
+
+  // Exact match after removing all spaces (space tolerance)
+  if (normalizedQuery.replace(/\s+/g, "") === normalizedCandidate.replace(/\s+/g, "")) {
+    return 98;
+  }
+
+  // Exact match after removing stopwords (e.g. "Dolo 650 Tablet" vs "Dolo 650")
+  const queryNoStopwords = stripStopwords(normalizedQuery);
+  const candidateNoStopwords = stripStopwords(normalizedCandidate);
+  if (queryNoStopwords && candidateNoStopwords && queryNoStopwords === candidateNoStopwords) {
+    return 98;
+  }
 
   // Substring match (candidate contains full query)
   if (normalizedCandidate.includes(normalizedQuery)) return 92;
@@ -79,7 +123,8 @@ const productSimilarity = (query, candidate) => {
   // Weighted combined score
   const combined = Math.round(charScore * 0.6 + tokenScore * 0.4);
 
-  return combined;
+  // Use the max of charScore and combined score to handle single-word spelling typos
+  return Math.max(charScore, combined);
 };
 
 export default productSimilarity;

@@ -3,6 +3,10 @@ import { Router } from "express";
 import workspaceProductModule from "./products/workspaceProduct.module.js";
 import catalogGlobalProductModule from "./global-products/catalogGlobalProduct.module.js";
 import catalogHsnMasterModule from "./hsn-master/catalogHsnMaster.module.js";
+import catalogManufacturerMasterModule from "./manufacturer-master/catalogManufacturerMaster.module.js";
+import catalogUomMasterModule from "./uom-master/catalogUomMaster.module.js";
+import catalogCategoryMasterModule from "./category-master/catalogCategoryMaster.module.js";
+import catalogProductFormMasterModule from "./product-form-master/catalogProductFormMaster.module.js";
 
 const router = Router();
 
@@ -20,5 +24,25 @@ router.use(catalogGlobalProductModule.path, catalogGlobalProductModule.router);
 // /catalog/hsn-master
 // ---------------------
 router.use(catalogHsnMasterModule.path, catalogHsnMasterModule.router);
+
+// ---------------------
+// /catalog/manufacturer-master
+// ---------------------
+router.use(catalogManufacturerMasterModule.path, catalogManufacturerMasterModule.router);
+
+// ---------------------
+// /catalog/uom-master
+// ---------------------
+router.use(catalogUomMasterModule.path, catalogUomMasterModule.router);
+
+// ---------------------
+// /catalog/category-master
+// ---------------------
+router.use(catalogCategoryMasterModule.path, catalogCategoryMasterModule.router);
+
+// ---------------------
+// /catalog/product-form-master
+// ---------------------
+router.use(catalogProductFormMasterModule.path, catalogProductFormMasterModule.router);
 
 export default router;

@@ -55,6 +55,8 @@ import normalizeProductName from "../helpers/normalizeProductName.js";
 import searchGlobalProduct from "../helpers/searchGlobalProduct.js";
 import searchWorkspaceProduct from "../helpers/searchWorkspaceProduct.js";
 import suggestMatches from "../helpers/suggestMatches.js";
+import GlobalProduct from "../../../platform/global-catalog/products/models/globalProduct.model.js";
+import WorkspaceProduct from "../../products/models/workspaceProduct.model.js";
 
 /**
  * Confidence threshold above which a product is considered a confident match.
@@ -73,6 +75,114 @@ const MIN_SUGGESTION_CONFIDENCE = 50;
 const MAX_SUGGESTIONS = 5;
 
 /**
+ * Stopwords to skip/make optional in exact match regex
+ */
+const STOPWORDS = new Set([
+  "tab",
+  "tablet",
+  "tablets",
+  "tabs",
+  "cap",
+  "capsule",
+  "capsules",
+  "caps",
+  "syrup",
+  "injection",
+  "inj",
+  "cream",
+  "gel",
+  "drops",
+  "solution",
+  "suspension",
+  "powder",
+  "sachet",
+  "ointment",
+  "lotion",
+  "spray",
+]);
+
+const OPTIONAL_STOPWORDS_PATTERN = "(?:[\\s_-]*(?:tab|tablet|tablets|tabs|cap|capsule|capsules|caps|syrup|injection|inj|cream|gel|drops|solution|suspension|powder|sachet|ointment|lotion|spray))?";
+
+/**
+ * Helper to normalize name specifically for exact spacing/case lookup
+ */
+const normalizeForExactLookup = (name) => {
+  const normalized = normalizeProductName(name);
+  if (!normalized) return "";
+  // Split transitions between letters and numbers so that spacing differences match exactly
+  return normalized
+    .replace(/([a-zA-Z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([a-zA-Z])/g, "$1 $2");
+};
+
+/**
+ * Perform Layer 2: Exact normalized lookup (cross-type)
+ */
+const findExactNormalizedMatch = async (normalizedQuery, workspaceId) => {
+  const exactLookupName = normalizeForExactLookup(normalizedQuery);
+  if (!exactLookupName) return null;
+
+  // Build a regex that matches exactly after ignoring spaces/hyphens/underscores
+  // Filter out stopwords from the query so they are matched by the optional trailing pattern instead
+  const tokens = exactLookupName
+    .split(" ")
+    .filter(Boolean)
+    .filter((t) => !STOPWORDS.has(t));
+    
+  if (tokens.length === 0) return null;
+
+  const pattern = "^" + tokens.map((t) => t.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")).join("[\\s_-]*") + OPTIONAL_STOPWORDS_PATTERN + "$";
+  const regex = new RegExp(pattern, "i");
+
+  const filter = {
+    isDeleted: false,
+    status: "active",
+    name: { $regex: regex },
+  };
+
+  // Layer 2a: Try Workspace matches first
+  if (workspaceId) {
+    const wsMatch = await WorkspaceProduct.findOne({
+      ...filter,
+      workspaceId,
+    })
+      .populate("HsnMaster", "code description gstRate cessRate isActive")
+      .lean();
+
+    if (wsMatch) {
+      return {
+        matched: true,
+        confidence: 100,
+        productSource: "WORKSPACE",
+        productId: wsMatch._id,
+        productType: wsMatch.productType,
+        name: wsMatch.name,
+        suggestions: [],
+      };
+    }
+  }
+
+  // Layer 2b: Try Global matches
+  const globalMatch = await GlobalProduct.findOne(filter)
+    .populate("HsnMaster", "code description gstRate cessRate isActive")
+    .lean();
+
+  if (globalMatch) {
+    return {
+      matched: true,
+      confidence: 100,
+      productSource: "GLOBAL",
+      productId: globalMatch._id,
+      productType: globalMatch.productType,
+      name: globalMatch.name,
+      suggestions: [],
+    };
+  }
+
+  return null;
+};
+
+/**
  * Search for a product by name across Global and Workspace catalogs.
  *
  * @param {string} query            - Raw product name query
@@ -85,7 +195,7 @@ const MAX_SUGGESTIONS = 5;
 const search = async (query, workspaceId = null, options = {}) => {
   const { productType, limit = 10 } = options;
 
-  // Step 1 — Normalize
+  // Layer 1 — Normalize
   const normalized = normalizeProductName(query);
 
   if (!normalized) {
@@ -98,15 +208,31 @@ const search = async (query, workspaceId = null, options = {}) => {
     };
   }
 
-  // Step 2 — Search both catalogs in parallel
+  // Layer 2 — Exact normalized lookup (case/space/hyphen/stopword tolerant, cross-type)
+  const exactMatch = await findExactNormalizedMatch(normalized, workspaceId);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  // Layer 3 — Fuse.js for near matches (exact lookup failed)
+  // Retrieve candidate lists from both databases
   const [globalCandidates, workspaceCandidates] = await Promise.all([
-    searchGlobalProduct(normalized, { productType, limit }),
+    // Fetch global candidates using text index or regex fallback (avoid loading entire global catalog)
+    searchGlobalProduct(normalized, { limit }),
+    
+    // Fetch all active workspace products to ensure we match spelling typos against all workspace products
     workspaceId
-      ? searchWorkspaceProduct(normalized, workspaceId, { productType, limit })
+      ? WorkspaceProduct.find({
+          workspaceId,
+          isDeleted: false,
+          status: "active",
+        })
+          .select("name workspaceProductCode productType manufacturer")
+          .lean()
       : Promise.resolve([]),
   ]);
 
-  // Step 3 — Score and rank all candidates
+  // Score and rank candidates using Fuse.js inside suggestMatches
   const suggestions = suggestMatches(
     query,
     globalCandidates,
@@ -117,7 +243,7 @@ const search = async (query, workspaceId = null, options = {}) => {
     },
   );
 
-  // Step 4 — Determine if top result is a confident match
+  // Layer 4 — Similarity threshold check
   const top = suggestions[0];
 
   if (top && top.confidence >= CONFIDENT_MATCH_THRESHOLD) {
@@ -174,17 +300,27 @@ const searchWorkspace = async (query, workspaceId, options = {}) => {
     };
   }
 
-  const workspaceCandidates = await searchWorkspaceProduct(
-    normalized,
+  // Layer 2 exact check
+  const exactMatch = await findExactNormalizedMatch(normalized, workspaceId);
+  if (exactMatch && exactMatch.productSource === "WORKSPACE") {
+    return exactMatch;
+  }
+
+  // Layer 3
+  const workspaceCandidates = await WorkspaceProduct.find({
     workspaceId,
-    options,
-  );
+    isDeleted: false,
+    status: "active",
+  })
+    .select("name workspaceProductCode productType manufacturer")
+    .lean();
 
   const suggestions = suggestMatches(query, [], workspaceCandidates, {
     minConfidence: MIN_SUGGESTION_CONFIDENCE,
     topN: MAX_SUGGESTIONS,
   });
 
+  // Layer 4
   const top = suggestions[0];
 
   if (top && top.confidence >= CONFIDENT_MATCH_THRESHOLD) {

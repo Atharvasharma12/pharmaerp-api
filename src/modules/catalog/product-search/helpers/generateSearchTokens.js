@@ -22,9 +22,11 @@ const STOPWORDS = new Set([
   "tab",
   "tablet",
   "tablets",
+  "tabs",
   "cap",
   "capsule",
   "capsules",
+  "caps",
   "syrup",
   "injection",
   "inj",
@@ -63,7 +65,12 @@ const generateSearchTokens = (name, options = {}) => {
     return [];
   }
 
-  const tokens = normalized
+  // Split transitions between letters and numbers (e.g. "dolo650" -> "dolo 650")
+  const transitionSplit = normalized
+    .replace(/([a-zA-Z])([0-9])/g, "$1 $2")
+    .replace(/([0-9])([a-zA-Z])/g, "$1 $2");
+
+  const tokens = transitionSplit
     .split(" ")
     .filter((token) => token.length >= 2)
     .filter((token) => includeStopwords || !STOPWORDS.has(token));

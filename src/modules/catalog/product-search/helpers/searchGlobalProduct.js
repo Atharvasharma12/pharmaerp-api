@@ -27,7 +27,7 @@ const DEFAULT_LIMIT = 10;
  * @returns {Promise<Array<{_id, name, globalProductCode, productType}>>}
  */
 const searchGlobalProduct = async (query, options = {}) => {
-  const { productType, limit = DEFAULT_LIMIT } = options;
+  const { limit = DEFAULT_LIMIT } = options;
 
   const normalized = normalizeProductName(query);
 
@@ -39,10 +39,6 @@ const searchGlobalProduct = async (query, options = {}) => {
     isDeleted: false,
     status: "active",
   };
-
-  if (productType) {
-    baseFilter.productType = productType;
-  }
 
   const selectFields = "name globalProductCode productType marketer";
 
@@ -63,19 +59,30 @@ const searchGlobalProduct = async (query, options = {}) => {
     return results;
   }
 
-  // --- Strategy 2: Regex fallback on first significant token ---
+  // --- Strategy 2: Regex fallback with fuzzy token matching ---
   const tokens = generateSearchTokens(normalized, { includeStopwords: false });
-  const primaryToken = tokens[0];
-
-  if (!primaryToken) {
+  if (tokens.length === 0) {
     return [];
   }
 
+  // Build a fuzzy regex for each token: split letters and join with optional single wildcards '.?'
+  const fuzzyTokens = tokens.map((t) => {
+    if (t.length <= 3) return t.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+    return t
+      .split("")
+      .map((char) => char.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&"))
+      .join(".?");
+  });
+
+  // Combine tokens with OR (|) to match products containing any similar token
+  const fuzzyPattern = fuzzyTokens.join("|");
+  const regex = new RegExp(fuzzyPattern, "i");
+
   results = await GlobalProduct.find({
     ...baseFilter,
-    name: { $regex: new RegExp(primaryToken, "i") },
+    name: { $regex: regex },
   })
-    .limit(limit)
+    .limit(limit * 2) // Fetch more candidates to score in memory
     .select(selectFields)
     .lean();
 

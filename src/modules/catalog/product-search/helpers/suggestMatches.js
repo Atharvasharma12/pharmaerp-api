@@ -1,20 +1,4 @@
-/**
- * suggestMatches.js
- *
- * Takes a raw query and a list of product candidates, scores each one
- * using productSimilarity, and returns the top suggestions sorted by
- * confidence descending.
- *
- * Example (from gpnotes.md):
- *   Input:  "PARACITAMOL"
- *   Output:
- *     [
- *       { name: "Paracetamol 500", confidence: 95, productSource: "GLOBAL", productId: "..." },
- *       { name: "Paracetamol 650", confidence: 91, productSource: "GLOBAL", productId: "..." },
- *       { name: "Paracetamol Syrup", confidence: 87, productSource: "GLOBAL", productId: "..." },
- *     ]
- */
-
+import Fuse from "fuse.js";
 import productSimilarity from "./productSimilarity.js";
 
 const PRODUCT_SOURCE = {
@@ -41,52 +25,63 @@ const suggestMatches = (
 ) => {
   const { minConfidence = 50, topN = 5 } = options;
 
-  const scored = [];
+  // Format and combine candidates
+  const candidates = [
+    ...globalCandidates.map((c) => ({
+      ...c,
+      productSource: PRODUCT_SOURCE.GLOBAL,
+    })),
+    ...workspaceCandidates.map((c) => ({
+      ...c,
+      productSource: PRODUCT_SOURCE.WORKSPACE,
+    })),
+  ];
 
-  // Score global candidates
-  for (const candidate of globalCandidates) {
-    const confidence = productSimilarity(query, candidate.name);
-
-    if (confidence >= minConfidence) {
-      scored.push({
-        name: candidate.name,
-        confidence,
-        productSource: PRODUCT_SOURCE.GLOBAL,
-        productId: candidate._id,
-        productType: candidate.productType,
-        globalProductCode: candidate.globalProductCode,
-      });
-    }
+  if (candidates.length === 0) {
+    return [];
   }
 
-  // Score workspace candidates
-  for (const candidate of workspaceCandidates) {
+  // Initialize Fuse.js on candidates
+  const fuse = new Fuse(candidates, {
+    keys: ["name"],
+    includeScore: true,
+    threshold: 0.5, // Allow fuzzy matching
+  });
+
+  const fuseResults = fuse.search(query);
+
+  const scored = fuseResults.map((result) => {
+    const candidate = result.item;
+
+    // Calculate character/token similarity using the robust productSimilarity helper
+    // as it combines char similarity (now via Fuse) and token overlaps.
     const confidence = productSimilarity(query, candidate.name);
 
-    if (confidence >= minConfidence) {
-      scored.push({
-        name: candidate.name,
-        confidence,
-        productSource: PRODUCT_SOURCE.WORKSPACE,
-        productId: candidate._id,
-        productType: candidate.productType,
-        workspaceProductCode: candidate.workspaceProductCode,
-      });
-    }
-  }
+    return {
+      name: candidate.name,
+      confidence,
+      productSource: candidate.productSource,
+      productId: candidate._id,
+      productType: candidate.productType,
+      globalProductCode: candidate.globalProductCode,
+      workspaceProductCode: candidate.workspaceProductCode,
+    };
+  });
 
-  // Sort descending by confidence, then prefer GLOBAL over WORKSPACE
+  // Sort descending by confidence, then prefer GLOBAL over WORKSPACE on equal score
   scored.sort((a, b) => {
     if (b.confidence !== a.confidence) {
       return b.confidence - a.confidence;
     }
-    // Prefer global when equal confidence
     if (a.productSource === PRODUCT_SOURCE.GLOBAL) return -1;
     if (b.productSource === PRODUCT_SOURCE.GLOBAL) return 1;
     return 0;
   });
 
-  return scored.slice(0, topN);
+  // Filter and limit
+  return scored
+    .filter((match) => match.confidence >= minConfidence)
+    .slice(0, topN);
 };
 
 export default suggestMatches;
