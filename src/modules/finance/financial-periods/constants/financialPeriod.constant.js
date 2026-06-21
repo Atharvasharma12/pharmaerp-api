@@ -1,0 +1,12 @@
+export const PERIOD_TYPE = {
+  YEAR: "YEAR",
+  QUARTER: "QUARTER",
+  MONTH: "MONTH",
+  ADJUSTMENT: "ADJUSTMENT",
+};
+
+export const PERIOD_STATUS = {
+  OPEN: "OPEN",
+  CLOSED: "CLOSED",
+  LOCKED: "LOCKED",
+};

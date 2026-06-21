@@ -1378,6 +1378,259 @@ catalog/product-resolver/
 
 
 
+src/modules/parties/
+│
+├── parties.routes.js
+├── parties.module.js
+│
+├── customers/
+│   ├── models/
+│   ├── repositories/
+│   ├── services/
+│   ├── controllers/
+│   ├── validations/
+│   ├── routes/
+│   ├── constants/
+│   └── customer.module.js
+│
+└── suppliers/
+    ├── models/
+    ├── repositories/
+    ├── services/
+    ├── controllers/
+    ├── validations/
+    ├── routes/
+    ├── constants/
+    └── supplier.module.js
+
+src/modules/parties/customers/
+│
+├── customer.module.js
+│
+├── constants/
+│   └── customer.constant.js
+│
+├── controllers/
+│   └── customer.controller.js
+│
+├── models/
+│   └── customer.model.js
+│
+├── repositories/
+│   └── customer.repository.js
+│
+├── routes/
+│   └── customer.routes.js
+│
+├── services/
+│   └── customer.service.js
+│
+├── validations/
+│   └── customer.validation.js
+
+
+src/modules/parties/suppliers/
+│
+├── supplier.module.js
+│
+├── constants/
+│   └── supplier.constant.js
+│
+├── controllers/
+│   └── supplier.controller.js
+│
+├── models/
+│   └── supplier.model.js
+│
+├── repositories/
+│   └── supplier.repository.js
+│
+├── routes/
+│   └── supplier.routes.js
+│
+├── services/
+│   └── supplier.service.js
+│
+├── validations/
+│   └── supplier.validation.js
+
+
+src/modules/finance/
+│
+├── chart-of-accounts/
+│
+├── journal-vouchers/
+│
+├── ledger/
+│
+├── account-balances/
+│
+├── financial-periods/
+│
+└── reports/
+
+chart-of-accounts/
+│
+├── chartOfAccounts.module.js
+│
+├── constants/
+│   ├── account.constant.js
+│   └── accountGroup.constant.js
+│
+├── controllers/
+│   ├── account.controller.js
+│   └── accountGroup.controller.js
+│
+├── models/
+│   ├── account.model.js
+│   └── accountGroup.model.js
+│
+├── repositories/
+│   ├── account.repository.js
+│   └── accountGroup.repository.js
+│
+├── routes/
+│   ├── account.routes.js
+│   └── accountGroup.routes.js
+│
+├── services/
+│   ├── account.service.js
+│   └── accountGroup.service.js
+│
+└── validations/
+    ├── account.validation.js
+    └── accountGroup.validation.js
+
+
+journal-vouchers/
+│
+├── journalVoucher.module.js
+│
+├── constants/
+│   └── journalVoucher.constant.js
+│
+├── controllers/
+│   └── journalVoucher.controller.js
+│
+├── models/
+│   ├── journalVoucher.model.js
+│   └── journalLine.model.js
+│
+├── repositories/
+│   ├── journalVoucher.repository.js
+│   └── journalLine.repository.js
+│
+├── routes/
+│   └── journalVoucher.routes.js
+│
+├── services/
+│   ├── journalVoucher.service.js
+│   ├── journalPosting.service.js
+│   ├── journalValidation.service.js
+│   ├── journalNumber.service.js
+│   └── openingBalance.service.js
+│
+├── validations/
+│   └── journalVoucher.validation.js
+│
+└── helpers/
+    ├── calculateJournalTotals.js
+    ├── validateDebitCreditBalance.js
+    └── buildJournalReference.js
+
+
+
+ledger/
+│
+├── ledger.module.js
+│
+├── controllers/
+│   └── ledger.controller.js
+│
+├── models/
+│   └── ledger.model.js
+│
+├── repositories/
+│   └── ledger.repository.js
+│
+├── routes/
+│   └── ledger.routes.js
+│
+├── services/
+│   └── ledger.service.js
+│
+└── validations/
+
+
+
+account-balances/
+│
+├── accountBalance.module.js
+│
+├── controllers/
+│   └── accountBalance.controller.js
+│
+├── models/
+│   └── accountBalance.model.js
+│
+├── repositories/
+│   └── accountBalance.repository.js
+│
+├── routes/
+│   └── accountBalance.routes.js
+│
+├── services/
+│   └── accountBalance.service.js
+│
+└── validations/
+
+
+
+financial-periods/
+│
+├── financialPeriod.module.js
+│
+├── constants/
+│   └── financialPeriod.constant.js
+│
+├── controllers/
+│   └── financialPeriod.controller.js
+│
+├── models/
+│   └── financialPeriod.model.js
+│
+├── repositories/
+│   └── financialPeriod.repository.js
+│
+├── routes/
+│   └── financialPeriod.routes.js
+│
+├── services/
+│   └── financialPeriod.service.js
+│
+└── validations/
+    └── financialPeriod.validation.js
+
+
+
+reports/
+│
+├── trial-balance/
+│
+├── profit-loss/
+│
+├── balance-sheet/
+│
+├── customer-ledger/
+│
+├── supplier-ledger/
+│
+├── cash-book/
+│
+└── bank-book/
+
+
+
 The ERP system follows a Workspace → Company → Branch hierarchy. A Workspace represents a customer organization (pharmacy business) and serves as the top-level tenant. Within a workspace, the customer can create one or more Companies, and each company can manage multiple Branches. Users belong to a workspace and can be granted access to specific companies and branches based on their roles and permissions. Company-level data includes business information such as GST number, drug licenses, trade licenses, PAN, tax configurations, billing settings, and other statutory or compliance-related details, since these are shared across all branches of that company. Branch-level data includes inventory, stock, batches, purchases, sales, POS operations, and day-to-day pharmacy activities, as stock and transactions are maintained separately for each branch. We are building a multi-tenant Retail Pharmacy ERP SaaS platform that enables customers to centrally manage companies, branches, users, compliance, inventory, sales, purchases, billing, subscriptions, and reporting within a scalable and secure architecture.
 
 

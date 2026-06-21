@@ -1,302 +1,404 @@
-# 🏥 ERP Backend
+# ERP Backend
 
-A modular Node.js backend for retail pharmacy ERP operations. This backend supports two main frontend applications:
-
-1. **ERP Frontend** — used by pharmacy customers to manage companies, branches, inventory, billing, sales, purchases, users, and reports.
-2. **Platform Frontend** — used by the ERP owner/internal team to manage customers, plans, subscriptions, global catalog, and platform-level operations.
-
-The backend uses **Express.js**, **MongoDB**, **JWT authentication**, and a clean module-based architecture. The current structure already supports core authentication, workspaces, subscriptions, centralized routing, middleware, and reusable feature modules. :contentReference[oaicite:0]{index=0}
+A modular backend for a retail pharmacy ERP platform. The project is built with Node.js, Express, MongoDB, JWT-based authentication, and a feature-driven module structure that separates platform operations, organization management, subscription handling, and catalog management.
 
 ---
 
-## 🚀 What This Project Supports
+## Overview
 
-- Express-based REST API with `/api/v1` prefix
-- JWT authentication
-- Role-based authorization
-- Multi-tenant workspace support
-- Customer ERP user management
-- Platform/internal admin user management
-- Workspace, company, and branch structure
-- Subscription plans and subscription lifecycle
-- Platform dashboard and customer management
-- Global catalog management for medicines and categories
-- Platform audit logs
-- Centralized error handling
-- Request logging
+This backend is designed to support two main product areas:
+
+1. **ERP customer side** for pharmacy/workspace users
+2. **Platform/admin side** for internal ERP owners and operators
+
+The API is served under the base prefix:
+
+```txt
+/api/v1
+```
+
+---
+
+## Tech Stack
+
+- **Runtime:** Node.js
+- **Framework:** Express.js
+- **Database:** MongoDB + Mongoose
+- **Auth:** JWT (ERP users) and platform JWT
+- **Validation:** Joi
+- **Security:** Helmet, CORS, cookie parsing
+- **Logging:** Winston + daily rotate file logs
+- **Testing:** Jest
+- **Development:** Nodemon
+
+---
+
+## Main Features
+
+- Modular route registration with a centralized router
+- Multi-workspace and multi-company organization flow
+- ERP user authentication and profile management
+- Platform admins and platform users management
+- Subscription plans and subscription lifecycle handling
+- Workspace-level catalog/product management
+- Platform-level global catalog management
+- Request and error handling middleware
 - Environment-based configuration
-- Modular route wiring
-- Scalable feature-module architecture
-- Jest and ESLint-ready project setup
+- Email-based auth flows
 
 ---
 
-## 🧠 Application Types
-
-This backend supports two different user systems.
-
----
-
-### 1. ERP Customer Side
-
-This is used by pharmacy businesses.
-
-Example users:
-
-- Pharmacy owner
-- Branch manager
-- Cashier
-- Inventory manager
-- Accountant
-- Staff member
-
-ERP users can belong to:
-
-```txt
-Workspace
-Company
-Branch
-Role
-Permissions
-```
-
-ERP customer side can use full role + permission based access control because pharmacy businesses may have multiple companies, branches, and employees.
-
----
-
-### 2. Platform Owner Side
-
-This is used by your internal ERP owner team.
-
-Example users:
-
-- Super admin
-- Admin
-- Support team
-- Billing manager
-- Catalog manager
-- Read-only user
-
-Platform side uses simple role-based access only.
-
-```txt
-PlatformUser
-Role
-```
-
-No permission model is required for now.
-
----
-
-## ✅ Platform Role Decision
-
-For platform/internal users, this project uses hardcoded role constants.
-
-No separate role model.
-No permission model.
-No access-control module.
-
-Reason:
-
-- Internal team is small
-- Roles are predictable
-- Easier to maintain
-- Faster to build
-- Permissions can be added later if team grows
-
-Example platform roles:
-
-```js
-SUPER_ADMIN;
-ADMIN;
-SUPPORT;
-BILLING_MANAGER;
-CATALOG_MANAGER;
-READ_ONLY;
-```
-
----
-
-## 📁 Repository Structure
+## Project Structure
 
 ```txt
 erp-backend/
 ├── src/
 │   ├── app.js
 │   ├── server.js
-│
 │   ├── config/
 │   │   ├── cors.js
 │   │   ├── database.js
 │   │   ├── env.js
 │   │   └── logger.js
-│
 │   ├── constants/
 │   │   ├── app.constant.js
 │   │   ├── http.constant.js
-│   │   ├── roles.constant.js
-│   │   ├── status.constant.js
 │   │   ├── platformRoles.constant.js
 │   │   └── platformStatus.constant.js
-│
 │   ├── middlewares/
 │   │   ├── auth.middleware.js
+│   │   ├── companyContext.middleware.js
+│   │   ├── error.middleware.js
+│   │   ├── notFound.middleware.js
 │   │   ├── permission.middleware.js
 │   │   ├── platformAuth.middleware.js
 │   │   ├── platformRole.middleware.js
-│   │   ├── platformAudit.middleware.js
-│   │   ├── workspaceContext.middleware.js
-│   │   ├── subscriptionGuard.middleware.js
-│   │   ├── error.middleware.js
-│   │   ├── notFound.middleware.js
-│   │   ├── rateLimiter.middleware.js
 │   │   ├── requestLogger.middleware.js
-│   │   └── validate.middleware.js
-│
+│   │   ├── subscriptionGuard.middleware.js
+│   │   ├── validate.middleware.js
+│   │   ├── workspaceContext.middleware.js
+│   │   └── branchContext.middleware.js
 │   ├── modules/
 │   │   ├── core/
-│   │   ├── platform/
 │   │   ├── organization/
+│   │   ├── platform/
 │   │   ├── subscription/
-│   │   ├── catalog/
-│   │   ├── inventory/
-│   │   ├── parties/
-│   │   ├── purchase/
-│   │   ├── sales/
-│   │   ├── billing/
-│   │   ├── invoicing/
-│   │   ├── taxation/
-│   │   ├── finance/
-│   │   ├── orders/
-│   │   ├── ecommerce/
-│   │   ├── crm/
-│   │   ├── hrm/
-│   │   ├── reports/
-│   │   ├── notifications/
-│   │   └── system/
-│
+│   │   └── catalog/
 │   ├── routes/
 │   │   └── index.routes.js
-│
 │   ├── utils/
 │   │   ├── ApiError.js
 │   │   ├── ApiResponse.js
 │   │   ├── asyncHandler.js
 │   │   ├── hash.js
-│   │   ├── helpers.js
 │   │   ├── jwt.js
 │   │   └── platform/
-│   │       ├── platformJwt.js
-│   │       ├── platformLogger.js
-│   │       ├── platformHelpers.js
-│   │       ├── generateWorkspaceReport.js
-│   │       ├── generateSubscriptionAnalytics.js
-│   │       ├── calculatePlatformRevenue.js
-│   │       └── platformCookies.js
-│
 │   ├── docs/
 │   └── jobs/
-│
-├── tests/
-│   ├── api/
-│   └── unit/
-│
-├── logs/
-├── public/
 ├── scripts/
+├── tests/
 ├── uploads/
-├── .env.example
-├── .gitignore
-├── nodemon.json
-├── package.json
-├── package-lock.json
-└── README.md
+├── logs/
+└── .env.example
 ```
 
 ---
 
-# 🧩 Platform Module Structure
+## API Base Routing
 
-The `platform` module is used by the ERP owner/internal admin frontend.
+All routes are mounted from [src/routes/index.routes.js](src/routes/index.routes.js), and the application exposes these main API groups:
 
 ```txt
-src/modules/platform/
-│
-├── platform.routes.js
-├── platform.module.js
-│
-├── auth/
-│   ├── controllers/
-│   │   └── platformAuth.controller.js
-│   ├── services/
-│   │   └── platformAuth.service.js
-│   ├── repositories/
-│   │   └── platformAuth.repository.js
-│   ├── routes/
-│   │   └── platformAuth.routes.js
-│   ├── validations/
-│   │   └── platformAuth.validation.js
-│   ├── constants/
-│   │   └── platformAuth.constant.js
-│   └── platformAuth.module.js
-│
-├── users/
-│   ├── models/
-│   │   └── platformUser.model.js
-│   ├── controllers/
-│   │   └── platformUser.controller.js
-│   ├── services/
-│   │   └── platformUser.service.js
-│   ├── repositories/
-│   │   └── platformUser.repository.js
-│   ├── routes/
-│   │   └── platformUser.routes.js
-│   ├── validations/
-│   │   └── platformUser.validation.js
-│   ├── constants/
-│   │   └── platformUser.constant.js
-│   └── platformUser.module.js
-│
-├── dashboard/
-│   ├── controllers/
-│   │   └── platformDashboard.controller.js
-│   ├── services/
-│   │   └── platformDashboard.service.js
-│   ├── repositories/
-│   │   └── platformDashboard.repository.js
-│   ├── routes/
-│   │   └── platformDashboard.routes.js
-│   └── platformDashboard.module.js
-│
-├── customers/
-│   ├── controllers/
-│   │   └── platformCustomer.controller.js
-│   ├── services/
-│   │   └── platformCustomer.service.js
-│   ├── repositories/
-│   │   └── platformCustomer.repository.js
-│   ├── routes/
-│   │   └── platformCustomer.routes.js
-│   ├── validations/
-│   │   └── platformCustomer.validation.js
-│   └── platformCustomer.module.js
-│
-├── plans/
-│   ├── controllers/
-│   │   └── platformPlan.controller.js
-│   ├── services/
-│   │   └── platformPlan.service.js
-│   ├── repositories/
-│   │   └── platformPlan.repository.js
-│   ├── routes/
-│   │   └── platformPlan.routes.js
-│   ├── validations/
-│   │   └── platformPlan.validation.js
-│   ├── constants/
-│   │   └── platformPlan.constant.js
-│   └── platformPlan.module.js
-│
-├── subscriptions/
+/api/v1/core/*
+/api/v1/platform/*
+/api/v1/organization/*
+/api/v1/subscription/*
+/api/v1/catalog/*
+```
+
+---
+
+## Module Breakdown
+
+### 1. Core Module
+
+Purpose: common auth, user profile, health checks, and access control.
+
+Mounted at:
+
+```txt
+/api/v1/core
+```
+
+Included areas:
+
+- `/health` — server health check
+- `/auth` — register, login, forgot/reset password, OTP flows, logout
+- `/users` — me/profile, avatar, email/phone updates, account deletion
+- `/access-control` — access control related endpoints
+
+---
+
+### 2. Organization Module
+
+Purpose: workspace, company, and branch management for ERP tenants.
+
+Mounted at:
+
+```txt
+/api/v1/organization
+```
+
+Included areas:
+
+- `/workspaces` — create, update, invite, manage workspace members
+- `/companies` — workspace company CRUD
+- `/branches` — company branch CRUD and workspace-level branch listing
+
+These APIs are built around workspace/company/branch context and are intended for ERP customer-side operations.
+
+---
+
+### 3. Platform Module
+
+Purpose: admin/internal operations for the platform owner.
+
+Mounted at:
+
+```txt
+/api/v1/platform
+```
+
+Included areas:
+
+- `/auth` — platform login/logout/me
+- `/users` — platform user CRUD
+- `/plans` — platform subscription plan management
+- `/subscriptions` — platform subscription lifecycle management
+- `/global-catalog` — platform-wide catalog masters and products
+
+This module is used for internal platform operations such as customer onboarding, subscription oversight, and global master-data control.
+
+---
+
+### 4. Subscription Module
+
+Purpose: customer-facing subscription operations for workspaces.
+
+Mounted at:
+
+```txt
+/api/v1/subscription
+```
+
+Included areas:
+
+- `/plans` — active and available plan retrieval
+- `/subscriptions` — purchase, trial, renew, upgrade, downgrade, cancel, and reporting flows
+
+This is used to manage workspace subscription state, billing cycles, seat availability, and subscription actions.
+
+---
+
+### 5. Catalog Module
+
+Purpose: workspace-level catalog and product management for ERP users.
+
+Mounted at:
+
+```txt
+/api/v1/catalog
+```
+
+Included areas:
+
+- `/products` — workspace product CRUD and listing
+- `/global-products` — global/shared product listing for the workspace context
+- `/hsn-master` — HSN master endpoints
+- `/manufacturer-master` — manufacturer master endpoints
+- `/uom-master` — unit of measure master endpoints
+- `/category-master` — category master endpoints
+- `/product-form-master` — product form master endpoints
+- `/salt-master` — salt master endpoints
+
+---
+
+## Catalog Master Details
+
+The catalog area is one of the most important sections of the backend. It supports both product-level data and master records needed for pharmacy ERP operations.
+
+### Products
+
+- Create/update/delete workspace products
+- Fetch product details and lists
+- Operate under the current workspace context
+
+### Global Products
+
+- Access shared/global catalog products
+- Used for cross-workspace catalog reference or central product data
+
+### Masters
+
+- **HSN Master** — HSN code and tax-related reference records
+- **Manufacturer Master** — manufacturer information and reference data
+- **UOM Master** — unit-of-measure definitions
+- **Category Master** — product categorization
+- **Product Form Master** — dosage/form classification
+- **Salt Master** — active ingredient/salt definitions
+
+---
+
+## Authentication Model
+
+The project uses two authentication flows:
+
+### ERP User Authentication
+
+- JWT-based login for customer/workspace users
+- Authenticated routes use middleware to validate the token and context
+- User context includes workspace/company/branch awareness where needed
+
+### Platform Authentication
+
+- Separate JWT flow for platform/internal users
+- Platform routes use dedicated platform auth middleware
+
+---
+
+## Middleware Layer
+
+Common middleware in the app includes:
+
+- `requestLogger` — logs request details
+- `authMiddleware` — validates ERP user tokens
+- `platformAuthMiddleware` — validates platform tokens
+- `workspaceContextMiddleware` — sets workspace context
+- `companyContextMiddleware` — sets company context
+- `branchContextMiddleware` — sets branch context
+- `subscriptionGuard` — validates subscription state where needed
+- `validate` — validates request payloads using Joi schemas
+- `error.middleware` — global error handling
+- `notFound.middleware` — 404 responses
+
+---
+
+## Environment Configuration
+
+Create a `.env` file using the sample file:
+
+```bash
+cp .env.example .env
+```
+
+Important variables:
+
+```env
+NODE_ENV=development
+PORT=5000
+DB_URI=mongodb://localhost:27017/erp-backend
+JWT_SECRET=your-jwt-secret
+PLATFORM_JWT_SECRET=your-platform-jwt-secret
+CORS_ORIGIN=http://localhost:3000
+API_PREFIX=/api/v1
+```
+
+---
+
+## Installation
+
+```bash
+npm install
+```
+
+---
+
+## Running the Server
+
+Development mode:
+
+```bash
+npm run dev
+```
+
+Production mode:
+
+```bash
+npm start
+```
+
+---
+
+## Useful Scripts
+
+```bash
+npm run dev
+npm start
+npm test
+npm run lint
+npm run seed:platform-user
+```
+
+- `seed:platform-user` seeds a platform user for admin/platform setup.
+
+---
+
+## Testing
+
+The repository includes Jest-based tests under the `tests` folder:
+
+```txt
+tests/
+├── api/
+└── unit/
+```
+
+---
+
+## Logging and File Storage
+
+- Request and application logs are written to the `logs` directory.
+- Uploads are stored under the `uploads` directory.
+- The logger is configured to support rotating logs for better production monitoring.
+
+---
+
+## Notes on Architecture
+
+The backend follows a clean separation of concerns:
+
+- **Routes** define API endpoints
+- **Controllers** handle requests and responses
+- **Services** contain business logic
+- **Repositories/models** manage database access
+- **Middlewares** handle auth, validation, context, and error handling
+
+This keeps each module focused and easier to maintain as the application grows.
+
+---
+
+## Recommended Development Flow
+
+1. Start the server with `npm run dev`
+2. Configure the `.env` file properly
+3. Use the platform auth flow to create platform users
+4. Create workspace/company/branch records for ERP customers
+5. Manage subscription lifecycle and catalog data
+6. Test APIs using Postman or your frontend integration layer
+
+---
+
+## Summary
+
+The backend currently covers:
+
+- ERP user and organization flows
+- Platform admin and global catalog operations
+- Subscription management for workspaces
+- Workspace and platform-level catalog master data
+- Secure authentication and request handling
+
+This makes the project a strong foundation for a full pharmacy ERP ecosystem.
 │   ├── controllers/
 │   │   └── platformSubscription.controller.js
 │   ├── services/

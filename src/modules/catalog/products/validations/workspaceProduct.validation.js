@@ -31,6 +31,14 @@ const objectId = Joi.string()
     "string.pattern.base": "Invalid id",
   });
 
+const compositionItemSchema = Joi.object({
+  salt: objectId.required(),
+  strength: Joi.number().min(0).required(),
+  unit: Joi.string()
+    .valid("mg", "g", "mcg", "ml", "%", "IU")
+    .required(),
+});
+
 // ---------------------
 // Create schema
 // ---------------------
@@ -43,17 +51,26 @@ export const createWorkspaceProductSchema = Joi.object({
 
   name: Joi.string().trim().min(1).max(300).required(),
 
-  // manufacturer — simpler than GlobalProduct (no manufacturerAddress/country/details)
-  manufacturer: Joi.string().trim().max(300).allow(null, "").optional(),
+  // manufacturer — ref to ManufacturerMaster
+  manufacturer: objectId.allow(null).optional(),
 
   pack: Joi.string().trim().allow(null, "").optional(),
 
   qty: Joi.string().trim().allow(null, "").optional(),
 
-  productForm: Joi.string().trim().allow(null, "").optional(),
+  // uom — ref to UomMaster
+  uom: objectId.allow(null).optional(),
+
+  // category — ref to CategoryMaster
+  category: objectId.allow(null).optional(),
+
+  // productForm — ref to ProductFormMaster
+  productForm: objectId.allow(null).optional(),
 
   // HsnMaster — ObjectId ref for GST (single source of truth, never inline)
   HsnMaster: objectId.allow(null).optional(),
+
+  composition: Joi.array().items(compositionItemSchema).default([]).optional(),
 
   // notes — simple free-form notes (not regulatory/descriptive medicine info)
   notes: Joi.string().trim().max(2000).allow(null, "").optional(),
@@ -81,15 +98,21 @@ export const createWorkspaceProductSchema = Joi.object({
 export const updateWorkspaceProductSchema = Joi.object({
   name: Joi.string().trim().min(1).max(300).optional(),
 
-  manufacturer: Joi.string().trim().max(300).allow(null, "").optional(),
+  manufacturer: objectId.allow(null).optional(),
 
   pack: Joi.string().trim().allow(null, "").optional(),
 
   qty: Joi.string().trim().allow(null, "").optional(),
 
-  productForm: Joi.string().trim().allow(null, "").optional(),
+  uom: objectId.allow(null).optional(),
+
+  category: objectId.allow(null).optional(),
+
+  productForm: objectId.allow(null).optional(),
 
   HsnMaster: objectId.allow(null).optional(),
+
+  composition: Joi.array().items(compositionItemSchema).optional(),
 
   notes: Joi.string().trim().max(2000).allow(null, "").optional(),
 

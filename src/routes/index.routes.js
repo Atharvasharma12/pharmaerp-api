@@ -7,6 +7,8 @@ import platformModule from "../modules/platform/platform.module.js";
 import organizationModule from "../modules/organization/organization.module.js";
 import subscriptionModule from "../modules/subscription/subscription.module.js";
 import catalogModule from "../modules/catalog/catalog.module.js";
+import partiesModule from "../modules/parties/parties.module.js";
+import financeModule from "../modules/finance/finance.module.js";
 
 const router = Router();
 
@@ -19,5 +21,9 @@ router.use(API_PREFIX + organizationModule.path, organizationModule.router);
 router.use(API_PREFIX + subscriptionModule.path, subscriptionModule.router);
 
 router.use(API_PREFIX + catalogModule.path, catalogModule.router);
+
+router.use(API_PREFIX + partiesModule.path, partiesModule.router);
+
+router.use(API_PREFIX + financeModule.path, financeModule.router);
 
 export default router;

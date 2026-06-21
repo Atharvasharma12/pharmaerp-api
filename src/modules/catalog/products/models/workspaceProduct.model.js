@@ -7,6 +7,32 @@ import {
   WORKSPACE_PRODUCT_CODE_PREFIX,
 } from "../constants/workspaceProduct.constant.js";
 
+const compositionSchema = new mongoose.Schema(
+  {
+    salt: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SaltMaster",
+      required: true,
+    },
+
+    strength: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+
+    unit: {
+      type: String,
+      required: true,
+      trim: true,
+      enum: ["mg", "g", "mcg", "ml", "%", "IU"],
+    },
+  },
+  {
+    _id: false,
+  },
+);
+
 const workspaceProductSchema = new mongoose.Schema(
   {
     workspaceProductCode: {
@@ -46,9 +72,9 @@ const workspaceProductSchema = new mongoose.Schema(
     },
 
     manufacturer: {
-      type: String,
-      trim: true,
-      maxlength: 300,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ManufacturerMaster",
+      default: null,
     },
 
     pack: {
@@ -56,14 +82,40 @@ const workspaceProductSchema = new mongoose.Schema(
       trim: true,
     },
 
-    qty: {
-      type: String,
-      trim: true,
+    // Example:
+    // [
+    //   {
+    //     salt: ObjectId("..."),
+    //     strength: 500,
+    //     unit: "mg"
+    //   },
+    //   {
+    //     salt: ObjectId("..."),
+    //     strength: 30,
+    //     unit: "mg"
+    //   }
+    // ]
+    composition: {
+      type: [compositionSchema],
+      default: [],
+    },
+
+    uom: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "UomMaster",
+      default: null,
+    },
+
+    category: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CategoryMaster",
+      default: null,
     },
 
     productForm: {
-      type: String,
-      trim: true,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductFormMaster",
+      default: null,
     },
 
     HsnMaster: {
@@ -152,9 +204,9 @@ workspaceProductSchema.methods.toSafeObject = function () {
   return product;
 };
 
-// ---------------------
+// ----------------------------------------------------
 // Indexes
-// ---------------------
+// ----------------------------------------------------
 
 workspaceProductSchema.index(
   {
@@ -195,6 +247,11 @@ workspaceProductSchema.index({
 workspaceProductSchema.index({
   workspaceId: 1,
   createdBy: 1,
+});
+
+// Search by salt
+workspaceProductSchema.index({
+  "composition.salt": 1,
 });
 
 const WorkspaceProduct =

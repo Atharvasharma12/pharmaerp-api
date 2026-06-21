@@ -19,6 +19,11 @@ const findWorkspaceProductById = async (productId, workspaceId, options = {}) =>
     isDeleted: false,
   })
     .populate("HsnMaster", "code description gstRate cessRate isActive")
+    .populate("manufacturer", "name description isActive")
+    .populate("uom", "name abbreviation description isActive")
+    .populate("category", "name slug parentCategory level description imageUrl isActive")
+    .populate("productForm", "name description isActive")
+    .populate("composition.salt", "name description isActive")
     .select(options.select || "");
 };
 
@@ -33,6 +38,11 @@ const findWorkspaceProductByCode = async (
     isDeleted: false,
   })
     .populate("HsnMaster", "code description gstRate cessRate isActive")
+    .populate("manufacturer", "name description isActive")
+    .populate("uom", "name abbreviation description isActive")
+    .populate("category", "name slug parentCategory level description imageUrl isActive")
+    .populate("productForm", "name description isActive")
+    .populate("composition.salt", "name description isActive")
     .select(options.select || "");
 };
 
@@ -87,6 +97,11 @@ const getWorkspaceProducts = async (
   const [products, total] = await Promise.all([
     WorkspaceProduct.find(query)
       .populate("HsnMaster", "code description gstRate cessRate isActive")
+      .populate("manufacturer", "name description isActive")
+      .populate("uom", "name abbreviation description isActive")
+      .populate("category", "name slug parentCategory level description imageUrl isActive")
+      .populate("productForm", "name description isActive")
+      .populate("composition.salt", "name description isActive")
       .sort(sort)
       .skip(skip)
       .limit(limit)

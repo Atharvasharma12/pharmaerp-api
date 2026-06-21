@@ -33,6 +33,11 @@ const resolveWorkspaceProduct = async (productId, workspaceId) => {
     status: "active",
   })
     .populate("HsnMaster", "code description gstRate cessRate isActive")
+    .populate("manufacturer", "name description isActive")
+    .populate("uom", "name abbreviation description isActive")
+    .populate("category", "name slug parentCategory level description imageUrl isActive")
+    .populate("productForm", "name description isActive")
+    .populate("composition.salt", "name description isActive")
     .lean();
 
   if (!product) {
