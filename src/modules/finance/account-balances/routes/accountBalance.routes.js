@@ -1,9 +1,9 @@
 import { Router } from "express";
 
-import authMiddleware from "../../../../../middlewares/auth.middleware.js";
-import workspaceContextMiddleware from "../../../../../middlewares/workspaceContext.middleware.js";
-import companyContextMiddleware from "../../../../../middlewares/companyContext.middleware.js";
-import validate from "../../../../../middlewares/validate.middleware.js";
+import authMiddleware from "../../../../middlewares/auth.middleware.js";
+import workspaceContextMiddleware from "../../../../middlewares/workspaceContext.middleware.js";
+import companyContextMiddleware from "../../../../middlewares/companyContext.middleware.js";
+import validate from "../../../../middlewares/validate.middleware.js";
 
 import {
   getBalances,
@@ -28,13 +28,13 @@ router.get("/", validate(getBalancesQuerySchema, "query"), getBalances);
 router.get(
   "/:accountId",
   validate(accountIdParamSchema, "params"),
-  getBalanceByAccountId
+  getBalanceByAccountId,
 );
 
 router.post(
   "/:accountId/recalculate",
   validate(accountIdParamSchema, "params"),
-  recalculateBalance
+  recalculateBalance,
 );
 
 export default router;

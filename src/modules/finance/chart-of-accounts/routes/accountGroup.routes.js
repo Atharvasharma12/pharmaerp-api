@@ -1,9 +1,9 @@
 import { Router } from "express";
 
-import authMiddleware from "../../../../../middlewares/auth.middleware.js";
-import workspaceContextMiddleware from "../../../../../middlewares/workspaceContext.middleware.js";
-import companyContextMiddleware from "../../../../../middlewares/companyContext.middleware.js";
-import validate from "../../../../../middlewares/validate.middleware.js";
+import authMiddleware from "../../../../middlewares/auth.middleware.js";
+import workspaceContextMiddleware from "../../../../middlewares/workspaceContext.middleware.js";
+import companyContextMiddleware from "../../../../middlewares/companyContext.middleware.js";
+import validate from "../../../../middlewares/validate.middleware.js";
 
 import {
   createAccountGroup,
@@ -29,14 +29,26 @@ router.use(companyContextMiddleware);
 
 // CRUD
 router.post("/", validate(createAccountGroupSchema), createAccountGroup);
-router.get("/", validate(getAccountGroupsQuerySchema, "query"), getAccountGroups);
-router.get("/:accountGroupId", validate(accountGroupIdParamSchema, "params"), getAccountGroupById);
+router.get(
+  "/",
+  validate(getAccountGroupsQuerySchema, "query"),
+  getAccountGroups,
+);
+router.get(
+  "/:accountGroupId",
+  validate(accountGroupIdParamSchema, "params"),
+  getAccountGroupById,
+);
 router.patch(
   "/:accountGroupId",
   validate(accountGroupIdParamSchema, "params"),
   validate(updateAccountGroupSchema),
-  updateAccountGroup
+  updateAccountGroup,
 );
-router.delete("/:accountGroupId", validate(accountGroupIdParamSchema, "params"), deleteAccountGroup);
+router.delete(
+  "/:accountGroupId",
+  validate(accountGroupIdParamSchema, "params"),
+  deleteAccountGroup,
+);
 
 export default router;

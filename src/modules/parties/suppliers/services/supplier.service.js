@@ -1,6 +1,6 @@
 import ApiError from "../../../../utils/ApiError.js";
 import supplierRepository from "../repositories/supplier.repository.js";
-import branchRepository from "../../../../organization/branches/repositories/branch.repository.js";
+import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import { SUPPLIER_STATUS } from "../constants/supplier.constant.js";
 
 const createSupplier = async (workspaceId, companyId, userId, payload) => {
@@ -25,7 +25,10 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
   } = payload;
 
   if (branchId) {
-    const branch = await branchRepository.findBranchByIdAndCompany(branchId, companyId);
+    const branch = await branchRepository.findBranchByIdAndCompany(
+      branchId,
+      companyId,
+    );
     if (!branch) {
       throw new ApiError(404, "Branch not found under this company");
     }
@@ -70,7 +73,7 @@ const getSuppliers = async (workspaceId, companyId, query = {}) => {
     workspaceId,
     companyId,
     filters,
-    { page, limit, sort }
+    { page, limit, sort },
   );
 
   return {
@@ -85,7 +88,7 @@ const getSupplierById = async (supplierId, companyId, workspaceId) => {
   const supplier = await supplierRepository.findSupplierByIdCompanyAndWorkspace(
     supplierId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!supplier) {
@@ -95,11 +98,17 @@ const getSupplierById = async (supplierId, companyId, workspaceId) => {
   return supplier.toSafeObject();
 };
 
-const updateSupplier = async (supplierId, companyId, workspaceId, userId, payload) => {
+const updateSupplier = async (
+  supplierId,
+  companyId,
+  workspaceId,
+  userId,
+  payload,
+) => {
   const supplier = await supplierRepository.findSupplierByIdCompanyAndWorkspace(
     supplierId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!supplier) {
@@ -107,14 +116,19 @@ const updateSupplier = async (supplierId, companyId, workspaceId, userId, payloa
   }
 
   if (payload.branchId) {
-    const branch = await branchRepository.findBranchByIdAndCompany(payload.branchId, companyId);
+    const branch = await branchRepository.findBranchByIdAndCompany(
+      payload.branchId,
+      companyId,
+    );
     if (!branch) {
       throw new ApiError(404, "Branch not found under this company");
     }
   }
 
   if (payload.supplierCode && payload.supplierCode !== supplier.supplierCode) {
-    const existing = await supplierRepository.findSupplierByCode(payload.supplierCode);
+    const existing = await supplierRepository.findSupplierByCode(
+      payload.supplierCode,
+    );
     if (existing && existing._id.toString() !== supplier._id.toString()) {
       throw new ApiError(400, "Supplier with this code already exists");
     }
@@ -156,7 +170,7 @@ const deleteSupplier = async (supplierId, companyId, workspaceId, userId) => {
     supplierId,
     companyId,
     workspaceId,
-    userId
+    userId,
   );
 
   if (!supplier) {
@@ -182,7 +196,8 @@ const getSupplierLedger = async (supplierId, companyId, workspaceId) => {
       description: "Opening Balance",
       voucherType: "OPENING_BALANCE",
       debit: supplier.openingBalanceType === "dr" ? supplier.openingBalance : 0,
-      credit: supplier.openingBalanceType === "cr" ? supplier.openingBalance : 0,
+      credit:
+        supplier.openingBalanceType === "cr" ? supplier.openingBalance : 0,
       balance: supplier.openingBalance,
       balanceType: supplier.openingBalanceType,
     });

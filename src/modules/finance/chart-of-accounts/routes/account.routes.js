@@ -1,9 +1,9 @@
 import { Router } from "express";
 
-import authMiddleware from "../../../../../middlewares/auth.middleware.js";
-import workspaceContextMiddleware from "../../../../../middlewares/workspaceContext.middleware.js";
-import companyContextMiddleware from "../../../../../middlewares/companyContext.middleware.js";
-import validate from "../../../../../middlewares/validate.middleware.js";
+import authMiddleware from "../../../../middlewares/auth.middleware.js";
+import workspaceContextMiddleware from "../../../../middlewares/workspaceContext.middleware.js";
+import companyContextMiddleware from "../../../../middlewares/companyContext.middleware.js";
+import validate from "../../../../middlewares/validate.middleware.js";
 
 import {
   createAccount,
@@ -30,13 +30,21 @@ router.use(companyContextMiddleware);
 // CRUD
 router.post("/", validate(createAccountSchema), createAccount);
 router.get("/", validate(getAccountsQuerySchema, "query"), getAccounts);
-router.get("/:accountId", validate(accountIdParamSchema, "params"), getAccountById);
+router.get(
+  "/:accountId",
+  validate(accountIdParamSchema, "params"),
+  getAccountById,
+);
 router.patch(
   "/:accountId",
   validate(accountIdParamSchema, "params"),
   validate(updateAccountSchema),
-  updateAccount
+  updateAccount,
 );
-router.delete("/:accountId", validate(accountIdParamSchema, "params"), deleteAccount);
+router.delete(
+  "/:accountId",
+  validate(accountIdParamSchema, "params"),
+  deleteAccount,
+);
 
 export default router;

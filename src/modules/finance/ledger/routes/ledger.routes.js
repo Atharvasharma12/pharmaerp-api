@@ -1,9 +1,9 @@
 import { Router } from "express";
 
-import authMiddleware from "../../../../../middlewares/auth.middleware.js";
-import workspaceContextMiddleware from "../../../../../middlewares/workspaceContext.middleware.js";
-import companyContextMiddleware from "../../../../../middlewares/companyContext.middleware.js";
-import validate from "../../../../../middlewares/validate.middleware.js";
+import authMiddleware from "../../../../middlewares/auth.middleware.js";
+import workspaceContextMiddleware from "../../../../middlewares/workspaceContext.middleware.js";
+import companyContextMiddleware from "../../../../middlewares/companyContext.middleware.js";
+import validate from "../../../../middlewares/validate.middleware.js";
 
 import {
   getLedger,
@@ -27,7 +27,7 @@ router.get("/", validate(getLedgerQuerySchema, "query"), getLedger);
 router.post(
   "/recalculate",
   validate(recalculateLedgerSchema),
-  recalculateLedger
+  recalculateLedger,
 );
 
 export default router;

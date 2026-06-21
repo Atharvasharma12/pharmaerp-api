@@ -1,9 +1,9 @@
 import { Router } from "express";
 
-import authMiddleware from "../../../../../middlewares/auth.middleware.js";
-import workspaceContextMiddleware from "../../../../../middlewares/workspaceContext.middleware.js";
-import companyContextMiddleware from "../../../../../middlewares/companyContext.middleware.js";
-import validate from "../../../../../middlewares/validate.middleware.js";
+import authMiddleware from "../../../../middlewares/auth.middleware.js";
+import workspaceContextMiddleware from "../../../../middlewares/workspaceContext.middleware.js";
+import companyContextMiddleware from "../../../../middlewares/companyContext.middleware.js";
+import validate from "../../../../middlewares/validate.middleware.js";
 
 import {
   createVoucher,
@@ -35,26 +35,26 @@ router.get("/", validate(getVouchersQuerySchema, "query"), getVouchers);
 router.get(
   "/:voucherId",
   validate(voucherIdParamSchema, "params"),
-  getVoucherById
+  getVoucherById,
 );
 
 router.patch(
   "/:voucherId",
   validate(voucherIdParamSchema, "params"),
   validate(updateVoucherSchema),
-  updateVoucher
+  updateVoucher,
 );
 
 router.post(
   "/:voucherId/post",
   validate(voucherIdParamSchema, "params"),
-  postVoucher
+  postVoucher,
 );
 
 router.post(
   "/:voucherId/cancel",
   validate(voucherIdParamSchema, "params"),
-  cancelVoucher
+  cancelVoucher,
 );
 
 export default router;

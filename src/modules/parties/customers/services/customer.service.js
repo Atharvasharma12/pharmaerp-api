@@ -1,6 +1,6 @@
 import ApiError from "../../../../utils/ApiError.js";
 import customerRepository from "../repositories/customer.repository.js";
-import branchRepository from "../../../../organization/branches/repositories/branch.repository.js";
+import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
@@ -26,7 +26,10 @@ const createCustomer = async (workspaceId, companyId, userId, payload) => {
   } = payload;
 
   if (branchId) {
-    const branch = await branchRepository.findBranchByIdAndCompany(branchId, companyId);
+    const branch = await branchRepository.findBranchByIdAndCompany(
+      branchId,
+      companyId,
+    );
     if (!branch) {
       throw new ApiError(404, "Branch not found under this company");
     }
@@ -72,7 +75,7 @@ const getCustomers = async (workspaceId, companyId, query = {}) => {
     workspaceId,
     companyId,
     filters,
-    { page, limit, sort }
+    { page, limit, sort },
   );
 
   return {
@@ -87,7 +90,7 @@ const getCustomerById = async (customerId, companyId, workspaceId) => {
   const customer = await customerRepository.findCustomerByIdCompanyAndWorkspace(
     customerId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!customer) {
@@ -97,11 +100,17 @@ const getCustomerById = async (customerId, companyId, workspaceId) => {
   return customer.toSafeObject();
 };
 
-const updateCustomer = async (customerId, companyId, workspaceId, userId, payload) => {
+const updateCustomer = async (
+  customerId,
+  companyId,
+  workspaceId,
+  userId,
+  payload,
+) => {
   const customer = await customerRepository.findCustomerByIdCompanyAndWorkspace(
     customerId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!customer) {
@@ -109,14 +118,19 @@ const updateCustomer = async (customerId, companyId, workspaceId, userId, payloa
   }
 
   if (payload.branchId) {
-    const branch = await branchRepository.findBranchByIdAndCompany(payload.branchId, companyId);
+    const branch = await branchRepository.findBranchByIdAndCompany(
+      payload.branchId,
+      companyId,
+    );
     if (!branch) {
       throw new ApiError(404, "Branch not found under this company");
     }
   }
 
   if (payload.customerCode && payload.customerCode !== customer.customerCode) {
-    const existing = await customerRepository.findCustomerByCode(payload.customerCode);
+    const existing = await customerRepository.findCustomerByCode(
+      payload.customerCode,
+    );
     if (existing && existing._id.toString() !== customer._id.toString()) {
       throw new ApiError(400, "Customer with this code already exists");
     }
@@ -159,7 +173,7 @@ const deleteCustomer = async (customerId, companyId, workspaceId, userId) => {
     customerId,
     companyId,
     workspaceId,
-    userId
+    userId,
   );
 
   if (!customer) {
@@ -185,7 +199,8 @@ const getCustomerLedger = async (customerId, companyId, workspaceId) => {
       description: "Opening Balance",
       voucherType: "OPENING_BALANCE",
       debit: customer.openingBalanceType === "dr" ? customer.openingBalance : 0,
-      credit: customer.openingBalanceType === "cr" ? customer.openingBalance : 0,
+      credit:
+        customer.openingBalanceType === "cr" ? customer.openingBalance : 0,
       balance: customer.openingBalance,
       balanceType: customer.openingBalanceType,
     });

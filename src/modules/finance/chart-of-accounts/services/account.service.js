@@ -3,8 +3,8 @@ import accountRepository from "../repositories/account.repository.js";
 import accountGroupRepository from "../repositories/accountGroup.repository.js";
 import { ACCOUNT_STATUS } from "../constants/account.constant.js";
 
-import Customer from "../../../../parties/customers/models/customer.model.js";
-import Supplier from "../../../../parties/suppliers/models/supplier.model.js";
+import Customer from "../../../parties/customers/models/customer.model.js";
+import Supplier from "../../../parties/suppliers/models/supplier.model.js";
 
 const createAccount = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -18,22 +18,34 @@ const createAccount = async (workspaceId, companyId, userId, payload) => {
   } = payload;
 
   // Check unique code
-  const existingCode = await accountRepository.findAccountByCode(companyId, accountCode);
+  const existingCode = await accountRepository.findAccountByCode(
+    companyId,
+    accountCode,
+  );
   if (existingCode) {
-    throw new ApiError(400, "Account with this code already exists in the company");
+    throw new ApiError(
+      400,
+      "Account with this code already exists in the company",
+    );
   }
 
   // Check unique name
-  const existingName = await accountRepository.findAccountByName(companyId, accountName);
+  const existingName = await accountRepository.findAccountByName(
+    companyId,
+    accountName,
+  );
   if (existingName) {
-    throw new ApiError(400, "Account with this name already exists in the company");
+    throw new ApiError(
+      400,
+      "Account with this name already exists in the company",
+    );
   }
 
   // Validate parent account group
   const group = await accountGroupRepository.findGroupByIdCompanyAndWorkspace(
     accountGroupId,
     companyId,
-    workspaceId
+    workspaceId,
   );
   if (!group) {
     throw new ApiError(404, "Account Group not found under this company");
@@ -66,7 +78,7 @@ const getAccounts = async (workspaceId, companyId, query = {}) => {
     workspaceId,
     companyId,
     filters,
-    { page, limit, sort, all: all === "true" || all === true }
+    { page, limit, sort, all: all === "true" || all === true },
   );
 
   return {
@@ -81,7 +93,7 @@ const getAccountById = async (accountId, companyId, workspaceId) => {
   const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
     accountId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!account) {
@@ -91,11 +103,17 @@ const getAccountById = async (accountId, companyId, workspaceId) => {
   return account.toSafeObject();
 };
 
-const updateAccount = async (accountId, companyId, workspaceId, userId, payload) => {
+const updateAccount = async (
+  accountId,
+  companyId,
+  workspaceId,
+  userId,
+  payload,
+) => {
   const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
     accountId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!account) {
@@ -108,9 +126,18 @@ const updateAccount = async (accountId, companyId, workspaceId, userId, payload)
 
   // Unique name check
   if (payload.accountName && payload.accountName !== account.accountName) {
-    const existingName = await accountRepository.findAccountByName(companyId, payload.accountName);
-    if (existingName && existingName._id.toString() !== account._id.toString()) {
-      throw new ApiError(400, "Account with this name already exists in the company");
+    const existingName = await accountRepository.findAccountByName(
+      companyId,
+      payload.accountName,
+    );
+    if (
+      existingName &&
+      existingName._id.toString() !== account._id.toString()
+    ) {
+      throw new ApiError(
+        400,
+        "Account with this name already exists in the company",
+      );
     }
   }
 
@@ -119,7 +146,7 @@ const updateAccount = async (accountId, companyId, workspaceId, userId, payload)
     const group = await accountGroupRepository.findGroupByIdCompanyAndWorkspace(
       payload.accountGroupId,
       companyId,
-      workspaceId
+      workspaceId,
     );
     if (!group) {
       throw new ApiError(404, "Account Group not found under this company");
@@ -150,7 +177,7 @@ const deleteAccount = async (accountId, companyId, workspaceId, userId) => {
   const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
     accountId,
     companyId,
-    workspaceId
+    workspaceId,
   );
 
   if (!account) {
@@ -169,7 +196,7 @@ const deleteAccount = async (accountId, companyId, workspaceId, userId) => {
   if (isLinkedToCustomer) {
     throw new ApiError(
       400,
-      "Cannot delete account because it is linked to an active customer ledger"
+      "Cannot delete account because it is linked to an active customer ledger",
     );
   }
 
@@ -181,11 +208,16 @@ const deleteAccount = async (accountId, companyId, workspaceId, userId) => {
   if (isLinkedToSupplier) {
     throw new ApiError(
       400,
-      "Cannot delete account because it is linked to an active supplier ledger"
+      "Cannot delete account because it is linked to an active supplier ledger",
     );
   }
 
-  await accountRepository.deleteAccountById(accountId, companyId, workspaceId, userId);
+  await accountRepository.deleteAccountById(
+    accountId,
+    companyId,
+    workspaceId,
+    userId,
+  );
 
   return { success: true };
 };
