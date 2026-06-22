@@ -4,7 +4,7 @@ import journalVoucherRepository from "../repositories/journalVoucher.repository.
 import journalLineRepository from "../repositories/journalLine.repository.js";
 import accountBalanceRepository from "../../account-balances/repositories/accountBalance.repository.js";
 import ledgerService from "../../ledger/services/ledger.service.js";
-import { JOURNAL_VOUCHER_STATUS } from "../constants/journalVoucher.constant.js";
+import { VOUCHER_STATUS } from "../constants/voucherStatus.constant.js";
 
 const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, options = {}) => {
   const session = options.session || (await mongoose.startSession());
@@ -26,11 +26,11 @@ const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, opt
       throw new ApiError(404, "Journal Voucher not found");
     }
 
-    if (voucher.status === JOURNAL_VOUCHER_STATUS.POSTED) {
+    if (voucher.status === VOUCHER_STATUS.POSTED) {
       throw new ApiError(400, "Journal Voucher is already posted");
     }
 
-    if (voucher.status === JOURNAL_VOUCHER_STATUS.CANCELLED) {
+    if (voucher.status === VOUCHER_STATUS.CANCELLED) {
       throw new ApiError(400, "Cancelled Journal Vouchers cannot be posted");
     }
 
@@ -74,7 +74,7 @@ const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, opt
       });
     }
 
-    voucher.status = JOURNAL_VOUCHER_STATUS.POSTED;
+    voucher.status = VOUCHER_STATUS.POSTED;
     voucher.postedAt = new Date();
     voucher.postedBy = userId;
     await voucher.save({ session });

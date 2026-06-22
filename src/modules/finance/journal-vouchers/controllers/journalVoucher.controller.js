@@ -78,3 +78,42 @@ export const cancelVoucher = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Journal Voucher cancelled successfully", voucher));
 });
+
+export const submitApproval = asyncHandler(async (req, res) => {
+  const voucher = await journalVoucherService.submitForApproval(
+    req.params.voucherId,
+    req.companyId,
+    req.workspaceId,
+    req.user._id
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Journal Voucher submitted for approval successfully", voucher));
+});
+
+export const approveVoucher = asyncHandler(async (req, res) => {
+  const voucher = await journalVoucherService.approveJournalVoucher(
+    req.params.voucherId,
+    req.companyId,
+    req.workspaceId,
+    req.user._id
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Journal Voucher approved successfully", voucher));
+});
+
+export const reverseVoucher = asyncHandler(async (req, res) => {
+  const voucher = await journalVoucherService.reverseJournalVoucher(
+    req.params.voucherId,
+    req.companyId,
+    req.workspaceId,
+    req.user._id
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Journal Voucher reversed successfully", voucher));
+});

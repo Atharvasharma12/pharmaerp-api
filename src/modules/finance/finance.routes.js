@@ -4,6 +4,8 @@ import accountBalanceModule from "./account-balances/accountBalance.module.js";
 import journalVoucherModule from "./journal-vouchers/journalVoucher.module.js";
 import ledgerModule from "./ledger/ledger.module.js";
 import financialPeriodModule from "./financial-periods/financialPeriod.module.js";
+import openingBalancesModule from "./opening-balances/openingBalances.module.js";
+import treasuryModule from "./treasury/treasury.module.js";
 
 const router = Router();
 
@@ -22,7 +24,14 @@ router.use(ledgerModule.path, ledgerModule.router);
 // Mount financial periods routes
 router.use(financialPeriodModule.path, financialPeriodModule.router);
 
+// Mount opening balances routes
+router.use(openingBalancesModule.path, openingBalancesModule.router);
+
+// Mount treasury routes
+router.use(treasuryModule.path, treasuryModule.router);
+
 export default router;
+
 
 
 

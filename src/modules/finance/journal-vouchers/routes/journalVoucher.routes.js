@@ -12,6 +12,9 @@ import {
   updateVoucher,
   postVoucher,
   cancelVoucher,
+  submitApproval,
+  approveVoucher,
+  reverseVoucher,
 } from "../controllers/journalVoucher.controller.js";
 
 import {
@@ -55,6 +58,24 @@ router.post(
   "/:voucherId/cancel",
   validate(voucherIdParamSchema, "params"),
   cancelVoucher,
+);
+
+router.post(
+  "/:voucherId/submit-approval",
+  validate(voucherIdParamSchema, "params"),
+  submitApproval,
+);
+
+router.post(
+  "/:voucherId/approve",
+  validate(voucherIdParamSchema, "params"),
+  approveVoucher,
+);
+
+router.post(
+  "/:voucherId/reverse",
+  validate(voucherIdParamSchema, "params"),
+  reverseVoucher,
 );
 
 export default router;

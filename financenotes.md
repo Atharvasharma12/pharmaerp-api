@@ -1,77 +1,93 @@
-# Finance & Accounting Module Architecture (Updated)
+# Finance & Treasury Module Architecture (Production Ready)
 
 ## Objective
 
-Build a scalable, double-entry accounting system that integrates with:
+Build a production-grade finance and treasury system for a multi-tenant Pharmacy ERP.
 
-- Customers
-- Suppliers
-- Inventory
-- Purchases
-- Sales
-- Payments
-- GST
-- Reports
-
-The Finance Module becomes the single source of truth for all financial transactions inside the ERP.
-
----
-
-# Core Accounting Philosophy
-
-Every financial transaction must generate accounting entries.
-
-Examples:
+The system must support:
 
 ```txt
-Purchase
-Sale
-Payment
-Receipt
-Expense
-Income
-Opening Balance
-Adjustment
+Customers
+Suppliers
+Inventory
+Purchases
+Sales
+POS Billing
+Cash Collection
+UPI Collection
+Banking
+GST
+Reports
 ```
 
-All accounting starts with Journal Vouchers.
+The Finance Module becomes the single source of truth for all accounting transactions.
 
 ---
 
-# Double Entry Accounting Rule
+# Core Principle
 
-Every transaction must satisfy:
+Separate:
 
 ```txt
-Total Debit
-=
-Total Credit
+Operational Money Movement
+
+FROM
+
+Accounting Entries
 ```
 
 Example:
 
-```txt
-Purchase ₹10,000
+Customer pays cash.
 
-Inventory A/c Dr      10,000
-    To Supplier A/c   10,000
+Operational Record:
+
+```txt
+Cash Register
+Cash Transaction
+Cash Count
 ```
+
+Accounting Record:
+
+```txt
+Cash A/c Dr
+    To Sales A/c Cr
+```
+
+Both are required.
 
 ---
 
-# Finance Module Structure
+# Architecture
 
 ```txt
-src/modules/finance/
-│
-├── finance.module.js
-├── finance.routes.js
+finance/
 │
 ├── chart-of-accounts/
-├── journal-vouchers/
-├── ledger/
+│
 ├── account-balances/
+│
 ├── financial-periods/
+│
+├── journal-vouchers/
+│
+├── ledger/
+│
+├── opening-balances/
+│
+├── treasury/
+│
+│   ├── bank-management/
+│   ├── cash-management/
+│   └── payment-management/
+│
+├── receipts/
+│
+├── payments/
+│
+├── contra-vouchers/
+│
 └── reports/
 ```
 
@@ -80,41 +96,36 @@ src/modules/finance/
 # Finance Processing Flow
 
 ```txt
-Transaction
-      ↓
+Business Transaction
+         ↓
+
+Operational Record
+         ↓
+
 Journal Voucher
-      ↓
+         ↓
+
 Journal Lines
-      ↓
-Ledger Entries
-      ↓
-Account Balance Update
-      ↓
+         ↓
+
+Ledger
+         ↓
+
+Account Balance
+         ↓
+
 Reports
 ```
 
 ---
 
-# Module Build Order
+# PHASE 1
 
-```txt
-1. Account Groups
-2. Accounts
-3. Account Balances
-4. Journal Vouchers
-5. Journal Lines
-6. Ledger
-7. Financial Periods
-8. Reports
-```
-
----
-
-# 1. Chart Of Accounts
+# Chart Of Accounts
 
 Purpose:
 
-Store accounting hierarchy and accounts.
+Store accounting hierarchy.
 
 ---
 
@@ -123,35 +134,9 @@ Store accounting hierarchy and accounts.
 ```txt
 chart-of-accounts/
 │
-├── chartOfAccounts.module.js
+├── account-groups/
 │
-├── constants/
-│   ├── account.constant.js
-│   └── accountGroup.constant.js
-│
-├── controllers/
-│   ├── account.controller.js
-│   └── accountGroup.controller.js
-│
-├── models/
-│   ├── account.model.js
-│   └── accountGroup.model.js
-│
-├── repositories/
-│   ├── account.repository.js
-│   └── accountGroup.repository.js
-│
-├── routes/
-│   ├── account.routes.js
-│   └── accountGroup.routes.js
-│
-├── services/
-│   ├── account.service.js
-│   └── accountGroup.service.js
-│
-└── validations/
-    ├── account.validation.js
-    └── accountGroup.validation.js
+└── accounts/
 ```
 
 ---
@@ -182,7 +167,8 @@ Assets
 ├── Cash
 ├── Bank
 ├── Inventory
-└── Accounts Receivable
+├── Accounts Receivable
+└── GST Input
 ```
 
 ```txt
@@ -195,63 +181,126 @@ Liabilities
 
 ---
 
+# Accounts
+
+Examples:
+
+```txt
+Cash In Hand
+
+Main Cash Counter
+
+HDFC Current Account
+
+ICICI Current Account
+
+Inventory Account
+
+Sales Account
+
+Purchase Account
+
+Input GST
+
+Output GST
+
+Customer Accounts
+
+Supplier Accounts
+```
+
+---
+
 # Account Categories
 
 ```txt
 CUSTOMER
-
 SUPPLIER
-
 BANK
-
 CASH
-
 INVENTORY
-
 PURCHASE
-
 SALES
-
 GST
-
 EXPENSE
-
 INCOME
-
 FIXED_ASSET
-
 LIABILITY
-
 EQUITY
 ```
 
 ---
 
-# Customer & Supplier Integration
+# Customer Integration
 
 Customer Created
 
 ```txt
 Customer
       ↓
-Create Account
+Account Creation
       ↓
-Link ledgerAccountId
+ledgerAccountId
 ```
+
+---
+
+# Supplier Integration
 
 Supplier Created
 
 ```txt
 Supplier
       ↓
-Create Account
+Account Creation
       ↓
-Link ledgerAccountId
+ledgerAccountId
 ```
 
 ---
 
-# 2. Account Balances
+# PHASE 2
+
+# Financial Periods
+
+Purpose:
+
+Control accounting periods.
+
+---
+
+## Model
+
+```js
+{
+  (periodCode, periodType, startDate, endDate, status, isCurrent);
+}
+```
+
+---
+
+# Period Types
+
+```txt
+YEAR
+QUARTER
+MONTH
+ADJUSTMENT
+```
+
+---
+
+# Status
+
+```txt
+OPEN
+CLOSED
+LOCKED
+```
+
+---
+
+# Account Balances
 
 Purpose:
 
@@ -259,35 +308,7 @@ Fast balance lookup.
 
 ---
 
-# Why Needed
-
-Suppose:
-
-```txt
-5000 Customers
-
-10,00,000 Ledger Entries
-```
-
-Customer List:
-
-```txt
-Customer Name
-Balance
-Credit Limit
-```
-
-Calculating balance from Ledger every page load is expensive.
-
----
-
-# Solution
-
-Maintain Account Balance Summary.
-
----
-
-## accountBalance.model.js
+## Model
 
 ```js
 {
@@ -297,120 +318,33 @@ Maintain Account Balance Summary.
 
 ---
 
-# Example
+# Formula
 
 ```txt
-Debit Total = 100000
+Balance
 
-Credit Total = 40000
+=
 
-Balance = 60000 DR
+Debit Total
+
+-
+
+Credit Total
 ```
 
 ---
 
-# Important Rule
+# PHASE 3
 
-These are cumulative totals.
-
-```txt
-debitTotal
-only increases
-
-creditTotal
-only increases
-```
-
-Balance is recalculated.
-
-Formula:
-
-```txt
-balance = debitTotal - creditTotal
-```
-
----
-
-# 3. Journal Vouchers
+# Journal Vouchers
 
 Purpose:
 
 Store accounting transactions.
 
-Every accounting entry starts here.
-
 ---
 
-## Structure
-
-```txt
-journal-vouchers/
-│
-├── journalVoucher.module.js
-│
-├── constants/
-│   └── journalVoucher.constant.js
-│
-├── controllers/
-│   └── journalVoucher.controller.js
-│
-├── models/
-│   ├── journalVoucher.model.js
-│   └── journalLine.model.js
-│
-├── repositories/
-│   ├── journalVoucher.repository.js
-│   └── journalLine.repository.js
-│
-├── routes/
-│   └── journalVoucher.routes.js
-│
-├── services/
-│   ├── journalVoucher.service.js
-│   ├── journalPosting.service.js
-│   ├── journalValidation.service.js
-│   ├── journalNumber.service.js
-│   └── openingBalance.service.js
-│
-├── validations/
-│   └── journalVoucher.validation.js
-│
-└── helpers/
-    ├── calculateJournalTotals.js
-    ├── validateDebitCreditBalance.js
-    └── buildJournalReference.js
-```
-
----
-
-# Journal Voucher
-
-Stores voucher header.
-
-Example:
-
-```txt
-JV000001
-```
-
-Fields:
-
-```js
-{
-  (voucherNumber,
-    voucherDate,
-    voucherType,
-    referenceNumber,
-    narration,
-    totalDebit,
-    totalCredit,
-    status);
-}
-```
-
----
-
-# Voucher Types
+## Voucher Types
 
 ```txt
 PURCHASE
@@ -434,20 +368,24 @@ OPENING_BALANCE
 
 ---
 
-# Journal Lines
+## Journal Voucher
 
-Stores debit and credit entries.
-
-Example:
-
-```txt
-Sale ₹10,000
-
-Customer A/c Dr 10,000
-Sales A/c Cr    10,000
+```js
+{
+  (voucherNumber,
+    voucherDate,
+    voucherType,
+    referenceNumber,
+    narration,
+    totalDebit,
+    totalCredit,
+    status);
+}
 ```
 
-Stored as:
+---
+
+# Journal Lines
 
 ```js
 {
@@ -457,68 +395,19 @@ Stored as:
 
 ---
 
-# Journal Validation
-
-Responsible for:
+# Double Entry Rule
 
 ```txt
-Debit = Credit
+Total Debit
 
-Account Exists
+=
 
-Period Open
-
-Voucher Date Valid
-```
-
-Reject invalid vouchers.
-
----
-
-# Journal Posting
-
-Most important finance service.
-
-Flow:
-
-```txt
-Journal Voucher
-       ↓
-Post
-       ↓
-Create Ledger Entries
-       ↓
-Update Account Balances
+Total Credit
 ```
 
 ---
 
-# Opening Balance Service
-
-Used for:
-
-```txt
-Customer Opening Balance
-
-Supplier Opening Balance
-
-Account Opening Balance
-```
-
-Example:
-
-```txt
-ABC Medical
-
-Opening Balance
-50,000 DR
-```
-
-Creates Opening Balance Journal.
-
----
-
-# 4. Ledger Module
+# Ledger
 
 Purpose:
 
@@ -526,34 +415,7 @@ Permanent accounting history.
 
 ---
 
-## Structure
-
-```txt
-ledger/
-│
-├── ledger.module.js
-│
-├── controllers/
-│   └── ledger.controller.js
-│
-├── models/
-│   └── ledger.model.js
-│
-├── repositories/
-│   └── ledger.repository.js
-│
-├── routes/
-│   └── ledger.routes.js
-│
-├── services/
-│   └── ledger.service.js
-│
-└── validations/
-```
-
----
-
-## ledger.model.js
+## Model
 
 ```js
 {
@@ -570,110 +432,511 @@ ledger/
 
 ---
 
-# Example
+# Opening Balances
+
+Purpose:
+
+ERP onboarding.
+
+Examples:
 
 ```txt
-ABC Medical
+Opening Cash
 
-Sale
-Dr 10,000
+Opening Bank
 
-Receipt
-Cr 4,000
+Opening Customer Balance
 
-Balance 6,000
+Opening Supplier Balance
+
+Opening Inventory Value
+```
+
+Implemented through:
+
+```txt
+Voucher Type
+
+OPENING_BALANCE
 ```
 
 ---
 
-# 5. Financial Periods
+# PHASE 4
+
+# Treasury Management
 
 Purpose:
 
-Manage accounting years.
+Manage actual movement of money.
+
+---
+
+# Structure
+
+```txt
+treasury/
+│
+├── bank-management/
+│
+├── cash-management/
+│
+└── payment-management/
+```
+
+---
+
+# Bank Management
+
+Purpose:
+
+Manage bank accounts and deposits.
 
 ---
 
 ## Structure
 
 ```txt
-financial-periods/
+bank-management/
 │
-├── financialPeriod.module.js
+├── bank-accounts/
 │
-├── constants/
-│   └── financialPeriod.constant.js
+├── bank-transactions/
 │
-├── controllers/
-│   └── financialPeriod.controller.js
+├── bank-slips/
 │
-├── models/
-│   └── financialPeriod.model.js
+├── bank-deposits/
 │
-├── repositories/
-│   └── financialPeriod.repository.js
-│
-├── routes/
-│   └── financialPeriod.routes.js
-│
-├── services/
-│   └── financialPeriod.service.js
-│
-└── validations/
-    └── financialPeriod.validation.js
+└── bank-reconciliation/
 ```
 
 ---
 
-# Why Financial Periods Instead Of Financial Years
+# Bank Accounts
 
-Supports future:
-
-```txt
-YEAR
-
-QUARTER
-
-MONTH
-
-ADJUSTMENT PERIOD
-```
-
-Current ERP can use:
+Examples:
 
 ```txt
-periodType = YEAR
-```
+HDFC Current Account
 
-only.
+ICICI Current Account
+
+SBI Current Account
+```
 
 ---
 
-# Financial Period Model
+## Model
 
 ```js
 {
-  (periodCode, periodType, startDate, endDate, isCurrent, status);
+  (bankName,
+    accountName,
+    accountNumber,
+    ifscCode,
+    accountType,
+    ledgerAccountId,
+    isPrimary);
 }
 ```
 
 ---
 
-# Status
+# Bank Transactions
+
+Purpose:
+
+Store operational bank activity.
+
+Examples:
 
 ```txt
-OPEN
+NEFT
 
-CLOSED
+RTGS
 
-LOCKED
+IMPS
+
+Cheque
+
+UPI Settlement
+
+Bank Charges
+
+Interest
 ```
 
 ---
 
-# 6. Reports
+# Bank Slips
 
-Generated from:
+Purpose:
+
+Cash packing for bank deposits.
+
+Example:
+
+```txt
+500 x 20
+
+100 x 5
+
+50 x 2
+```
+
+---
+
+# Bank Reconciliation
+
+Purpose:
+
+Match:
+
+```txt
+Bank Statement
+
+vs
+
+ERP Ledger
+```
+
+---
+
+# Cash Management
+
+Purpose:
+
+Manage physical cash.
+
+---
+
+## Structure
+
+```txt
+cash-management/
+│
+├── cash-registers/
+│
+├── cash-balances/
+│
+├── cash-transactions/
+│
+├── denomination-counts/
+│
+├── day-closing/
+│
+└── shift-closing/
+```
+
+---
+
+# Cash Registers
+
+Examples:
+
+```txt
+Main Counter
+
+Counter 1
+
+Counter 2
+
+Wholesale Counter
+```
+
+---
+
+# Cash Balance
+
+Purpose:
+
+Store denomination balances.
+
+Examples:
+
+```txt
+500 x 20
+
+100 x 10
+
+50 x 5
+```
+
+---
+
+# Cash Transactions
+
+Examples:
+
+```txt
+Cash Sale
+
+Cash Refund
+
+Cash Adjustment
+
+Cash Transfer
+
+Cash Deposit
+```
+
+---
+
+# Denomination Counts
+
+Purpose:
+
+Store exact note counts.
+
+Examples:
+
+```txt
+₹500 × 20
+
+₹200 × 10
+
+₹100 × 15
+```
+
+---
+
+# Day Closing
+
+Purpose:
+
+Verify:
+
+```txt
+Expected Cash
+
+vs
+
+Actual Cash
+```
+
+---
+
+# Shift Closing
+
+Purpose:
+
+Cashier-wise closing.
+
+Examples:
+
+```txt
+Morning Shift
+
+Evening Shift
+```
+
+---
+
+# Payment Management
+
+Purpose:
+
+Manage UPI and digital collections.
+
+---
+
+## Structure
+
+```txt
+payment-management/
+│
+├── payment-methods/
+│
+├── qr-codes/
+│
+├── payment-collections/
+│
+├── settlements/
+│
+└── payment-reconciliation/
+```
+
+---
+
+# Payment Methods
+
+Examples:
+
+```txt
+Cash
+
+UPI
+
+Card
+
+Cheque
+
+Bank Transfer
+```
+
+---
+
+# QR Codes
+
+Examples:
+
+```txt
+Main Counter QR
+
+Wholesale QR
+
+Counter 2 QR
+```
+
+---
+
+# Payment Collections
+
+Purpose:
+
+Store:
+
+```txt
+UPI Collections
+
+Card Collections
+
+Wallet Collections
+```
+
+---
+
+# Settlements
+
+Purpose:
+
+Track:
+
+```txt
+Collected
+
+Settled
+
+Pending Settlement
+```
+
+---
+
+# Reconciliation
+
+Purpose:
+
+Match:
+
+```txt
+Provider Settlement
+
+vs
+
+ERP Collection
+```
+
+---
+
+# PHASE 5
+
+# Receipts
+
+Purpose:
+
+Customer collections.
+
+---
+
+# Example
+
+```txt
+Bank A/c Dr
+
+     To Customer A/c Cr
+```
+
+---
+
+# Payment Modes
+
+```txt
+Cash
+
+UPI
+
+Card
+
+Bank Transfer
+```
+
+---
+
+# PHASE 6
+
+# Payments
+
+Purpose:
+
+Supplier payments.
+
+---
+
+# Example
+
+```txt
+Supplier A/c Dr
+
+     To Bank A/c Cr
+```
+
+---
+
+# PHASE 7
+
+# Contra Vouchers
+
+Purpose:
+
+Money transfer between cash and banks.
+
+---
+
+# Cash Deposit
+
+```txt
+Bank A/c Dr
+
+     To Cash A/c Cr
+```
+
+---
+
+# Cash Withdrawal
+
+```txt
+Cash A/c Dr
+
+     To Bank A/c Cr
+```
+
+---
+
+# Bank Transfer
+
+```txt
+ICICI Bank Dr
+
+     To HDFC Bank Cr
+```
+
+---
+
+# PHASE 8
+
+# Reports
+
+Generated From:
 
 ```txt
 Ledger
@@ -683,7 +946,7 @@ Account Balances
 
 ---
 
-# Reports
+# Financial Reports
 
 ```txt
 Trial Balance
@@ -694,15 +957,41 @@ Balance Sheet
 
 General Ledger
 
+Cash Book
+
+Bank Book
+```
+
+---
+
+# Party Reports
+
+```txt
 Customer Ledger
 
 Supplier Ledger
 
-Cash Book
+Outstanding Receivables
 
-Bank Book
+Outstanding Payables
+```
 
-GST Reports
+---
+
+# Treasury Reports
+
+```txt
+Cash Register Report
+
+Cash Closing Report
+
+Bank Deposit Report
+
+Bank Reconciliation Report
+
+UPI Collection Report
+
+Settlement Report
 ```
 
 ---
@@ -713,13 +1002,16 @@ GST Reports
 Purchase
       ↓
 Inventory A/c Dr
-      ↓
+
 Supplier A/c Cr
       ↓
+
 Journal Voucher
       ↓
+
 Ledger
       ↓
+
 Account Balance
 ```
 
@@ -731,26 +1023,17 @@ Account Balance
 Sale
       ↓
 Customer A/c Dr
-      ↓
+
 Sales A/c Cr
       ↓
+
 Journal Voucher
       ↓
+
 Ledger
       ↓
+
 Account Balance
-```
-
----
-
-# Payment Flow
-
-```txt
-Supplier Payment
-
-Supplier A/c Dr
-      ↓
-Bank A/c Cr
 ```
 
 ---
@@ -759,10 +1042,82 @@ Bank A/c Cr
 
 ```txt
 Customer Receipt
+      ↓
 
 Bank A/c Dr
-      ↓
+
 Customer A/c Cr
+      ↓
+
+Journal Voucher
+      ↓
+
+Ledger
+```
+
+---
+
+# Payment Flow
+
+```txt
+Supplier Payment
+      ↓
+
+Supplier A/c Dr
+
+Bank A/c Cr
+      ↓
+
+Journal Voucher
+      ↓
+
+Ledger
+```
+
+---
+
+# UPI Collection Flow
+
+```txt
+Customer Payment
+      ↓
+
+QR Scan
+      ↓
+
+Payment Collection
+      ↓
+
+Receipt Voucher
+      ↓
+
+Journal Voucher
+      ↓
+
+Ledger
+```
+
+---
+
+# Cash Deposit Flow
+
+```txt
+Cash Register
+      ↓
+
+Bank Slip
+      ↓
+
+Bank Deposit
+      ↓
+
+Contra Voucher
+      ↓
+
+Journal Voucher
+      ↓
+
+Ledger
 ```
 
 ---
@@ -772,39 +1127,40 @@ Customer A/c Cr
 ```txt
 Chart Of Accounts
         ↓
+
 Journal Voucher
         ↓
+
 Journal Lines
         ↓
+
 Ledger
         ↓
+
 Account Balance
         ↓
+
 Reports
 ```
 
-And:
+Treasury Layer:
 
 ```txt
-Customer
-     ↓
-Account
+Cash Register
+Bank Account
+QR Collection
+Bank Deposit
+Settlement
+```
 
-Supplier
-     ↓
-Account
+Accounting Layer:
 
-Journal
-     ↓
+```txt
+Journal Voucher
+Journal Lines
 Ledger
-
-Ledger
-     ↓
 Account Balance
-
-Account Balance
-     ↓
 Reports
 ```
 
-This architecture is scalable, ERP-ready, multi-company ready, pharmacy ERP ready, and follows the same accounting lifecycle used by Tally, Busy, Zoho Books, QuickBooks, SAP Business One, and Oracle NetSuite.
+This architecture is fully production-ready, multi-workspace, multi-company, multi-branch, pharmacy ERP ready, and follows the accounting and treasury separation used by SAP Business One, Oracle NetSuite, Microsoft Dynamics 365, Zoho Books, Tally Prime Enterprise, and modern retail POS systems.

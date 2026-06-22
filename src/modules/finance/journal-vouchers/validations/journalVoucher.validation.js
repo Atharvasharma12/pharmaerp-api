@@ -1,8 +1,6 @@
 import Joi from "joi";
-import {
-  JOURNAL_VOUCHER_TYPE,
-  JOURNAL_VOUCHER_STATUS,
-} from "../constants/journalVoucher.constant.js";
+import { VOUCHER_TYPE } from "../constants/voucherType.constant.js";
+import { VOUCHER_STATUS } from "../constants/voucherStatus.constant.js";
 
 const objectId = Joi.string()
   .trim()
@@ -21,13 +19,13 @@ const lineItemSchema = Joi.object({
 export const createVoucherSchema = Joi.object({
   voucherDate: Joi.date().iso().required(),
   voucherType: Joi.string()
-    .valid(...Object.values(JOURNAL_VOUCHER_TYPE))
+    .valid(...Object.values(VOUCHER_TYPE))
     .required(),
   referenceNumber: Joi.string().trim().max(100).allow(null, "").optional(),
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
   status: Joi.string()
-    .valid(JOURNAL_VOUCHER_STATUS.DRAFT, JOURNAL_VOUCHER_STATUS.POSTED)
-    .default(JOURNAL_VOUCHER_STATUS.DRAFT)
+    .valid(VOUCHER_STATUS.DRAFT, VOUCHER_STATUS.POSTED)
+    .default(VOUCHER_STATUS.DRAFT)
     .optional(),
   lines: Joi.array().items(lineItemSchema).min(2).required(),
 });
@@ -37,7 +35,7 @@ export const updateVoucherSchema = Joi.object({
   referenceNumber: Joi.string().trim().max(100).allow(null, "").optional(),
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
   status: Joi.string()
-    .valid(JOURNAL_VOUCHER_STATUS.DRAFT, JOURNAL_VOUCHER_STATUS.POSTED)
+    .valid(VOUCHER_STATUS.DRAFT, VOUCHER_STATUS.POSTED)
     .optional(),
   lines: Joi.array().items(lineItemSchema).min(2).optional(),
 }).min(1);
@@ -49,10 +47,10 @@ export const voucherIdParamSchema = Joi.object({
 export const getVouchersQuerySchema = Joi.object({
   search: Joi.string().trim().allow("").optional(),
   voucherType: Joi.string()
-    .valid(...Object.values(JOURNAL_VOUCHER_TYPE))
+    .valid(...Object.values(VOUCHER_TYPE))
     .optional(),
   status: Joi.string()
-    .valid(...Object.values(JOURNAL_VOUCHER_STATUS))
+    .valid(...Object.values(VOUCHER_STATUS))
     .optional(),
   startDate: Joi.date().iso().optional(),
   endDate: Joi.date().iso().optional(),

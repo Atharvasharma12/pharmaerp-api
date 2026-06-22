@@ -1,9 +1,7 @@
 import mongoose from "mongoose";
 
-import {
-  JOURNAL_VOUCHER_TYPE,
-  JOURNAL_VOUCHER_STATUS,
-} from "../constants/journalVoucher.constant.js";
+import { VOUCHER_TYPE } from "../constants/voucherType.constant.js";
+import { VOUCHER_STATUS } from "../constants/voucherStatus.constant.js";
 
 const journalVoucherSchema = new mongoose.Schema(
   {
@@ -34,7 +32,7 @@ const journalVoucherSchema = new mongoose.Schema(
 
     voucherType: {
       type: String,
-      enum: Object.values(JOURNAL_VOUCHER_TYPE),
+      enum: Object.values(VOUCHER_TYPE),
       required: [true, "Voucher type is required"],
       index: true,
     },
@@ -63,8 +61,8 @@ const journalVoucherSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: Object.values(JOURNAL_VOUCHER_STATUS),
-      default: JOURNAL_VOUCHER_STATUS.DRAFT,
+      enum: Object.values(VOUCHER_STATUS),
+      default: VOUCHER_STATUS.DRAFT,
       index: true,
     },
 

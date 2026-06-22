@@ -7,6 +7,7 @@ import uomMasterRoutes from "./uom-master/routes/uomMaster.routes.js";
 import categoryMasterRoutes from "./category-master/routes/categoryMaster.routes.js";
 import productFormMasterRoutes from "./product-form-master/routes/productFormMaster.routes.js";
 import saltMasterRoutes from "./salt-master/routes/saltMaster.routes.js";
+import bankMasterRoutes from "./bank-master/routes/bankMaster.routes.js";
 
 const router = Router();
 
@@ -17,5 +18,6 @@ router.use("/uom-master", uomMasterRoutes);
 router.use("/category-master", categoryMasterRoutes);
 router.use("/product-form-master", productFormMasterRoutes);
 router.use("/salt-master", saltMasterRoutes);
+router.use("/bank-master", bankMasterRoutes);
 
 export default router;

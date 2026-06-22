@@ -2,15 +2,18 @@ import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import journalVoucherRepository from "../repositories/journalVoucher.repository.js";
 import journalLineRepository from "../repositories/journalLine.repository.js";
-import journalNumberService from "./journalNumber.service.js";
+import voucherNumberService from "./voucherNumber.service.js";
 import journalValidationService from "./journalValidation.service.js";
 import journalPostingService from "./journalPosting.service.js";
+import journalCancellationService from "./journalCancellation.service.js";
+import journalApprovalService from "./journalApproval.service.js";
+import journalReversalService from "./journalReversal.service.js";
 import { calculateJournalTotals } from "../helpers/calculateJournalTotals.js";
 import { buildJournalReference } from "../helpers/buildJournalReference.js";
-import {
-  JOURNAL_VOUCHER_STATUS,
-  JOURNAL_VOUCHER_TYPE,
-} from "../constants/journalVoucher.constant.js";
+import { normalizeJournalLines } from "../helpers/normalizeJournalLines.js";
+import { validateVoucherDate } from "../helpers/validateVoucherDate.js";
+import { VOUCHER_TYPE } from "../constants/voucherType.constant.js";
+import { VOUCHER_STATUS } from "../constants/voucherStatus.constant.js";
 
 const createJournalVoucher = async (workspaceId, companyId, userId, payload) => {
   const { lines, voucherDate, voucherType, referenceNumber, narration, status } =
@@ -20,37 +23,44 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload) => 
   session.startTransaction();
 
   try {
-    // 1. Validate lines
+    // 1. Normalize and round line amounts
+    const normalizedLines = normalizeJournalLines(lines);
+
+    // 2. Validate voucher date
+    const parsedDate = validateVoucherDate(voucherDate);
+
+    // 3. Validate lines
     await journalValidationService.validateJournalLines(
       companyId,
       workspaceId,
-      lines,
-      voucherDate
+      normalizedLines,
+      parsedDate
     );
 
-    // 2. Generate sequential number
-    const voucherNumber = await journalNumberService.generateVoucherNumber(
+    // 4. Generate sequential voucher number atomically
+    const voucherNumber = await voucherNumberService.generateVoucherNumber(
       companyId,
+      workspaceId,
       voucherType,
       { session }
     );
 
-    // 3. Compute totals and reference
-    const { totalDebit, totalCredit } = calculateJournalTotals(lines);
+    // 5. Compute totals and reference
+    const { totalDebit, totalCredit } = calculateJournalTotals(normalizedLines);
     const refNum = buildJournalReference(voucherType, referenceNumber);
 
-    // 4. Create voucher header
+    // 6. Create voucher header
     const voucherPayload = {
       workspaceId,
       companyId,
       voucherNumber,
-      voucherDate: new Date(voucherDate),
+      voucherDate: parsedDate,
       voucherType,
       referenceNumber: refNum,
       narration: narration || null,
       totalDebit,
       totalCredit,
-      status: JOURNAL_VOUCHER_STATUS.DRAFT, // Always created as DRAFT first
+      status: VOUCHER_STATUS.DRAFT, // Always created as DRAFT
       createdBy: userId,
     };
 
@@ -58,14 +68,14 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload) => 
       session,
     });
 
-    // 5. Create lines
-    const linesPayload = lines.map((line) => ({
+    // 7. Create lines
+    const linesPayload = normalizedLines.map((line) => ({
       workspaceId,
       companyId,
       voucherId: voucher._id,
       accountId: line.accountId,
-      debit: Number(line.debit) || 0,
-      credit: Number(line.credit) || 0,
+      debit: line.debit,
+      credit: line.credit,
       narration: line.narration || null,
     }));
 
@@ -73,8 +83,8 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload) => 
       session,
     });
 
-    // 6. Post immediately if requested
-    if (status === JOURNAL_VOUCHER_STATUS.POSTED) {
+    // 8. Post immediately if requested
+    if (status === VOUCHER_STATUS.POSTED) {
       await journalPostingService.postJournalVoucher(
         voucher._id,
         companyId,
@@ -82,7 +92,7 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload) => 
         userId,
         { session }
       );
-      voucher.status = JOURNAL_VOUCHER_STATUS.POSTED;
+      voucher.status = VOUCHER_STATUS.POSTED;
     }
 
     await session.commitTransaction();
@@ -156,40 +166,45 @@ const updateJournalVoucher = async (
     }
 
     if (
-      voucher.status === JOURNAL_VOUCHER_STATUS.POSTED ||
-      voucher.status === JOURNAL_VOUCHER_STATUS.CANCELLED
+      voucher.status === VOUCHER_STATUS.POSTED ||
+      voucher.status === VOUCHER_STATUS.CANCELLED ||
+      voucher.status === VOUCHER_STATUS.REVERSED
     ) {
       throw new ApiError(
         400,
-        "Posted or Cancelled vouchers cannot be modified"
+        "Posted, Cancelled, or Reversed vouchers cannot be modified"
       );
     }
 
     const { lines, voucherDate, referenceNumber, narration, status } = payload;
 
+    const parsedDate = voucherDate ? validateVoucherDate(voucherDate) : voucher.voucherDate;
+
     // Update lines if provided
     if (lines) {
+      const normalizedLines = normalizeJournalLines(lines);
+
       await journalValidationService.validateJournalLines(
         companyId,
         workspaceId,
-        lines,
-        voucherDate || voucher.voucherDate
+        normalizedLines,
+        parsedDate
       );
 
-      const { totalDebit, totalCredit } = calculateJournalTotals(lines);
+      const { totalDebit, totalCredit } = calculateJournalTotals(normalizedLines);
       voucher.totalDebit = totalDebit;
       voucher.totalCredit = totalCredit;
 
       // Delete existing lines and re-insert
       await journalLineRepository.deleteLinesByVoucherId(voucherId, { session });
 
-      const linesPayload = lines.map((line) => ({
+      const linesPayload = normalizedLines.map((line) => ({
         workspaceId,
         companyId,
         voucherId,
         accountId: line.accountId,
-        debit: Number(line.debit) || 0,
-        credit: Number(line.credit) || 0,
+        debit: line.debit,
+        credit: line.credit,
         narration: line.narration || null,
       }));
 
@@ -197,7 +212,7 @@ const updateJournalVoucher = async (
     }
 
     if (voucherDate) {
-      voucher.voucherDate = new Date(voucherDate);
+      voucher.voucherDate = parsedDate;
     }
 
     if (referenceNumber !== undefined) {
@@ -211,7 +226,7 @@ const updateJournalVoucher = async (
     await voucher.save({ session });
 
     // Handle posting if requested
-    if (status === JOURNAL_VOUCHER_STATUS.POSTED) {
+    if (status === VOUCHER_STATUS.POSTED) {
       await journalPostingService.postJournalVoucher(
         voucherId,
         companyId,
@@ -219,7 +234,7 @@ const updateJournalVoucher = async (
         userId,
         { session }
       );
-      voucher.status = JOURNAL_VOUCHER_STATUS.POSTED;
+      voucher.status = VOUCHER_STATUS.POSTED;
     }
 
     await session.commitTransaction();
@@ -249,52 +264,39 @@ const cancelJournalVoucher = async (
   workspaceId,
   userId
 ) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  return journalCancellationService.cancelJournalVoucher(
+    voucherId,
+    companyId,
+    workspaceId,
+    userId
+  );
+};
 
-  try {
-    const voucher = await journalVoucherRepository.findVoucherByIdCompanyAndWorkspace(
-      voucherId,
-      companyId,
-      workspaceId,
-      { session }
-    );
+const submitForApproval = async (voucherId, companyId, workspaceId, userId) => {
+  return journalApprovalService.submitForApproval(
+    voucherId,
+    companyId,
+    workspaceId,
+    userId
+  );
+};
 
-    if (!voucher) {
-      throw new ApiError(404, "Journal Voucher not found");
-    }
+const approveJournalVoucher = async (voucherId, companyId, workspaceId, userId) => {
+  return journalApprovalService.approveJournalVoucher(
+    voucherId,
+    companyId,
+    workspaceId,
+    userId
+  );
+};
 
-    if (voucher.status === JOURNAL_VOUCHER_STATUS.CANCELLED) {
-      throw new ApiError(400, "Voucher is already cancelled");
-    }
-
-    if (voucher.status === JOURNAL_VOUCHER_STATUS.POSTED) {
-      const lines = await journalLineRepository.findLinesByVoucherId(voucherId, {
-        session,
-      });
-
-      // Reverse account balances
-      await journalPostingService.reverseJournalVoucherBalances(
-        voucher,
-        lines,
-        companyId,
-        workspaceId,
-        { session }
-      );
-    }
-
-    voucher.status = JOURNAL_VOUCHER_STATUS.CANCELLED;
-    await voucher.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return getJournalVoucherById(voucherId, companyId, workspaceId);
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
-  }
+const reverseJournalVoucher = async (voucherId, companyId, workspaceId, userId) => {
+  return journalReversalService.reverseJournalVoucher(
+    voucherId,
+    companyId,
+    workspaceId,
+    userId
+  );
 };
 
 export default {
@@ -304,4 +306,7 @@ export default {
   updateJournalVoucher,
   postJournalVoucher,
   cancelJournalVoucher,
+  submitForApproval,
+  approveJournalVoucher,
+  reverseJournalVoucher,
 };

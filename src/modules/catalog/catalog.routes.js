@@ -8,6 +8,7 @@ import catalogUomMasterModule from "./uom-master/catalogUomMaster.module.js";
 import catalogCategoryMasterModule from "./category-master/catalogCategoryMaster.module.js";
 import catalogProductFormMasterModule from "./product-form-master/catalogProductFormMaster.module.js";
 import catalogSaltMasterModule from "./salt-master/catalogSaltMaster.module.js";
+import catalogBankMasterModule from "./bank-master/catalogBankMaster.module.js";
 
 const router = Router();
 
@@ -50,5 +51,10 @@ router.use(catalogProductFormMasterModule.path, catalogProductFormMasterModule.r
 // /catalog/salt-master
 // ---------------------
 router.use(catalogSaltMasterModule.path, catalogSaltMasterModule.router);
+
+// ---------------------
+// /catalog/bank-master
+// ---------------------
+router.use(catalogBankMasterModule.path, catalogBankMasterModule.router);
 
 export default router;
