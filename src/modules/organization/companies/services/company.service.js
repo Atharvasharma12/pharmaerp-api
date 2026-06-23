@@ -1,7 +1,9 @@
+import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 
 import companyRepository from "../repositories/company.repository.js";
 import workspaceRepository from "../../workspaces/repositories/workspace.repository.js";
+import coaSeederService from "../../../finance/chart-of-accounts/services/coaSeeder.service.js";
 
 import { COMPANY_STATUS } from "../constants/company.constant.js";
 
@@ -83,24 +85,39 @@ const createCompany = async (workspaceId, userId, payload) => {
     }
   }
 
-  const company = await companyRepository.createCompany({
-    workspaceId,
-    name,
-    slug,
-    type,
-    logo,
-    email,
-    phones,
-    website,
-    address,
-    gstin,
-    pan,
-    owner,
-    license,
-    createdBy: userId,
-  });
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  return company.toSafeObject();
+  try {
+    const company = await companyRepository.createCompany({
+      workspaceId,
+      name,
+      slug,
+      type,
+      logo,
+      email,
+      phones,
+      website,
+      address,
+      gstin,
+      pan,
+      owner,
+      license,
+      createdBy: userId,
+    }, { session });
+
+    // Seed default Chart of Accounts groups and accounts for the new company
+    await coaSeederService.seedCompanyChartOfAccounts(workspaceId, company._id, userId, { session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return company.toSafeObject();
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
 };
 
 const getWorkspaceCompanies = async (workspaceId, userId) => {

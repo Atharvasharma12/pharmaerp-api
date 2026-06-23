@@ -69,7 +69,11 @@ const findCompanyByGstin = async (workspaceId, gstin, options = {}) => {
   }).select(options.select || "");
 };
 
-const createCompany = async (payload) => {
+const createCompany = async (payload, options = {}) => {
+  if (options.session) {
+    const [company] = await Company.create([payload], { session: options.session });
+    return company;
+  }
   return Company.create(payload);
 };
 
