@@ -1,646 +1,816 @@
-# PHASE 4 - Treasury Management
+# Treasury Management Module Architecture
 
-## Step 1 — Bank Accounts
+## Objective
 
-Module:
+Treasury Management is responsible for managing actual money movement inside the ERP.
 
-```txt
-finance/
-└── treasury/
-    └── bank-management/
-        └── bank-accounts/
-```
+Finance records accounting transactions.
 
-Purpose:
-
-```txt
-Create all company bank accounts.
-
-HDFC Current Account
-ICICI Current Account
-SBI Current Account
-```
-
-Important:
-
-Every bank account creates and links to:
-
-```txt
-Account
-    ↓
-ledgerAccountId
-```
-
-Example:
-
-```txt
-HDFC Current Account
-
-linked to
-
-Account:
-HDFC Current Account
-```
-
-Build:
-
-```txt
-Bank Account CRUD
-Primary Bank Account
-Activate / Deactivate
-Multiple Bank Accounts
-```
-
----
-
-## Step 2 — Payment Methods
-
-Module:
-
-```txt
-finance/
-└── treasury/
-    └── payment-management/
-        └── payment-methods/
-```
-
-Create master records:
+Treasury manages:
 
 ```txt
 Cash
+Bank
 UPI
-PhonePe
-Google Pay
-Paytm
-Card
-Cheque
-Bank Transfer
-```
-
-Build:
-
-```txt
-Payment Method CRUD
-Active/Inactive
-Default Payment Method
+Cheques
+Deposits
+Withdrawals
+Fund Transfers
+Cash Flow
 ```
 
 ---
 
-## Step 3 — QR Codes
-
-Module:
+# Finance vs Treasury
 
 ```txt
-finance/
-└── treasury/
-    └── payment-management/
-        └── qr-codes/
+Finance
+    ↓
+Accounting Records
+
+Treasury
+    ↓
+Money Movement
 ```
 
 Examples:
 
 ```txt
-Main Counter QR
+Sale
+    ↓
+Finance Entry
 
-Wholesale Counter QR
-
-Counter 2 QR
-```
-
-Relation:
-
-```txt
-QR Code
-     ↓
-Bank Account
-```
-
-Build:
-
-```txt
-QR CRUD
-Link QR to Bank Account
-Activate / Deactivate QR
+Customer Payment
+    ↓
+Treasury Movement
+    ↓
+Finance Entry
 ```
 
 ---
 
-## Step 4 — Cash Registers
-
-Module:
+# Treasury Module Structure
 
 ```txt
-finance/
-└── treasury/
-    └── cash-management/
-        └── cash-registers/
-```
-
-Examples:
-
-```txt
-Main Counter
-
-Counter 1
-
-Counter 2
-
-Wholesale Counter
-```
-
-Each Register linked to:
-
-```txt
-Cash Account
-```
-
-Example:
-
-```txt
-Main Counter Cash
-
-ledgerAccountId
-```
-
-Build:
-
-```txt
-Cash Register CRUD
-Opening Float
-Status
+src/modules/treasury/
+│
+├── treasury.module.js
+├── treasury.routes.js
+│
+├── bank-accounts/
+│
+├── cash-accounts/
+│
+├── fund-transfers/
+│
+├── bank-transactions/
+│
+├── cash-transactions/
+│
+├── cheque-management/
+│
+├── payment-qr/
+│
+├── bank-slips/
+│
+└── cash-denominations/
 ```
 
 ---
 
-## Step 5 — Cash Balances
-
-Module:
+# Treasury Processing Flow
 
 ```txt
-cash-balances/
-```
-
-Purpose:
-
-Track denomination-wise cash.
-
-Example:
-
-```txt
-500 × 20
-
-100 × 10
-
-50 × 5
-```
-
-Build:
-
-```txt
-Running Balance
-
-Reserved Balance
-
-Bank Deposit Balance
-```
-
----
-
-## Step 6 — Denomination Counts
-
-Module:
-
-```txt
-denomination-counts/
-```
-
-Purpose:
-
-Store exact notes.
-
-Example:
-
-```txt
-₹500 × 20
-
-₹200 × 15
-
-₹100 × 5
-```
-
-Used By:
-
-```txt
-Cash Collection
-
-Day Closing
-
-Bank Deposit
-```
-
----
-
-## Step 7 — Cash Transactions
-
-Module:
-
-```txt
-cash-transactions/
-```
-
-Examples:
-
-```txt
-Cash Sale
-
-Cash Refund
-
-Cash Adjustment
-
-Cash Transfer
-
-Cash Deposit
-```
-
-IMPORTANT:
-
-Creates:
-
-```txt
-Cash Transaction
-       +
+Cash / Bank Movement
+          ↓
+Treasury Transaction
+          ↓
 Journal Voucher
+          ↓
+Ledger
+          ↓
+Account Balance
 ```
 
-Never cash transaction alone.
+Treasury never bypasses Finance.
+
+All Treasury operations must generate accounting entries.
 
 ---
 
-## Step 8 — Payment Collections
-
-Module:
+# Module Build Order
 
 ```txt
-payment-collections/
-```
+1. Bank Accounts
+2. Cash Accounts
 
-Examples:
+3. Fund Transfers
 
-```txt
-UPI Collection
+4. Bank Transactions
+5. Cash Transactions
 
-Card Collection
+6. Payment QR
 
-Wallet Collection
-```
+7. Cheque Management
 
-Flow:
+8. Bank Slips
 
-```txt
-Payment Collection
-         ↓
-Receipt Voucher
-         ↓
-Journal Voucher
+9. Cash Denominations
 ```
 
 ---
 
-## Step 9 — Bank Slips
+# 1. Bank Accounts
 
-Module:
+## Purpose
+
+Store company bank accounts.
+
+---
+
+## Examples
 
 ```txt
-bank-slips/
+HDFC Current Account
+
+ICICI Current Account
+
+Axis Bank
+
+SBI Current Account
 ```
 
-Purpose:
+---
 
-Cash packing for deposit.
+## Structure
+
+```txt
+bank-accounts/
+│
+├── bankAccount.module.js
+│
+├── constants/
+│   └── bankAccount.constant.js
+│
+├── controllers/
+│   └── bankAccount.controller.js
+│
+├── models/
+│   └── bankAccount.model.js
+│
+├── repositories/
+│   └── bankAccount.repository.js
+│
+├── routes/
+│   └── bankAccount.routes.js
+│
+├── services/
+│   └── bankAccount.service.js
+│
+└── validations/
+    └── bankAccount.validation.js
+```
+
+---
+
+## Bank Account Model
+
+```js
+{
+  (workspaceId,
+    companyId,
+    branchId,
+    accountName,
+    accountNumber,
+    ifscCode,
+    bankName,
+    branchName,
+    accountType,
+    ledgerAccountId,
+    isPrimary,
+    status);
+}
+```
+
+---
+
+# Integration
+
+Every bank account should be linked with:
+
+```txt
+Finance Account
+```
 
 Example:
 
 ```txt
-500 × 20
-
-100 × 10
-```
-
-Total:
-
-```txt
-₹11,000
-```
-
-Build:
-
-```txt
-Create Slip
-Cancel Slip
-Approve Slip
-Deposit Slip
+HDFC Current Account
+       ↓
+Account
+       ↓
+Ledger
 ```
 
 ---
 
-## Step 10 — Bank Deposits
+# 2. Cash Accounts
 
-Module:
+## Purpose
 
-```txt
-bank-deposits/
-```
+Manage physical cash.
 
-Flow:
+---
 
-```txt
-Bank Slip
-      ↓
-Bank Deposit
-      ↓
-Contra Voucher
-      ↓
-Journal Voucher
-```
-
-Accounting:
+## Examples
 
 ```txt
-Bank A/c Dr
+Main Cash
 
-    To Cash A/c Cr
+Petty Cash
+
+Counter Cash
+
+Warehouse Cash
 ```
 
 ---
 
-## Step 11 — Bank Transactions
-
-Module:
+## Structure
 
 ```txt
-bank-transactions/
+cash-accounts/
+│
+├── cashAccount.module.js
+│
+├── constants/
+│   └── cashAccount.constant.js
+│
+├── controllers/
+│   └── cashAccount.controller.js
+│
+├── models/
+│   └── cashAccount.model.js
+│
+├── repositories/
+│   └── cashAccount.repository.js
+│
+├── routes/
+│   └── cashAccount.routes.js
+│
+├── services/
+│   └── cashAccount.service.js
+│
+└── validations/
+    └── cashAccount.validation.js
 ```
 
-Examples:
+---
+
+## Cash Account Model
+
+```js
+{
+  (workspaceId,
+    companyId,
+    branchId,
+    accountName,
+    ledgerAccountId,
+    openingBalance,
+    status);
+}
+```
+
+---
+
+# 3. Fund Transfers
+
+## Purpose
+
+Transfer money between treasury accounts.
+
+---
+
+## Examples
 
 ```txt
+Cash → Bank
+
+Bank → Cash
+
+Bank → Bank
+```
+
+---
+
+## Structure
+
+```txt
+fund-transfers/
+│
+├── fundTransfer.module.js
+│
+├── constants/
+│   └── fundTransfer.constant.js
+│
+├── controllers/
+│   └── fundTransfer.controller.js
+│
+├── models/
+│   └── fundTransfer.model.js
+│
+├── repositories/
+│   └── fundTransfer.repository.js
+│
+├── routes/
+│   └── fundTransfer.routes.js
+│
+├── services/
+│   └── fundTransfer.service.js
+│
+└── validations/
+    └── fundTransfer.validation.js
+```
+
+---
+
+## Examples
+
+```txt
+HDFC
+   ↓
+ICICI
+
+₹50,000
+```
+
+---
+
+## Accounting Entry
+
+```txt
+ICICI Bank A/c Dr
+
+HDFC Bank A/c Cr
+```
+
+---
+
+# 4. Bank Transactions
+
+## Purpose
+
+Track bank activity.
+
+---
+
+## Examples
+
+```txt
+Deposit
+
+Withdrawal
+
+Bank Charges
+
+Interest
+
 NEFT
 
 RTGS
 
 IMPS
 
-Cheque
-
-Interest
-
-Bank Charges
-```
-
-Store:
-
-```txt
-UTR
-
-Reference Number
-
-Settlement Reference
+UPI
 ```
 
 ---
 
-## Step 12 — Settlements
-
-Module:
+## Accounting Example
 
 ```txt
-settlements/
-```
-
-Purpose:
-
-UPI/Card Settlement Tracking.
-
-Example:
-
-```txt
-Collected = ₹50,000
-
-Settled = ₹45,000
-
-Pending = ₹5,000
-```
-
----
-
-## Step 13 — Day Closing
-
-Module:
-
-```txt
-day-closing/
-```
-
-Example:
-
-```txt
-Expected Cash
-
-vs
-
-Actual Cash
-```
-
-System:
-
-```txt
-Expected = ₹50,000
-
-Actual = ₹49,900
-
-Difference = -100
-```
-
----
-
-## Step 14 — Shift Closing
-
-Module:
-
-```txt
-shift-closing/
-```
-
-Examples:
-
-```txt
-Morning Shift
-
-Evening Shift
-```
-
-Track:
-
-```txt
-Cashier Collection
-
-UPI Collection
-
-Card Collection
-```
-
----
-
-## Step 15 — Reconciliation
-
-Modules:
-
-```txt
-bank-reconciliation/
-
-payment-reconciliation/
-```
-
-Purpose:
-
-```txt
-Bank Statement
-
-vs
-
-ERP Ledger
-```
-
-and
-
-```txt
-PhonePe Settlement
-
-vs
-
-ERP Collection
-```
-
-For your production-ready Pharmacy ERP, I would make Phase 4 - Treasury Management consist of these modules:
-
-PHASE 4 - Treasury Management
-
-1. Bank Management
-   ├── Bank Accounts
-   ├── Bank Transactions
-   ├── Bank Slips
-   ├── Bank Deposits
-   └── Bank Reconciliation
-
-2. Cash Management
-   ├── Cash Registers
-   ├── Cash Balances
-   ├── Cash Transactions
-   ├── Denomination Counts
-   ├── Day Closing
-   └── Shift Closing
-
-3. Payment Management
-   ├── Payment Methods
-   ├── QR Codes
-   ├── Payment Collections
-   ├── Settlements
-   └── Payment Reconciliation
-
-4. Receipts
-
-5. Payments
-
-6. Contra Vouchers
-
-So the actual implementation order would be:
-
-PHASE 4
-
-1. Bank Accounts
-
-2. Payment Methods
-
-3. QR Codes
-
-4. Cash Registers
-
-5. Cash Balances
-
-6. Denomination Counts
-
-7. Cash Transactions
-
-8. Payment Collections
-
-9. Bank Slips
-
-10. Bank Deposits
-
-11. Bank Transactions
-
-12. Settlements
-
-13. Receipts
-
-14. Payments
-
-15. Contra Vouchers
-
-16. Day Closing
-
-17. Shift Closing
-
-18. Bank Reconciliation
-
-19. Payment Reconciliation
-    Treasury Flow
-    Cash / UPI / Card Collection
-    ↓
-
-Payment Collection
-↓
-
-Receipt Voucher
-↓
-
-Journal Voucher
-↓
-
-Ledger
-↓
-
-Account Balance
-
----
-
 Cash Deposit
-↓
 
-Bank Slip
-↓
+Bank A/c Dr
 
-Bank Deposit
-↓
-
-Contra Voucher
-↓
-
-Journal Voucher
-↓
-
-Ledger
+Cash A/c Cr
+```
 
 ---
 
-Supplier Payment
-↓
+## Structure
 
-Payment Voucher
-↓
+```txt
+bank-transactions/
+│
+├── bankTransaction.module.js
+│
+├── constants/
+│
+├── controllers/
+│
+├── models/
+│
+├── repositories/
+│
+├── routes/
+│
+├── services/
+│
+└── validations/
+```
 
+---
+
+# 5. Cash Transactions
+
+## Purpose
+
+Track physical cash movement.
+
+---
+
+## Examples
+
+```txt
+Cash In
+
+Cash Out
+
+Expense
+
+Petty Cash Expense
+```
+
+---
+
+## Accounting Example
+
+```txt
+Expense A/c Dr
+
+Cash A/c Cr
+```
+
+---
+
+## Structure
+
+```txt
+cash-transactions/
+│
+├── cashTransaction.module.js
+│
+├── constants/
+│
+├── controllers/
+│
+├── models/
+│
+├── repositories/
+│
+├── routes/
+│
+├── services/
+│
+└── validations/
+```
+
+---
+
+# 6. Payment QR
+
+## Purpose
+
+Manage UPI QR codes.
+
+---
+
+## Examples
+
+```txt
+pay@upi
+
+store@oksbi
+
+company@okhdfcbank
+```
+
+---
+
+## Structure
+
+```txt
+payment-qr/
+│
+├── paymentQr.module.js
+│
+├── constants/
+│
+├── controllers/
+│
+├── models/
+│
+├── repositories/
+│
+├── routes/
+│
+├── services/
+│
+└── validations/
+```
+
+---
+
+## Model
+
+```js
+{
+  (bankAccountId, upiId, qrImage, isPrimary, status);
+}
+```
+
+---
+
+# 7. Cheque Management
+
+## Purpose
+
+Manage issued and received cheques.
+
+---
+
+## Status
+
+```txt
+PENDING
+
+DEPOSITED
+
+CLEARED
+
+BOUNCED
+
+CANCELLED
+```
+
+---
+
+## Structure
+
+```txt
+cheque-management/
+│
+├── cheque.module.js
+│
+├── constants/
+│
+├── controllers/
+│
+├── models/
+│
+├── repositories/
+│
+├── routes/
+│
+├── services/
+│
+└── validations/
+```
+
+---
+
+## Examples
+
+```txt
+Received Cheque
+
+Issued Cheque
+
+Cheque Deposit
+
+Cheque Bounce
+```
+
+---
+
+# 8. Bank Slips
+
+## Purpose
+
+Track physical deposit and withdrawal slips.
+
+---
+
+## Examples
+
+```txt
+Cash Deposit Slip
+
+Cash Withdrawal Slip
+```
+
+---
+
+## Structure
+
+```txt
+bank-slips/
+│
+├── bankSlip.module.js
+│
+├── constants/
+│
+├── controllers/
+│
+├── models/
+│
+├── repositories/
+│
+├── routes/
+│
+├── services/
+│
+└── validations/
+```
+
+---
+
+## Example
+
+```txt
+Deposit Slip
+
+₹1,00,000
+```
+
+---
+
+# 9. Cash Denominations
+
+## Purpose
+
+Manage physical currency counts.
+
+---
+
+## Examples
+
+```txt
+₹500 × 20
+
+₹200 × 50
+
+₹100 × 100
+
+₹50 × 20
+```
+
+---
+
+## Uses
+
+```txt
+Counter Closing
+
+Cash Verification
+
+Day End Closing
+```
+
+---
+
+## Structure
+
+```txt
+cash-denominations/
+│
+├── cashDenomination.module.js
+│
+├── constants/
+│
+├── controllers/
+│
+├── models/
+│
+├── repositories/
+│
+├── routes/
+│
+├── services/
+│
+└── validations/
+```
+
+---
+
+# Treasury Reports
+
+Generated from Treasury + Finance.
+
+---
+
+## Reports
+
+```txt
+Cash Book
+
+Bank Book
+
+Fund Transfer Report
+
+Cheque Report
+
+Cash Flow Report
+
+Bank Reconciliation
+
+Daily Cash Summary
+
+UPI Collection Report
+```
+
+---
+
+# Integration With Finance
+
+Treasury never directly changes balances.
+
+Every treasury operation generates:
+
+```txt
+Treasury Transaction
+       ↓
 Journal Voucher
-↓
+       ↓
+Ledger Entry
+       ↓
+Account Balance Update
+```
+
+---
+
+# Example Flow
+
+## Customer Receipt Through UPI
+
+```txt
+Customer Pays ₹5,000
+        ↓
+Payment QR
+        ↓
+Bank Transaction
+        ↓
+Journal Voucher
+
+Bank A/c Dr 5,000
+
+Customer A/c Cr 5,000
+        ↓
+Ledger
+        ↓
+Account Balance
+```
+
+---
+
+# Final Treasury Principle
+
+```txt
+Bank Accounts
+      ↓
+
+Cash Accounts
+      ↓
+
+Fund Transfers
+      ↓
+
+Bank Transactions
+      ↓
+
+Cash Transactions
+      ↓
+
+Payment QR
+      ↓
+
+Cheque Management
+      ↓
+
+Bank Slips
+      ↓
+
+Cash Denominations
+      ↓
+
+Finance
+      ↓
 
 Ledger
+      ↓
+
+Reports
+```
+
+Treasury manages actual money movement, while Finance records accounting impact. Together they provide complete cash, bank, UPI, cheque, and fund management for the Pharmacy ERP.

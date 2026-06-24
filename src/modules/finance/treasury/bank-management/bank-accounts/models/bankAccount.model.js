@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { BANK_ACCOUNT_TYPE } from "../constants/bankAccount.constant.js";
 
 const bankAccountSchema = new mongoose.Schema(
   {
@@ -70,7 +71,7 @@ const bankAccountSchema = new mongoose.Schema(
 
     accountType: {
       type: String,
-      enum: ["CURRENT", "SAVINGS", "OVERDRAFT", "CASH_CREDIT"],
+      enum: Object.values(BANK_ACCOUNT_TYPE),
       default: "CURRENT",
       index: true,
     },
@@ -119,7 +120,7 @@ const bankAccountSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 bankAccountSchema.methods.toSafeObject = function () {
@@ -134,7 +135,7 @@ bankAccountSchema.index(
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },
-  }
+  },
 );
 
 const BankAccount =
