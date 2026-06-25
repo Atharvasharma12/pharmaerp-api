@@ -1,12 +1,12 @@
 import mongoose from "mongoose";
 import ApiError from "../../../../../../utils/ApiError.js";
-import bankTransactionRepository from "../repositories/bankTransaction.repository.js";
+import cashTransactionRepository from "../repositories/cashTransaction.repository.js";
 import {
-  BANK_TRANSACTION_DIRECTION,
-  BANK_TRANSACTION_STATUS,
-} from "../constants/bankTransaction.constant.js";
+  CASH_TRANSACTION_DIRECTION,
+  CASH_TRANSACTION_STATUS,
+} from "../constants/cashTransaction.constant.js";
 
-import BankAccount from "../bank-accounts/models/bankAccount.model.js";
+import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
@@ -17,26 +17,9 @@ import journalCancellationService from "../../../../journal-vouchers/services/jo
 import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
 
-/**
- * Determine the journal voucher type based on transaction direction.
- * CREDIT (money in) → RECEIPT
- * DEBIT  (money out) → PAYMENT
- * Charges/Interest  → JOURNAL
- */
-const resolveVoucherType = (transactionType) => {
-  const receiptTypes = ["DEPOSIT", "NEFT", "RTGS", "IMPS", "UPI", "CHEQUE", "INTEREST"];
-  const paymentTypes = ["WITHDRAWAL"];
-  const journalTypes = ["BANK_CHARGES", "OTHER"];
-
-  if (receiptTypes.includes(transactionType)) return VOUCHER_TYPE.JOURNAL;
-  if (paymentTypes.includes(transactionType)) return VOUCHER_TYPE.JOURNAL;
-  if (journalTypes.includes(transactionType)) return VOUCHER_TYPE.JOURNAL;
-  return VOUCHER_TYPE.JOURNAL;
-};
-
-/**
- * Find or auto-create a system account for bank charges / interest income.
- */
+// ---------------------------------------------------------------------------
+// AUTO-CREATE SYSTEM ACCOUNT (for EXPENSE / PETTY_CASH auto-offset)
+// ---------------------------------------------------------------------------
 const findOrCreateSystemAccount = async (
   workspaceId,
   companyId,
@@ -90,12 +73,12 @@ const findOrCreateSystemAccount = async (
 };
 
 // ---------------------------------------------------------------------------
-// CREATE BANK TRANSACTION
+// CREATE CASH TRANSACTION
 // ---------------------------------------------------------------------------
-const createBankTransaction = async (workspaceId, companyId, userId, payload) => {
+const createCashTransaction = async (workspaceId, companyId, userId, payload) => {
   const {
     transactionDate,
-    bankAccountId,
+    cashAccountId,
     transactionType,
     direction,
     amount,
@@ -108,20 +91,20 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
   session.startTransaction();
 
   try {
-    // 1. Verify BankAccount exists and is active
-    const bankAccount = await BankAccount.findOne({
-      _id: bankAccountId,
+    // 1. Verify CashAccount exists and is active
+    const cashAccount = await CashAccount.findOne({
+      _id: cashAccountId,
       companyId,
       workspaceId,
       isDeleted: false,
-      isActive: true,
+      status: "active",
     }).session(session);
 
-    if (!bankAccount) {
-      throw new ApiError(400, "Bank Account not found or inactive");
+    if (!cashAccount) {
+      throw new ApiError(400, "Cash Account not found or inactive");
     }
 
-    const bankLedgerAccountId = bankAccount.ledgerAccountId;
+    const cashLedgerAccountId = cashAccount.ledgerAccountId;
 
     // 2. Resolve the counterparty (offset) ledger account
     let offsetLedgerAccountId = null;
@@ -137,27 +120,26 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
       offsetLedgerAccountId = acct._id;
     } else {
       // Auto-resolve based on transaction type
-      if (transactionType === "BANK_CHARGES") {
-        const chargesAccount = await findOrCreateSystemAccount(
+      if (transactionType === "EXPENSE") {
+        const expenseAccount = await findOrCreateSystemAccount(
           workspaceId, companyId, userId,
-          "BANK_CHARGES", "Bank Charges",
+          "CASH_EXPENSE", "Cash Expenses",
           "EXPENSE", "EXPENSE",
-          "BANK_CHARGES_GRP", "Bank Charges",
+          "CASH_EXPENSE_GRP", "Cash Expenses",
           session,
         );
-        offsetLedgerAccountId = chargesAccount._id;
-      } else if (transactionType === "INTEREST") {
-        const interestAccount = await findOrCreateSystemAccount(
+        offsetLedgerAccountId = expenseAccount._id;
+      } else if (transactionType === "PETTY_CASH") {
+        const pettyAccount = await findOrCreateSystemAccount(
           workspaceId, companyId, userId,
-          "BANK_INTEREST_INC", "Bank Interest Income",
-          "INCOME", "INCOME",
-          "BANK_INTEREST_GRP", "Bank Interest",
+          "PETTY_CASH_EXP", "Petty Cash Expenses",
+          "EXPENSE", "EXPENSE",
+          "PETTY_CASH_GRP", "Petty Cash",
           session,
         );
-        offsetLedgerAccountId = interestAccount._id;
+        offsetLedgerAccountId = pettyAccount._id;
       } else {
-        // For DEPOSIT, WITHDRAWAL, NEFT, RTGS, IMPS, UPI, CHEQUE, OTHER
-        // we require counterpartyAccountId from the user
+        // CASH_IN, CASH_OUT, OTHER require counterpartyAccountId
         throw new ApiError(
           400,
           `counterpartyAccountId is required for transaction type: ${transactionType}`,
@@ -166,33 +148,32 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
     }
 
     // 3. Generate unique transaction number
-    const transactionNumber = await bankTransactionRepository.getNextTransactionNumber(
+    const transactionNumber = await cashTransactionRepository.getNextTransactionNumber(
       companyId,
       workspaceId,
       { session },
     );
 
     // 4. Generate journal voucher number
-    const voucherType = resolveVoucherType(transactionType);
     const voucherNumber = await voucherNumberService.generateVoucherNumber(
       companyId,
       workspaceId,
-      voucherType,
+      VOUCHER_TYPE.JOURNAL,
       { session },
     );
 
     const txNarration = narration || `${transactionType} - ${transactionNumber}`;
 
     // 5. Build journal lines
-    // CREDIT direction: Bank A/c Dr, Offset A/c Cr (money comes in to bank)
-    // DEBIT  direction: Offset A/c Dr, Bank A/c Cr (money goes out of bank)
+    // CREDIT direction: Cash A/c Dr, Offset A/c Cr (money comes into cash)
+    // DEBIT  direction: Offset A/c Dr, Cash A/c Cr (money goes out of cash)
     let lines;
-    if (direction === BANK_TRANSACTION_DIRECTION.CREDIT) {
+    if (direction === CASH_TRANSACTION_DIRECTION.CREDIT) {
       lines = [
         {
           workspaceId,
           companyId,
-          accountId: bankLedgerAccountId,
+          accountId: cashLedgerAccountId,
           debit: amount,
           credit: 0,
           narration: txNarration,
@@ -219,7 +200,7 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
         {
           workspaceId,
           companyId,
-          accountId: bankLedgerAccountId,
+          accountId: cashLedgerAccountId,
           debit: 0,
           credit: amount,
           narration: txNarration,
@@ -234,7 +215,7 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
         companyId,
         voucherNumber,
         voucherDate: new Date(transactionDate),
-        voucherType,
+        voucherType: VOUCHER_TYPE.JOURNAL,
         referenceNumber: referenceNumber || null,
         narration: txNarration,
         totalDebit: amount,
@@ -257,13 +238,13 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
       { session },
     );
 
-    // 9. Save the Bank Transaction record
+    // 9. Save the Cash Transaction record
     const txPayload = {
       workspaceId,
       companyId,
       transactionNumber,
       transactionDate: new Date(transactionDate),
-      bankAccountId,
+      cashAccountId,
       transactionType,
       direction,
       amount,
@@ -271,13 +252,13 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
       narration: narration || null,
       counterpartyAccountId: offsetLedgerAccountId,
       journalVoucherId: journalVoucher._id,
-      status: BANK_TRANSACTION_STATUS.POSTED,
+      status: CASH_TRANSACTION_STATUS.POSTED,
       postedAt: new Date(),
       postedBy: userId,
       createdBy: userId,
     };
 
-    const bankTransaction = await bankTransactionRepository.createBankTransaction(
+    const cashTransaction = await cashTransactionRepository.createCashTransaction(
       txPayload,
       { session },
     );
@@ -285,7 +266,7 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
     await session.commitTransaction();
     session.endSession();
 
-    return getBankTransactionById(bankTransaction._id, companyId, workspaceId);
+    return getCashTransactionById(cashTransaction._id, companyId, workspaceId);
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
@@ -294,11 +275,11 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
 };
 
 // ---------------------------------------------------------------------------
-// GET BANK TRANSACTIONS (LIST)
+// GET CASH TRANSACTIONS (LIST)
 // ---------------------------------------------------------------------------
-const getBankTransactions = async (workspaceId, companyId, query = {}) => {
+const getCashTransactions = async (workspaceId, companyId, query = {}) => {
   const { page, limit, sort, all, ...filters } = query;
-  const result = await bankTransactionRepository.getBankTransactions(
+  const result = await cashTransactionRepository.getCashTransactions(
     workspaceId,
     companyId,
     filters,
@@ -306,7 +287,7 @@ const getBankTransactions = async (workspaceId, companyId, query = {}) => {
   );
 
   return {
-    bankTransactions: result.bankTransactions.map((bt) => bt.toSafeObject()),
+    cashTransactions: result.cashTransactions.map((ct) => ct.toSafeObject()),
     total: result.total,
     page: result.page,
     limit: result.limit,
@@ -314,40 +295,40 @@ const getBankTransactions = async (workspaceId, companyId, query = {}) => {
 };
 
 // ---------------------------------------------------------------------------
-// GET BANK TRANSACTION BY ID
+// GET CASH TRANSACTION BY ID
 // ---------------------------------------------------------------------------
-const getBankTransactionById = async (id, companyId, workspaceId) => {
-  const bankTransaction =
-    await bankTransactionRepository.findBankTransactionByIdCompanyAndWorkspace(
+const getCashTransactionById = async (id, companyId, workspaceId) => {
+  const cashTransaction =
+    await cashTransactionRepository.findCashTransactionByIdCompanyAndWorkspace(
       id,
       companyId,
       workspaceId,
     );
-  if (!bankTransaction) {
-    throw new ApiError(404, "Bank Transaction not found");
+  if (!cashTransaction) {
+    throw new ApiError(404, "Cash Transaction not found");
   }
-  return bankTransaction.toSafeObject();
+  return cashTransaction.toSafeObject();
 };
 
 // ---------------------------------------------------------------------------
-// CANCEL BANK TRANSACTION
+// CANCEL CASH TRANSACTION
 // ---------------------------------------------------------------------------
-const cancelBankTransaction = async (id, companyId, workspaceId, userId, payload) => {
+const cancelCashTransaction = async (id, companyId, workspaceId, userId, payload) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
-    const bankTransaction = await mongoose
-      .model("BankTransaction")
+    const cashTransaction = await mongoose
+      .model("CashTransaction")
       .findOne({ _id: id, companyId, workspaceId, isDeleted: false })
       .session(session);
 
-    if (!bankTransaction) {
-      throw new ApiError(404, "Bank Transaction not found");
+    if (!cashTransaction) {
+      throw new ApiError(404, "Cash Transaction not found");
     }
 
-    if (bankTransaction.status === BANK_TRANSACTION_STATUS.CANCELLED) {
-      throw new ApiError(400, "Bank Transaction is already cancelled");
+    if (cashTransaction.status === CASH_TRANSACTION_STATUS.CANCELLED) {
+      throw new ApiError(400, "Cash Transaction is already cancelled");
     }
 
     await session.commitTransaction();
@@ -355,23 +336,23 @@ const cancelBankTransaction = async (id, companyId, workspaceId, userId, payload
 
     // Reverse the journal voucher (manages its own session internally)
     if (
-      bankTransaction.status === BANK_TRANSACTION_STATUS.POSTED &&
-      bankTransaction.journalVoucherId
+      cashTransaction.status === CASH_TRANSACTION_STATUS.POSTED &&
+      cashTransaction.journalVoucherId
     ) {
       await journalCancellationService.cancelJournalVoucher(
-        bankTransaction.journalVoucherId,
+        cashTransaction.journalVoucherId,
         companyId,
         workspaceId,
         userId,
       );
     }
 
-    // Update the bank transaction status
-    await mongoose.model("BankTransaction").updateOne(
-      { _id: bankTransaction._id },
+    // Update the cash transaction status
+    await mongoose.model("CashTransaction").updateOne(
+      { _id: cashTransaction._id },
       {
         $set: {
-          status: BANK_TRANSACTION_STATUS.CANCELLED,
+          status: CASH_TRANSACTION_STATUS.CANCELLED,
           cancelledAt: new Date(),
           cancelledBy: userId,
           cancellationReason: payload?.reason || null,
@@ -379,7 +360,7 @@ const cancelBankTransaction = async (id, companyId, workspaceId, userId, payload
       },
     );
 
-    return getBankTransactionById(bankTransaction._id, companyId, workspaceId);
+    return getCashTransactionById(cashTransaction._id, companyId, workspaceId);
   } catch (error) {
     try {
       await session.abortTransaction();
@@ -390,8 +371,8 @@ const cancelBankTransaction = async (id, companyId, workspaceId, userId, payload
 };
 
 export default {
-  createBankTransaction,
-  getBankTransactions,
-  getBankTransactionById,
-  cancelBankTransaction,
+  createCashTransaction,
+  getCashTransactions,
+  getCashTransactionById,
+  cancelCashTransaction,
 };

@@ -44,7 +44,9 @@ const findGroupByCode = async (companyId, groupCode, options = {}) => {
     companyId,
     groupCode: String(groupCode).trim().toUpperCase(),
     isDeleted: false,
-  }).select(options.select || "");
+  })
+    .select(options.select || "")
+    .session(options.session || null);
 };
 
 const findGroupByName = async (companyId, groupName, options = {}) => {
@@ -58,8 +60,11 @@ const findGroupByName = async (companyId, groupName, options = {}) => {
   }).select(options.select || "");
 };
 
-const createGroup = async (payload) => {
-  return AccountGroup.create(payload);
+const createGroup = async (payload, options = {}) => {
+  const [group] = await AccountGroup.create([payload], {
+    session: options.session || null,
+  });
+  return group;
 };
 
 const saveGroup = async (group) => {

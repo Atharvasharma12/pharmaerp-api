@@ -44,7 +44,9 @@ const findAccountByCode = async (companyId, accountCode, options = {}) => {
     companyId,
     accountCode: String(accountCode).trim().toUpperCase(),
     isDeleted: false,
-  }).select(options.select || "");
+  })
+    .select(options.select || "")
+    .session(options.session || null);
 };
 
 const findAccountByName = async (companyId, accountName, options = {}) => {
@@ -58,8 +60,11 @@ const findAccountByName = async (companyId, accountName, options = {}) => {
   }).select(options.select || "");
 };
 
-const createAccount = async (payload) => {
-  return Account.create(payload);
+const createAccount = async (payload, options = {}) => {
+  const [account] = await Account.create([payload], {
+    session: options.session || null,
+  });
+  return account;
 };
 
 const saveAccount = async (account) => {

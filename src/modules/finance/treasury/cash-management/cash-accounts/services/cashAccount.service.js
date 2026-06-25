@@ -31,19 +31,23 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
     let cashGroup = await accountGroupRepository.findGroupByCode(
       companyId,
       "CASH_ACCOUNTS",
+      { session },
     );
 
     if (!cashGroup) {
-      cashGroup = await accountGroupRepository.createGroup({
-        workspaceId,
-        companyId,
-        groupCode: "CASH_ACCOUNTS",
-        groupName: "Cash Accounts",
-        parentGroupId: null,
-        nature: "ASSET",
-        isSystemGroup: true,
-        createdBy: userId,
-      });
+      cashGroup = await accountGroupRepository.createGroup(
+        {
+          workspaceId,
+          companyId,
+          groupCode: "CASH_ACCOUNTS",
+          groupName: "Cash Accounts",
+          parentGroupId: null,
+          nature: "ASSET",
+          isSystemGroup: true,
+          createdBy: userId,
+        },
+        { session },
+      );
     }
 
     // 3. Generate unique accountCode for Ledger Account
