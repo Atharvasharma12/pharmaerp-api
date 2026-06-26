@@ -1,9 +1,11 @@
 import mongoose from "mongoose";
 import ApiError from "../../../../../../utils/ApiError.js";
 import bankSlipRepository from "../repositories/bankSlip.repository.js";
-import { BANK_SLIP_TYPE, BANK_SLIP_STATUS } from "../constants/bankSlip.constant.js";
+import {
+  BANK_SLIP_TYPE,
+  BANK_SLIP_STATUS,
+} from "../constants/bankSlip.constant.js";
 
-import BankAccount from "../bank-accounts/models/bankAccount.model.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
 import journalVoucherRepository from "../../../../journal-vouchers/repositories/journalVoucher.repository.js";
@@ -11,6 +13,7 @@ import journalLineRepository from "../../../../journal-vouchers/repositories/jou
 import journalPostingService from "../../../../journal-vouchers/services/journalPosting.service.js";
 import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
+import BankAccount from "../../bank-accounts/models/bankAccount.model.js";
 
 // ---------------------------------------------------------------------------
 // HELPER — find or auto-create "Cash In Hand" system account for the offset
@@ -148,7 +151,10 @@ const submitBankSlip = async (id, companyId, workspaceId, userId, payload) => {
 
   if (!bankSlip) throw new ApiError(404, "Bank Slip not found");
   if (bankSlip.status !== BANK_SLIP_STATUS.PENDING) {
-    throw new ApiError(400, `Slip cannot be submitted from status: ${bankSlip.status}`);
+    throw new ApiError(
+      400,
+      `Slip cannot be submitted from status: ${bankSlip.status}`,
+    );
   }
 
   if (payload?.bankSlipReference) {
@@ -187,7 +193,10 @@ const confirmBankSlip = async (id, companyId, workspaceId, userId, payload) => {
 
     if (!bankSlip) throw new ApiError(404, "Bank Slip not found");
     if (bankSlip.status !== BANK_SLIP_STATUS.SUBMITTED) {
-      throw new ApiError(400, `Slip can only be confirmed from SUBMITTED status. Current: ${bankSlip.status}`);
+      throw new ApiError(
+        400,
+        `Slip can only be confirmed from SUBMITTED status. Current: ${bankSlip.status}`,
+      );
     }
 
     // Get bank ledger account
@@ -214,13 +223,33 @@ const confirmBankSlip = async (id, companyId, workspaceId, userId, payload) => {
     let lines;
     if (bankSlip.slipType === BANK_SLIP_TYPE.CASH_DEPOSIT) {
       lines = [
-        { accountId: bankLedgerAccountId, debit: bankSlip.amount, credit: 0, narration: confirmNarration },
-        { accountId: cashInHandAccount._id, debit: 0, credit: bankSlip.amount, narration: confirmNarration },
+        {
+          accountId: bankLedgerAccountId,
+          debit: bankSlip.amount,
+          credit: 0,
+          narration: confirmNarration,
+        },
+        {
+          accountId: cashInHandAccount._id,
+          debit: 0,
+          credit: bankSlip.amount,
+          narration: confirmNarration,
+        },
       ];
     } else {
       lines = [
-        { accountId: cashInHandAccount._id, debit: bankSlip.amount, credit: 0, narration: confirmNarration },
-        { accountId: bankLedgerAccountId, debit: 0, credit: bankSlip.amount, narration: confirmNarration },
+        {
+          accountId: cashInHandAccount._id,
+          debit: bankSlip.amount,
+          credit: 0,
+          narration: confirmNarration,
+        },
+        {
+          accountId: bankLedgerAccountId,
+          debit: 0,
+          credit: bankSlip.amount,
+          narration: confirmNarration,
+        },
       ];
     }
 
@@ -296,7 +325,10 @@ const rejectBankSlip = async (id, companyId, workspaceId, userId, payload) => {
 
   if (!bankSlip) throw new ApiError(404, "Bank Slip not found");
   if (bankSlip.status !== BANK_SLIP_STATUS.SUBMITTED) {
-    throw new ApiError(400, `Slip can only be rejected from SUBMITTED status. Current: ${bankSlip.status}`);
+    throw new ApiError(
+      400,
+      `Slip can only be rejected from SUBMITTED status. Current: ${bankSlip.status}`,
+    );
   }
 
   bankSlip.status = BANK_SLIP_STATUS.REJECTED;
@@ -319,7 +351,10 @@ const cancelBankSlip = async (id, companyId, workspaceId, userId, payload) => {
 
   if (!bankSlip) throw new ApiError(404, "Bank Slip not found");
   if (bankSlip.status !== BANK_SLIP_STATUS.PENDING) {
-    throw new ApiError(400, `Only PENDING slips can be cancelled. Current: ${bankSlip.status}`);
+    throw new ApiError(
+      400,
+      `Only PENDING slips can be cancelled. Current: ${bankSlip.status}`,
+    );
   }
 
   bankSlip.status = BANK_SLIP_STATUS.CANCELLED;

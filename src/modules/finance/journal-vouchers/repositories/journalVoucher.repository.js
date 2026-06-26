@@ -15,7 +15,7 @@ const findVoucherByIdCompanyAndWorkspace = async (
   voucherId,
   companyId,
   workspaceId,
-  options = {}
+  options = {},
 ) => {
   if (
     !mongoose.Types.ObjectId.isValid(voucherId) ||
@@ -42,7 +42,12 @@ const createVoucher = async (payload, options = {}) => {
   return voucher;
 };
 
-const getVouchers = async (workspaceId, companyId, filters = {}, options = {}) => {
+const getVouchers = async (
+  workspaceId,
+  companyId,
+  filters = {},
+  options = {},
+) => {
   if (
     !mongoose.Types.ObjectId.isValid(workspaceId) ||
     !mongoose.Types.ObjectId.isValid(companyId)
@@ -109,7 +114,12 @@ const getVouchers = async (workspaceId, companyId, filters = {}, options = {}) =
   return { vouchers, total, page, limit };
 };
 
-const deleteVoucherById = async (voucherId, companyId, workspaceId, options = {}) => {
+const deleteVoucherById = async (
+  voucherId,
+  companyId,
+  workspaceId,
+  options = {},
+) => {
   if (
     !mongoose.Types.ObjectId.isValid(voucherId) ||
     !mongoose.Types.ObjectId.isValid(companyId) ||
@@ -127,7 +137,7 @@ const deleteVoucherById = async (voucherId, companyId, workspaceId, options = {}
     },
     {
       session: options.session || null,
-    }
+    },
   );
 };
 

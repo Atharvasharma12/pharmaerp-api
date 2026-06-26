@@ -1,20 +1,14 @@
 import mongoose from "mongoose";
 import ApiError from "../../../../../utils/ApiError.js";
 import paymentQrRepository from "../repositories/paymentQr.repository.js";
-import BankAccount from "../bank-management/bank-accounts/models/bankAccount.model.js";
+import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
 
 // ---------------------------------------------------------------------------
 // CREATE PAYMENT QR
 // ---------------------------------------------------------------------------
 const createPaymentQr = async (workspaceId, companyId, userId, payload) => {
-  const {
-    bankAccountId,
-    upiId,
-    label,
-    provider,
-    qrImageUrl,
-    isPrimary,
-  } = payload;
+  const { bankAccountId, upiId, label, provider, qrImageUrl, isPrimary } =
+    payload;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -40,7 +34,10 @@ const createPaymentQr = async (workspaceId, companyId, userId, payload) => {
       { session },
     );
     if (existing) {
-      throw new ApiError(400, "A Payment QR with this UPI ID already exists for this company");
+      throw new ApiError(
+        400,
+        "A Payment QR with this UPI ID already exists for this company",
+      );
     }
 
     // 3. Create the Payment QR record
@@ -119,11 +116,12 @@ const getPaymentQrs = async (workspaceId, companyId, query = {}) => {
 // GET PAYMENT QR BY ID
 // ---------------------------------------------------------------------------
 const getPaymentQrById = async (id, companyId, workspaceId) => {
-  const paymentQr = await paymentQrRepository.findPaymentQrByIdCompanyAndWorkspace(
-    id,
-    companyId,
-    workspaceId,
-  );
+  const paymentQr =
+    await paymentQrRepository.findPaymentQrByIdCompanyAndWorkspace(
+      id,
+      companyId,
+      workspaceId,
+    );
   if (!paymentQr) {
     throw new ApiError(404, "Payment QR not found");
   }

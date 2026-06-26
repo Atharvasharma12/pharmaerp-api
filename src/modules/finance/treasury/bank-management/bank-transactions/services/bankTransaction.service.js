@@ -6,7 +6,7 @@ import {
   BANK_TRANSACTION_STATUS,
 } from "../constants/bankTransaction.constant.js";
 
-import BankAccount from "../bank-accounts/models/bankAccount.model.js";
+import BankAccount from "../../bank-accounts/models/bankAccount.model.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
@@ -24,7 +24,15 @@ import voucherNumberService from "../../../../journal-vouchers/services/voucherN
  * Charges/Interest  → JOURNAL
  */
 const resolveVoucherType = (transactionType) => {
-  const receiptTypes = ["DEPOSIT", "NEFT", "RTGS", "IMPS", "UPI", "CHEQUE", "INTEREST"];
+  const receiptTypes = [
+    "DEPOSIT",
+    "NEFT",
+    "RTGS",
+    "IMPS",
+    "UPI",
+    "CHEQUE",
+    "INTEREST",
+  ];
   const paymentTypes = ["WITHDRAWAL"];
   const journalTypes = ["BANK_CHARGES", "OTHER"];
 
@@ -49,10 +57,18 @@ const findOrCreateSystemAccount = async (
   groupName,
   session,
 ) => {
-  let account = await accountRepository.findAccountByCode(companyId, accountCode, { session });
+  let account = await accountRepository.findAccountByCode(
+    companyId,
+    accountCode,
+    { session },
+  );
   if (account) return account;
 
-  let group = await accountGroupRepository.findGroupByCode(companyId, groupCode, { session });
+  let group = await accountGroupRepository.findGroupByCode(
+    companyId,
+    groupCode,
+    { session },
+  );
   if (!group) {
     group = await accountGroupRepository.createGroup(
       {
@@ -92,7 +108,12 @@ const findOrCreateSystemAccount = async (
 // ---------------------------------------------------------------------------
 // CREATE BANK TRANSACTION
 // ---------------------------------------------------------------------------
-const createBankTransaction = async (workspaceId, companyId, userId, payload) => {
+const createBankTransaction = async (
+  workspaceId,
+  companyId,
+  userId,
+  payload,
+) => {
   const {
     transactionDate,
     bankAccountId,
@@ -139,19 +160,29 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
       // Auto-resolve based on transaction type
       if (transactionType === "BANK_CHARGES") {
         const chargesAccount = await findOrCreateSystemAccount(
-          workspaceId, companyId, userId,
-          "BANK_CHARGES", "Bank Charges",
-          "EXPENSE", "EXPENSE",
-          "BANK_CHARGES_GRP", "Bank Charges",
+          workspaceId,
+          companyId,
+          userId,
+          "BANK_CHARGES",
+          "Bank Charges",
+          "EXPENSE",
+          "EXPENSE",
+          "BANK_CHARGES_GRP",
+          "Bank Charges",
           session,
         );
         offsetLedgerAccountId = chargesAccount._id;
       } else if (transactionType === "INTEREST") {
         const interestAccount = await findOrCreateSystemAccount(
-          workspaceId, companyId, userId,
-          "BANK_INTEREST_INC", "Bank Interest Income",
-          "INCOME", "INCOME",
-          "BANK_INTEREST_GRP", "Bank Interest",
+          workspaceId,
+          companyId,
+          userId,
+          "BANK_INTEREST_INC",
+          "Bank Interest Income",
+          "INCOME",
+          "INCOME",
+          "BANK_INTEREST_GRP",
+          "Bank Interest",
           session,
         );
         offsetLedgerAccountId = interestAccount._id;
@@ -166,11 +197,12 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
     }
 
     // 3. Generate unique transaction number
-    const transactionNumber = await bankTransactionRepository.getNextTransactionNumber(
-      companyId,
-      workspaceId,
-      { session },
-    );
+    const transactionNumber =
+      await bankTransactionRepository.getNextTransactionNumber(
+        companyId,
+        workspaceId,
+        { session },
+      );
 
     // 4. Generate journal voucher number
     const voucherType = resolveVoucherType(transactionType);
@@ -181,7 +213,8 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
       { session },
     );
 
-    const txNarration = narration || `${transactionType} - ${transactionNumber}`;
+    const txNarration =
+      narration || `${transactionType} - ${transactionNumber}`;
 
     // 5. Build journal lines
     // CREDIT direction: Bank A/c Dr, Offset A/c Cr (money comes in to bank)
@@ -245,7 +278,10 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
     );
 
     // 7. Add voucherId to lines and save
-    const linesWithVoucher = lines.map((l) => ({ ...l, voucherId: journalVoucher._id }));
+    const linesWithVoucher = lines.map((l) => ({
+      ...l,
+      voucherId: journalVoucher._id,
+    }));
     await journalLineRepository.createLines(linesWithVoucher, { session });
 
     // 8. Post the voucher immediately
@@ -277,10 +313,10 @@ const createBankTransaction = async (workspaceId, companyId, userId, payload) =>
       createdBy: userId,
     };
 
-    const bankTransaction = await bankTransactionRepository.createBankTransaction(
-      txPayload,
-      { session },
-    );
+    const bankTransaction =
+      await bankTransactionRepository.createBankTransaction(txPayload, {
+        session,
+      });
 
     await session.commitTransaction();
     session.endSession();
@@ -332,7 +368,13 @@ const getBankTransactionById = async (id, companyId, workspaceId) => {
 // ---------------------------------------------------------------------------
 // CANCEL BANK TRANSACTION
 // ---------------------------------------------------------------------------
-const cancelBankTransaction = async (id, companyId, workspaceId, userId, payload) => {
+const cancelBankTransaction = async (
+  id,
+  companyId,
+  workspaceId,
+  userId,
+  payload,
+) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -383,7 +425,9 @@ const cancelBankTransaction = async (id, companyId, workspaceId, userId, payload
   } catch (error) {
     try {
       await session.abortTransaction();
-    } catch (_) { /* already committed or aborted */ }
+    } catch (_) {
+      /* already committed or aborted */
+    }
     session.endSession();
     throw error;
   }

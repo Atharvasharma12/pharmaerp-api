@@ -8,12 +8,12 @@ import {
 
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
 import CashAccount from "../../cash-management/cash-accounts/models/cashAccount.model.js";
-import journalVoucherRepository from "../../../../journal-vouchers/repositories/journalVoucher.repository.js";
-import journalLineRepository from "../../../../journal-vouchers/repositories/journalLine.repository.js";
-import journalPostingService from "../../../../journal-vouchers/services/journalPosting.service.js";
-import journalCancellationService from "../../../../journal-vouchers/services/journalCancellation.service.js";
-import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
-import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
+import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
+import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
+import journalCancellationService from "../../../journal-vouchers/services/journalCancellation.service.js";
+import { VOUCHER_TYPE } from "../../../journal-vouchers/constants/voucherType.constant.js";
+import voucherNumberService from "../../../journal-vouchers/services/voucherNumber.service.js";
+import journalVoucherRepository from "../../../journal-vouchers/repositories/journalVoucher.repository.js";
 
 /**
  * Resolve the ledger Account ID from either a BankAccount or CashAccount.
@@ -83,7 +83,10 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       fromAccountType === toAccountType &&
       String(fromAccountId) === String(toAccountId)
     ) {
-      throw new ApiError(400, "Source and destination accounts cannot be the same");
+      throw new ApiError(
+        400,
+        "Source and destination accounts cannot be the same",
+      );
     }
 
     // 2. Resolve ledger accounts for both ends
