@@ -14,6 +14,10 @@ import journalPostingService from "../../../../journal-vouchers/services/journal
 import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
 import BankAccount from "../../bank-accounts/models/bankAccount.model.js";
+import {
+  ACCOUNT_NATURE,
+  ACCOUNT_CATEGORY,
+} from "../../../../chart-of-accounts/constants/account.constant.js";
 
 // ---------------------------------------------------------------------------
 // HELPER — find or auto-create "Cash In Hand" system account for the offset
@@ -73,6 +77,72 @@ const findOrCreateCashInHandAccount = async (
   return account;
 };
 
+// ---------------------------------------------------------------------------
+// HELPER — find or auto-create ledger account for a bank
+const _findOrCreateBankLedgerAccount = async (
+  workspaceId,
+  companyId,
+  userId,
+  bankAccount,
+  session,
+) => {
+  // 1️⃣ Use existing linked ledger account if present and valid
+  if (bankAccount.ledgerAccountId) {
+    const existing = await accountRepository.findAccountByIdCompanyAndWorkspace(
+      bankAccount.ledgerAccountId,
+      companyId,
+      workspaceId,
+      { session },
+    );
+    if (existing) return existing;
+  }
+
+  // 2️⃣ Ensure the system group for bank accounts exists
+  let group = await accountGroupRepository.findGroupByCode(
+    companyId,
+    "BANK_ACCOUNTS",
+    { session },
+  );
+  if (!group) {
+    group = await accountGroupRepository.createGroup(
+      {
+        workspaceId,
+        companyId,
+        groupCode: "BANK_ACCOUNTS",
+        groupName: "Bank Accounts",
+        parentGroupId: null,
+        nature: ACCOUNT_NATURE.ASSET,
+        isSystemGroup: true,
+        createdBy: userId,
+      },
+      { session },
+    );
+  }
+
+  // 3️⃣ Create a COA account for this bank
+  const account = await accountRepository.createAccount(
+    {
+      workspaceId,
+      companyId,
+      accountCode: `BANK_${bankAccount.accountNumber}`,
+      accountName: bankAccount.accountName,
+      accountGroupId: group._id,
+      accountNature: ACCOUNT_NATURE.ASSET,
+      accountCategory: ACCOUNT_CATEGORY.BANK,
+      openingBalance: 0,
+      openingBalanceType: "dr",
+      status: "active",
+      isSystemAccount: false,
+      createdBy: userId,
+    },
+    { session },
+  );
+
+  // 4️⃣ Link back to bank account
+  bankAccount.ledgerAccountId = account._id;
+  await bankAccount.save({ session });
+  return account;
+};
 // ---------------------------------------------------------------------------
 // 1. CREATE BANK SLIP (Status: PENDING)
 //    No journal entry at this stage — slip is just a record/document
@@ -199,13 +269,21 @@ const confirmBankSlip = async (id, companyId, workspaceId, userId, payload) => {
       );
     }
 
-    // Get bank ledger account
+    // Get bank ledger account – ensure it exists
     const bankAccount = await BankAccount.findOne({
       _id: bankSlip.bankAccountId,
     }).session(session);
     if (!bankAccount) throw new ApiError(400, "Linked bank account not found");
 
-    const bankLedgerAccountId = bankAccount.ledgerAccountId;
+    // Ensure a COA account exists for this bank and link it
+    const bankLedgerAccount = await _findOrCreateBankLedgerAccount(
+      bankSlip.workspaceId,
+      companyId,
+      userId,
+      bankAccount,
+      session,
+    );
+    const bankLedgerAccountId = bankLedgerAccount._id;
 
     // Get Cash In Hand account
     const cashInHandAccount = await findOrCreateCashInHandAccount(

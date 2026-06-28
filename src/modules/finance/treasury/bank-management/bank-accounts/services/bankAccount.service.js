@@ -101,7 +101,7 @@ const createBankAccount = async (workspaceId, companyId, userId, payload) => {
         accountName: `${bankMaster.name} - ${accountName} (${accountNumber.slice(-4)})`,
         accountGroupId: bankGroup._id,
         accountNature: "ASSET",
-        accountCategory: "ASSET",
+        accountCategory: "BANK",
         openingBalance: 0,
         openingBalanceType: "dr",
         status: "active",

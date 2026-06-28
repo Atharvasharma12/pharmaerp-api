@@ -61,7 +61,8 @@ const accumulateBalance = async (
   workspaceId,
   debitChange = 0,
   creditChange = 0,
-  lastTransactionAt = new Date()
+  lastTransactionAt = new Date(),
+  options = {}
 ) => {
   if (
     !mongoose.Types.ObjectId.isValid(accountId) ||
@@ -71,11 +72,13 @@ const accumulateBalance = async (
     return null;
   }
 
+  const session = options.session || null;
+
   let balanceObj = await AccountBalance.findOne({
     accountId,
     companyId,
     workspaceId,
-  });
+  }).session(session);
 
   if (!balanceObj) {
     balanceObj = new AccountBalance({
@@ -91,7 +94,7 @@ const accumulateBalance = async (
   balanceObj.creditTotal += creditChange;
   balanceObj.lastTransactionAt = lastTransactionAt;
 
-  return balanceObj.save();
+  return balanceObj.save({ session });
 };
 
 const getBalances = async (workspaceId, companyId, filters = {}, options = {}) => {

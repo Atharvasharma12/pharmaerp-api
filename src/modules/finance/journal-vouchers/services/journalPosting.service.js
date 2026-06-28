@@ -52,7 +52,8 @@ const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, opt
         workspaceId,
         debitChange,
         creditChange,
-        postingDate
+        postingDate,
+        { session }
       );
 
       // Create ledger entry document

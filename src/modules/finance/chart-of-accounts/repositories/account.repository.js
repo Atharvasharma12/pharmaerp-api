@@ -16,7 +16,7 @@ const findAccountByIdCompanyAndWorkspace = async (
   accountId,
   companyId,
   workspaceId,
-  options = {}
+  options = {},
 ) => {
   if (
     !mongoose.Types.ObjectId.isValid(accountId) ||
@@ -32,6 +32,7 @@ const findAccountByIdCompanyAndWorkspace = async (
     workspaceId,
     isDeleted: false,
   })
+    .session(options.session || null)
     .populate("accountGroupId", "groupName groupCode nature")
     .select(options.select || "");
 };
@@ -71,7 +72,12 @@ const saveAccount = async (account) => {
   return account.save();
 };
 
-const getAccounts = async (workspaceId, companyId, filters = {}, options = {}) => {
+const getAccounts = async (
+  workspaceId,
+  companyId,
+  filters = {},
+  options = {},
+) => {
   if (
     !mongoose.Types.ObjectId.isValid(workspaceId) ||
     !mongoose.Types.ObjectId.isValid(companyId)
@@ -103,10 +109,7 @@ const getAccounts = async (workspaceId, companyId, filters = {}, options = {}) =
 
   if (filters.search) {
     const searchRegex = new RegExp(filters.search.trim(), "i");
-    query.$or = [
-      { accountName: searchRegex },
-      { accountCode: searchRegex },
-    ];
+    query.$or = [{ accountName: searchRegex }, { accountCode: searchRegex }];
   }
 
   const sort = options.sort || { accountName: 1 };
@@ -136,7 +139,12 @@ const getAccounts = async (workspaceId, companyId, filters = {}, options = {}) =
   return { accounts, total, page, limit };
 };
 
-const deleteAccountById = async (accountId, companyId, workspaceId, deletedBy) => {
+const deleteAccountById = async (
+  accountId,
+  companyId,
+  workspaceId,
+  deletedBy,
+) => {
   if (
     !mongoose.Types.ObjectId.isValid(accountId) ||
     !mongoose.Types.ObjectId.isValid(companyId) ||
@@ -162,7 +170,7 @@ const deleteAccountById = async (accountId, companyId, workspaceId, deletedBy) =
     {
       new: true,
       runValidators: true,
-    }
+    },
   );
 };
 

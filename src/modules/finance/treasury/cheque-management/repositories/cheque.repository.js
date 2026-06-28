@@ -7,15 +7,27 @@ const POPULATE_FIELDS = [
     select: "accountName accountNumber bankMasterId",
     populate: { path: "bankMasterId", select: "name shortName" },
   },
-  { path: "counterpartyAccountId", select: "accountName accountCode accountNature" },
+  {
+    path: "counterpartyAccountId",
+    select: "accountName accountCode accountNature",
+  },
   { path: "createdBy", select: "name email" },
   { path: "depositedBy", select: "name email" },
   { path: "clearedBy", select: "name email" },
   { path: "bouncedBy", select: "name email" },
   { path: "cancelledBy", select: "name email" },
-  { path: "pendingJournalVoucherId", select: "voucherNumber voucherDate status" },
-  { path: "clearingJournalVoucherId", select: "voucherNumber voucherDate status" },
-  { path: "bounceJournalVoucherId", select: "voucherNumber voucherDate status" },
+  {
+    path: "pendingJournalVoucherId",
+    select: "voucherNumber voucherDate status",
+  },
+  {
+    path: "clearingJournalVoucherId",
+    select: "voucherNumber voucherDate status",
+  },
+  {
+    path: "bounceJournalVoucherId",
+    select: "voucherNumber voucherDate status",
+  },
 ];
 
 const findChequeById = async (id, options = {}) => {
@@ -43,7 +55,12 @@ const findChequeByIdCompanyAndWorkspace = async (
     .session(options.session || null);
 };
 
-const findChequeByNumber = async (companyId, chequeNumber, chequeType, options = {}) => {
+const findChequeByNumber = async (
+  companyId,
+  chequeNumber,
+  chequeType,
+  options = {},
+) => {
   if (!mongoose.Types.ObjectId.isValid(companyId)) return null;
   return Cheque.findOne({
     companyId,
@@ -60,13 +77,19 @@ const createCheque = async (payload, options = {}) => {
   return cheque;
 };
 
-const getCheques = async (workspaceId, companyId, filters = {}, options = {}) => {
+const getCheques = async (
+  workspaceId,
+  companyId,
+  filters = {},
+  options = {},
+) => {
   const query = { workspaceId, companyId, isDeleted: false };
 
   if (filters.chequeType) query.chequeType = filters.chequeType;
   if (filters.status) query.status = filters.status;
   if (filters.bankAccountId) query.bankAccountId = filters.bankAccountId;
-  if (filters.counterpartyAccountId) query.counterpartyAccountId = filters.counterpartyAccountId;
+  if (filters.counterpartyAccountId)
+    query.counterpartyAccountId = filters.counterpartyAccountId;
 
   if (filters.startDate || filters.endDate) {
     query.chequeDate = {};
