@@ -139,6 +139,8 @@ const createCashDenomination = async (workspaceId, companyId, userId, payload) =
         workspaceId,
         companyId,
         cashAccountId,
+        // Denormalize branchId from the cash account for direct branch-level queries
+        branchId: cashAccount.branchId || null,
         countNumber,
         countDate: new Date(countDate),
         denominations: processedDenominations,

@@ -28,6 +28,7 @@ const findCashAccountByIdCompanyAndWorkspace = async (
     isDeleted: false,
   })
     .populate("ledgerAccountId", "accountName accountCode status")
+    .populate("branchId", "name branchCode type")
     .session(options.session || null);
 };
 
@@ -53,6 +54,9 @@ const getCashAccounts = async (
   if (filters.status) {
     query.status = filters.status;
   }
+  if (filters.branchId) {
+    query.branchId = filters.branchId;
+  }
   if (filters.isPrimary !== undefined) {
     query.isPrimary =
       filters.isPrimary === "true" || filters.isPrimary === true;
@@ -70,6 +74,7 @@ const getCashAccounts = async (
   if (options.all === true) {
     const cashAccounts = await CashAccount.find(query)
       .populate("ledgerAccountId", "accountName accountCode status")
+      .populate("branchId", "name branchCode type")
       .sort(sort)
       .session(options.session || null);
     return { cashAccounts, total: cashAccounts.length };
@@ -82,6 +87,7 @@ const getCashAccounts = async (
   const [cashAccounts, total] = await Promise.all([
     CashAccount.find(query)
       .populate("ledgerAccountId", "accountName accountCode status")
+      .populate("branchId", "name branchCode type")
       .sort(sort)
       .skip(skip)
       .limit(limit)

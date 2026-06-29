@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 import CashDenomination from "../models/cashDenomination.model.js";
 
 const POPULATE_FIELDS = [
-  { path: "cashAccountId", select: "accountName ledgerAccountId" },
+  { path: "cashAccountId", select: "accountName ledgerAccountId branchId" },
+  { path: "branchId", select: "name branchCode type" },
   { path: "createdBy", select: "name email" },
   { path: "confirmedBy", select: "name email" },
   { path: "cancelledBy", select: "name email" },
@@ -55,6 +56,7 @@ const getCashDenominations = async (
   const query = { workspaceId, companyId, isDeleted: false };
 
   if (filters.cashAccountId) query.cashAccountId = filters.cashAccountId;
+  if (filters.branchId) query.branchId = filters.branchId;
   if (filters.status) query.status = filters.status;
 
   if (filters.startDate || filters.endDate) {

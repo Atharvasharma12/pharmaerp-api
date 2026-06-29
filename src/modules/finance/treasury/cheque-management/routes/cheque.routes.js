@@ -35,7 +35,11 @@ router.post("/", validate(createChequeSchema), createCheque);
 router.get("/", validate(getChequesQuerySchema, "query"), getCheques);
 
 // Document routes
-router.get("/:chequeId", validate(chequeIdParamSchema, "params"), getChequeById);
+router.get(
+  "/:chequeId",
+  validate(chequeIdParamSchema, "params"),
+  getChequeById,
+);
 
 // Lifecycle action routes
 router.post(

@@ -19,6 +19,7 @@ export const createCashAccountSchema = Joi.object({
     "number.min": "Opening balance cannot be negative",
   }),
   isPrimary: Joi.boolean().default(false).optional(),
+  branchId: objectId.allow(null).optional(),
 });
 
 export const updateCashAccountSchema = Joi.object({
@@ -38,6 +39,7 @@ export const cashAccountIdParamSchema = Joi.object({
 });
 
 export const getCashAccountsQuerySchema = Joi.object({
+  branchId: objectId.optional(),
   search: Joi.string().trim().allow("").optional(),
   status: Joi.string().valid("active", "inactive").optional(),
   isPrimary: Joi.boolean().optional(),

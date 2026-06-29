@@ -7,7 +7,8 @@ import Account from "../../../../chart-of-accounts/models/account.model.js";
 import JournalLine from "../../../../journal-vouchers/models/journalLine.model.js";
 
 const createCashAccount = async (workspaceId, companyId, userId, payload) => {
-  const { accountName, description, openingBalance, isPrimary } = payload;
+  const { accountName, description, openingBalance, isPrimary, branchId } =
+    payload;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -24,7 +25,10 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
       .session(session);
 
     if (existing) {
-      throw new ApiError(400, "A cash account with this name already exists for this company");
+      throw new ApiError(
+        400,
+        "A cash account with this name already exists for this company",
+      );
     }
 
     // 2. Find or create standard "Cash Accounts" group under Assets
@@ -97,6 +101,7 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
     const cashAccountPayload = {
       workspaceId,
       companyId,
+      branchId: branchId || null,
       accountName: String(accountName).trim(),
       description: description || null,
       openingBalance: openingBalance || 0,
@@ -209,7 +214,8 @@ const updateCashAccount = async (
       ).session(session);
     }
 
-    if (description !== undefined) cashAccount.description = description || null;
+    if (description !== undefined)
+      cashAccount.description = description || null;
 
     if (status !== undefined) {
       cashAccount.status = status;

@@ -61,6 +61,7 @@ export const cashDenominationIdParamSchema = Joi.object({
 
 export const getCashDenominationsQuerySchema = Joi.object({
   cashAccountId: objectId.optional(),
+  branchId: objectId.optional(),
   status: Joi.string().valid("DRAFT", "CONFIRMED", "CANCELLED").optional(),
   startDate: Joi.date().iso().optional(),
   endDate: Joi.date().iso().optional(),

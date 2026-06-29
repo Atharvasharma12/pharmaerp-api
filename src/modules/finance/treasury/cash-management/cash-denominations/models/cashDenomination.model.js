@@ -49,6 +49,15 @@ const cashDenominationSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Denormalized branch reference — copied from the CashAccount on creation
+    // for fast direct filtering without joining through CashAccount
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+
     // Auto-generated count reference: CD-YYYY-NNNNN
     countNumber: {
       type: String,
@@ -193,6 +202,15 @@ cashDenominationSchema.index({
   workspaceId: 1,
   companyId: 1,
   status: 1,
+  isDeleted: 1,
+});
+
+// Branch-level index for fast per-branch denomination queries
+cashDenominationSchema.index({
+  workspaceId: 1,
+  companyId: 1,
+  branchId: 1,
+  countDate: -1,
   isDeleted: 1,
 });
 

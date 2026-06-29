@@ -17,6 +17,14 @@ const cashAccountSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Optional: branch this cash account belongs to
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+
     accountName: {
       type: String,
       required: [true, "Account name is required"],
@@ -111,6 +119,14 @@ cashAccountSchema.index({
   workspaceId: 1,
   companyId: 1,
   status: 1,
+  isDeleted: 1,
+});
+
+// Branch-level index for filtering cash accounts by branch
+cashAccountSchema.index({
+  workspaceId: 1,
+  companyId: 1,
+  branchId: 1,
   isDeleted: 1,
 });
 
