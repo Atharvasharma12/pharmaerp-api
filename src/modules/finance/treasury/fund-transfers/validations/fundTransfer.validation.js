@@ -7,6 +7,23 @@ const objectId = Joi.string()
     "string.pattern.base": "Invalid ID format",
   });
 
+// Valid Indian currency denominations
+const VALID_DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
+
+const denominationLineSchema = Joi.object({
+  denomination: Joi.number()
+    .valid(...VALID_DENOMINATIONS)
+    .required()
+    .messages({
+      "any.required": "Denomination value is required",
+      "any.only": `Denomination must be one of: ${VALID_DENOMINATIONS.join(", ")}`,
+    }),
+  quantity: Joi.number().integer().min(0).required().messages({
+    "any.required": "Quantity is required",
+    "number.min": "Quantity cannot be negative",
+  }),
+});
+
 export const createFundTransferSchema = Joi.object({
   transferDate: Joi.date().required().messages({
     "any.required": "Transfer date is required",
@@ -40,7 +57,24 @@ export const createFundTransferSchema = Joi.object({
   referenceNumber: Joi.string().trim().max(100).allow(null, "").optional(),
 
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
+
+  // Optional denomination breakdown for the FROM cash account (only when fromAccountType=CASH)
+  fromDenominations: Joi.array()
+    .items(denominationLineSchema)
+    .optional()
+    .messages({
+      "array.base": "fromDenominations must be an array",
+    }),
+
+  // Optional denomination breakdown for the TO cash account (only when toAccountType=CASH)
+  toDenominations: Joi.array()
+    .items(denominationLineSchema)
+    .optional()
+    .messages({
+      "array.base": "toDenominations must be an array",
+    }),
 });
+
 
 export const cancelFundTransferSchema = Joi.object({
   reason: Joi.string().trim().max(500).allow(null, "").optional(),

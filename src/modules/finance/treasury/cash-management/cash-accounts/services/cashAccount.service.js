@@ -5,10 +5,20 @@ import accountGroupRepository from "../../../../chart-of-accounts/repositories/a
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import JournalLine from "../../../../journal-vouchers/models/journalLine.model.js";
+import openingBalanceService from "../../../../opening-balances/services/openingBalance.service.js";
+import cashDenominationRepository from "../../cash-denominations/repositories/cashDenomination.repository.js";
+import { CASH_DENOMINATION_STATUS } from "../../cash-denominations/constants/cashDenomination.constant.js";
 
 const createCashAccount = async (workspaceId, companyId, userId, payload) => {
-  const { accountName, description, openingBalance, isPrimary, branchId } =
-    payload;
+  const {
+    accountName,
+    description,
+    openingBalance = 0,
+    openingBalanceType = "dr",
+    denominations,
+    isPrimary,
+    branchId,
+  } = payload;
 
   const session = await mongoose.startSession();
   session.startTransaction();
@@ -89,7 +99,7 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
         accountNature: "ASSET",
         accountCategory: "CASH",
         openingBalance: openingBalance || 0,
-        openingBalanceType: "dr",
+        openingBalanceType: openingBalanceType || "dr",
         status: "active",
         isSystemAccount: true,
         createdBy: userId,
@@ -97,14 +107,13 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
       { session },
     );
 
-    // 5. Save Cash Account
+    // 5. Save Cash Account (openingBalance is NOT stored here — lives on the ledger Account)
     const cashAccountPayload = {
       workspaceId,
       companyId,
       branchId: branchId || null,
       accountName: String(accountName).trim(),
       description: description || null,
-      openingBalance: openingBalance || 0,
       ledgerAccountId: ledgerAccount._id,
       isPrimary: !!isPrimary,
       createdBy: userId,
@@ -137,6 +146,85 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
           cashAccount._id,
           companyId,
           workspaceId,
+          { session },
+        );
+      }
+    }
+
+    // 7. If opening balance provided → post opening balance journal entry
+    //    This creates ledger entries + updates AccountBalance for the linked ledger account
+    if (openingBalance && openingBalance > 0) {
+      await openingBalanceService.postOpeningBalanceJournal(
+        workspaceId,
+        companyId,
+        userId,
+        ledgerAccount._id,
+        openingBalance,
+        openingBalanceType,
+        { session },
+      );
+
+      // 8. If denomination breakdown provided → create a CONFIRMED cash denomination count
+      //    physicalTotal must equal openingBalance for integrity
+      if (denominations && denominations.length > 0) {
+        const processedDenominations = denominations.map((d) => ({
+          denomination: d.denomination,
+          quantity: d.quantity || 0,
+          subtotal: d.denomination * (d.quantity || 0),
+        }));
+
+        const physicalTotal = processedDenominations.reduce(
+          (sum, d) => sum + d.subtotal,
+          0,
+        );
+
+        // Validate that denomination total matches opening balance
+        const tolerance = 0.01;
+        if (Math.abs(physicalTotal - openingBalance) > tolerance) {
+          throw new ApiError(
+            400,
+            `Denomination total (₹${physicalTotal}) does not match opening balance (₹${openingBalance})`,
+          );
+        }
+
+        // Generate count number
+        const countNumber = await cashDenominationRepository.getNextCountNumber(
+          companyId,
+          workspaceId,
+          { session },
+        );
+
+        const denomRecord = await cashDenominationRepository.createCashDenomination(
+          {
+            workspaceId,
+            companyId,
+            cashAccountId: cashAccount._id,
+            branchId: branchId || null,
+            countNumber,
+            countDate: new Date(),
+            denominations: processedDenominations,
+            physicalTotal,
+            expectedBalance: openingBalance,
+            variance: 0,
+            narration: `Opening balance denomination count`,
+            status: CASH_DENOMINATION_STATUS.CONFIRMED,
+            confirmedAt: new Date(),
+            confirmedBy: userId,
+            createdBy: userId,
+          },
+          { session },
+        );
+
+        // Update latestCashCount snapshot on the CashAccount
+        await cashAccountRepository.updateLatestCashCount(
+          cashAccount._id,
+          {
+            cashDenominationId: denomRecord._id,
+            countNumber,
+            countDate: new Date(),
+            physicalTotal,
+            denominations: processedDenominations,
+          },
           { session },
         );
       }

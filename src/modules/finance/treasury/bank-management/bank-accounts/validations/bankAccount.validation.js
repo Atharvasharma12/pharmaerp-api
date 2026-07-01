@@ -49,6 +49,17 @@ export const createBankAccountSchema = Joi.object({
     .default("CURRENT")
     .optional(),
   isPrimary: Joi.boolean().default(false).optional(),
+  openingBalance: Joi.number().min(0).default(0).optional().messages({
+    "number.min": "Opening balance cannot be negative",
+  }),
+  openingBalanceType: Joi.string()
+    .valid("dr", "cr")
+    .lowercase()
+    .default("dr")
+    .optional()
+    .messages({
+      "any.only": "Opening balance type must be 'dr' or 'cr'",
+    }),
 });
 
 export const updateBankAccountSchema = Joi.object({

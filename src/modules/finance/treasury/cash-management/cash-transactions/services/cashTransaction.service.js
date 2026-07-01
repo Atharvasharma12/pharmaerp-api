@@ -7,6 +7,7 @@ import {
 } from "../constants/cashTransaction.constant.js";
 
 import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
+import cashAccountRepository from "../../cash-accounts/repositories/cashAccount.repository.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
@@ -16,6 +17,8 @@ import journalPostingService from "../../../../journal-vouchers/services/journal
 import journalCancellationService from "../../../../journal-vouchers/services/journalCancellation.service.js";
 import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
+import cashDenominationRepository from "../../cash-denominations/repositories/cashDenomination.repository.js";
+import { CASH_DENOMINATION_STATUS } from "../../cash-denominations/constants/cashDenomination.constant.js";
 
 // ---------------------------------------------------------------------------
 // AUTO-CREATE SYSTEM ACCOUNT (for EXPENSE / PETTY_CASH auto-offset)
@@ -85,6 +88,7 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
     referenceNumber,
     narration,
     counterpartyAccountId,
+    denominations,
   } = payload;
 
   const session = await mongoose.startSession();
@@ -257,6 +261,73 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
       postedBy: userId,
       createdBy: userId,
     };
+
+    // 10. If denomination breakdown provided → create a CONFIRMED denomination count
+    let cashDenominationId = null;
+    if (denominations && denominations.length > 0) {
+      const processedDenominations = denominations.map((d) => ({
+        denomination: d.denomination,
+        quantity: d.quantity || 0,
+        subtotal: d.denomination * (d.quantity || 0),
+      }));
+
+      const physicalTotal = processedDenominations.reduce(
+        (sum, d) => sum + d.subtotal,
+        0,
+      );
+
+      const countNumber = await cashDenominationRepository.getNextCountNumber(
+        companyId,
+        workspaceId,
+        { session },
+      );
+
+      // Look up the cash account's branch for denormalization
+      const cashAccountDoc = await mongoose
+        .model("CashAccount")
+        .findOne({ _id: cashAccountId })
+        .select("branchId")
+        .session(session);
+
+      const denomRecord = await cashDenominationRepository.createCashDenomination(
+        {
+          workspaceId,
+          companyId,
+          cashAccountId,
+          branchId: cashAccountDoc?.branchId || null,
+          countNumber,
+          countDate: new Date(transactionDate),
+          denominations: processedDenominations,
+          physicalTotal,
+          expectedBalance: amount,
+          variance: 0,
+          narration: narration || `Cash denomination count for ${transactionNumber}`,
+          status: CASH_DENOMINATION_STATUS.CONFIRMED,
+          confirmedAt: new Date(),
+          confirmedBy: userId,
+          createdBy: userId,
+        },
+        { session },
+      );
+      cashDenominationId = denomRecord._id;
+
+      // Update latestCashCount snapshot on the CashAccount
+      await cashAccountRepository.updateLatestCashCount(
+        cashAccountId,
+        {
+          cashDenominationId: denomRecord._id,
+          countNumber,
+          countDate: new Date(transactionDate),
+          physicalTotal,
+          denominations: processedDenominations,
+        },
+        { session },
+      );
+    }
+
+    if (cashDenominationId) {
+      txPayload.cashDenominationId = cashDenominationId;
+    }
 
     const cashTransaction = await cashTransactionRepository.createCashTransaction(
       txPayload,

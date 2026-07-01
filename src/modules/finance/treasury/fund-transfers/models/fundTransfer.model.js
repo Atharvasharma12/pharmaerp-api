@@ -108,6 +108,22 @@ const fundTransferSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Optional: denomination count for the FROM cash account (populated when fromAccountType=CASH)
+    fromCashDenominationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CashDenomination",
+      default: null,
+      index: true,
+    },
+
+    // Optional: denomination count for the TO cash account (populated when toAccountType=CASH)
+    toCashDenominationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CashDenomination",
+      default: null,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: Object.values(FUND_TRANSFER_STATUS),

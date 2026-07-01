@@ -4,6 +4,7 @@ import cashDenominationRepository from "../repositories/cashDenomination.reposit
 import { CASH_DENOMINATION_STATUS } from "../constants/cashDenomination.constant.js";
 
 import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
+import cashAccountRepository from "../../cash-accounts/repositories/cashAccount.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import journalVoucherRepository from "../../../../journal-vouchers/repositories/journalVoucher.repository.js";
@@ -16,11 +17,11 @@ import voucherNumberService from "../../../../journal-vouchers/services/voucherN
 // HELPER — get ledger balance for a cash account
 // ---------------------------------------------------------------------------
 const getLedgerBalance = async (cashAccount, companyId, session) => {
-  // We return expectedBalance from the cash account's opening balance as a
-  // starting point; real-time balance comes from the account balance module.
-  // For now we return the openingBalance as a base — the frontend/reports
-  // module will provide the live balance. Service accepts it from the payload.
-  return cashAccount.openingBalance || 0;
+  // The real-time balance comes from the AccountBalance module through journal postings.
+  // The openingBalance field has been removed from CashAccount model — it now lives
+  // exclusively on the linked Account (ledger account). Return 0 as base; the
+  // frontend/reports module provides the live balance via accountBalance queries.
+  return 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -290,6 +291,19 @@ const confirmCashDenomination = async (id, companyId, workspaceId, userId, paylo
       cashDenomination.adjustmentJournalVoucherId = adjustmentVoucherId;
     }
     await cashDenomination.save({ session });
+
+    // Update latestCashCount snapshot on the linked CashAccount
+    await cashAccountRepository.updateLatestCashCount(
+      cashDenomination.cashAccountId,
+      {
+        cashDenominationId: cashDenomination._id,
+        countNumber: cashDenomination.countNumber,
+        countDate: cashDenomination.countDate,
+        physicalTotal: cashDenomination.physicalTotal,
+        denominations: cashDenomination.denominations,
+      },
+      { session },
+    );
 
     await session.commitTransaction();
     session.endSession();

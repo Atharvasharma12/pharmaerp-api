@@ -7,6 +7,23 @@ const objectId = Joi.string()
     "string.pattern.base": "Invalid ID format",
   });
 
+// Valid Indian currency denominations (same set as cashDenomination.validation.js)
+const VALID_DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
+
+const denominationLineSchema = Joi.object({
+  denomination: Joi.number()
+    .valid(...VALID_DENOMINATIONS)
+    .required()
+    .messages({
+      "any.required": "Denomination value is required",
+      "any.only": `Denomination must be one of: ${VALID_DENOMINATIONS.join(", ")}`,
+    }),
+  quantity: Joi.number().integer().min(0).required().messages({
+    "any.required": "Quantity is required",
+    "number.min": "Quantity cannot be negative",
+  }),
+});
+
 export const createCashAccountSchema = Joi.object({
   accountName: Joi.string().trim().min(2).max(120).required().messages({
     "any.required": "Account name is required",
@@ -18,6 +35,21 @@ export const createCashAccountSchema = Joi.object({
   openingBalance: Joi.number().min(0).default(0).optional().messages({
     "number.min": "Opening balance cannot be negative",
   }),
+  openingBalanceType: Joi.string()
+    .valid("dr", "cr")
+    .lowercase()
+    .default("dr")
+    .optional()
+    .messages({
+      "any.only": "Opening balance type must be 'dr' or 'cr'",
+    }),
+  // Optional denomination breakdown for opening balance cash count
+  denominations: Joi.array()
+    .items(denominationLineSchema)
+    .optional()
+    .messages({
+      "array.base": "Denominations must be an array",
+    }),
   isPrimary: Joi.boolean().default(false).optional(),
   branchId: objectId.allow(null).optional(),
 });
@@ -47,3 +79,4 @@ export const getCashAccountsQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),
   all: Joi.boolean().default(false).optional(),
 });
+

@@ -91,6 +91,14 @@ const cashTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Optional: linked denomination count for this cash movement
+    cashDenominationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CashDenomination",
+      default: null,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: Object.values(CASH_TRANSACTION_STATUS),

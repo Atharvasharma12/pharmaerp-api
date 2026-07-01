@@ -8,12 +8,15 @@ import {
 
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
 import CashAccount from "../../cash-management/cash-accounts/models/cashAccount.model.js";
+import cashAccountRepository from "../../cash-management/cash-accounts/repositories/cashAccount.repository.js";
 import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
 import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
 import journalCancellationService from "../../../journal-vouchers/services/journalCancellation.service.js";
 import { VOUCHER_TYPE } from "../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../journal-vouchers/services/voucherNumber.service.js";
 import journalVoucherRepository from "../../../journal-vouchers/repositories/journalVoucher.repository.js";
+import cashDenominationRepository from "../../cash-management/cash-denominations/repositories/cashDenomination.repository.js";
+import { CASH_DENOMINATION_STATUS } from "../../cash-management/cash-denominations/constants/cashDenomination.constant.js";
 
 /**
  * Resolve the ledger Account ID from either a BankAccount or CashAccount.
@@ -72,6 +75,8 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
     amount,
     referenceNumber,
     narration,
+    fromDenominations,
+    toDenominations,
   } = payload;
 
   const session = await mongoose.startSession();
@@ -198,6 +203,95 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       postedBy: userId,
       createdBy: userId,
     };
+
+    // 10. Create denomination records for cash sides of the transfer
+    // Returns { id, countNumber, physicalTotal, denominations } so the snapshot
+    // can be written without an extra getNextCountNumber call.
+    const buildDenomRecord = async (denominations, cashAccountId) => {
+      if (!denominations || denominations.length === 0) return null;
+
+      const processedDenominations = denominations.map((d) => ({
+        denomination: d.denomination,
+        quantity: d.quantity || 0,
+        subtotal: d.denomination * (d.quantity || 0),
+      }));
+
+      const physicalTotal = processedDenominations.reduce(
+        (sum, d) => sum + d.subtotal,
+        0,
+      );
+
+      const cashAccountDoc = await mongoose
+        .model("CashAccount")
+        .findOne({ _id: cashAccountId })
+        .select("branchId")
+        .session(session);
+
+      const countNumber = await cashDenominationRepository.getNextCountNumber(
+        companyId,
+        workspaceId,
+        { session },
+      );
+
+      const record = await cashDenominationRepository.createCashDenomination(
+        {
+          workspaceId,
+          companyId,
+          cashAccountId,
+          branchId: cashAccountDoc?.branchId || null,
+          countNumber,
+          countDate: new Date(transferDate),
+          denominations: processedDenominations,
+          physicalTotal,
+          expectedBalance: amount,
+          variance: 0,
+          narration: narration || `Fund Transfer ${transferNumber} - denomination count`,
+          status: CASH_DENOMINATION_STATUS.CONFIRMED,
+          confirmedAt: new Date(),
+          confirmedBy: userId,
+          createdBy: userId,
+        },
+        { session },
+      );
+      return { id: record._id, countNumber, physicalTotal, denominations: processedDenominations };
+    };
+
+    if (fromAccountType === "CASH" && fromDenominations && fromDenominations.length > 0) {
+      const result = await buildDenomRecord(fromDenominations, fromAccountId);
+      if (result) {
+        fundTransferPayload.fromCashDenominationId = result.id;
+        // Update latestCashCount snapshot on the FROM cash account
+        await cashAccountRepository.updateLatestCashCount(
+          fromAccountId,
+          {
+            cashDenominationId: result.id,
+            countNumber: result.countNumber,
+            countDate: new Date(transferDate),
+            physicalTotal: result.physicalTotal,
+            denominations: result.denominations,
+          },
+          { session },
+        );
+      }
+    }
+    if (toAccountType === "CASH" && toDenominations && toDenominations.length > 0) {
+      const result = await buildDenomRecord(toDenominations, toAccountId);
+      if (result) {
+        fundTransferPayload.toCashDenominationId = result.id;
+        // Update latestCashCount snapshot on the TO cash account
+        await cashAccountRepository.updateLatestCashCount(
+          toAccountId,
+          {
+            cashDenominationId: result.id,
+            countNumber: result.countNumber,
+            countDate: new Date(transferDate),
+            physicalTotal: result.physicalTotal,
+            denominations: result.denominations,
+          },
+          { session },
+        );
+      }
+    }
 
     const fundTransfer = await fundTransferRepository.createFundTransfer(
       fundTransferPayload,

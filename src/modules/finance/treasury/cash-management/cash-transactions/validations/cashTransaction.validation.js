@@ -17,6 +17,23 @@ const VALID_TRANSACTION_TYPES = [
 
 const VALID_DIRECTIONS = ["CREDIT", "DEBIT"];
 
+// Valid Indian currency denominations
+const VALID_DENOMINATIONS = [500, 200, 100, 50, 20, 10, 5, 2, 1];
+
+const denominationLineSchema = Joi.object({
+  denomination: Joi.number()
+    .valid(...VALID_DENOMINATIONS)
+    .required()
+    .messages({
+      "any.required": "Denomination value is required",
+      "any.only": `Denomination must be one of: ${VALID_DENOMINATIONS.join(", ")}`,
+    }),
+  quantity: Joi.number().integer().min(0).required().messages({
+    "any.required": "Quantity is required",
+    "number.min": "Quantity cannot be negative",
+  }),
+});
+
 export const createCashTransactionSchema = Joi.object({
   transactionDate: Joi.date().iso().required().messages({
     "any.required": "Transaction date is required",
@@ -46,7 +63,15 @@ export const createCashTransactionSchema = Joi.object({
   referenceNumber: Joi.string().trim().max(100).allow(null, "").optional(),
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
   counterpartyAccountId: objectId.allow(null).optional(),
+  // Optional denomination breakdown for this cash movement
+  denominations: Joi.array()
+    .items(denominationLineSchema)
+    .optional()
+    .messages({
+      "array.base": "Denominations must be an array",
+    }),
 });
+
 
 export const cancelCashTransactionSchema = Joi.object({
   reason: Joi.string().trim().max(500).allow(null, "").optional(),

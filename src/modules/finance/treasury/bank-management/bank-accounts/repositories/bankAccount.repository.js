@@ -19,7 +19,10 @@ const findBankAccountByIdCompanyAndWorkspace = async (id, companyId, workspaceId
     companyId,
     workspaceId,
     isDeleted: false,
-  }).session(options.session || null);
+  })
+    .populate("bankMasterId", "name logoUrl")
+    .populate("ledgerAccountId", "accountName accountCode status openingBalance openingBalanceType")
+    .session(options.session || null);
 };
 
 const createBankAccount = async (payload, options = {}) => {
@@ -59,7 +62,7 @@ const getBankAccounts = async (workspaceId, companyId, filters = {}, options = {
   if (options.all === true) {
     const bankAccounts = await BankAccount.find(query)
       .populate("bankMasterId", "name logoUrl")
-      .populate("ledgerAccountId", "accountName accountCode status")
+      .populate("ledgerAccountId", "accountName accountCode status openingBalance openingBalanceType")
       .sort(sort)
       .session(options.session || null);
     return { bankAccounts, total: bankAccounts.length };
@@ -72,7 +75,7 @@ const getBankAccounts = async (workspaceId, companyId, filters = {}, options = {
   const [bankAccounts, total] = await Promise.all([
     BankAccount.find(query)
       .populate("bankMasterId", "name logoUrl")
-      .populate("ledgerAccountId", "accountName accountCode status")
+      .populate("ledgerAccountId", "accountName accountCode status openingBalance openingBalanceType")
       .sort(sort)
       .skip(skip)
       .limit(limit)

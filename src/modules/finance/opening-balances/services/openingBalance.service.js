@@ -10,6 +10,8 @@ import voucherNumberService from "../../journal-vouchers/services/voucherNumber.
 import journalPostingService from "../../journal-vouchers/services/journalPosting.service.js";
 import { VOUCHER_TYPE } from "../../journal-vouchers/constants/voucherType.constant.js";
 import { VOUCHER_STATUS } from "../../journal-vouchers/constants/voucherStatus.constant.js";
+import BankAccount from "../../treasury/bank-management/bank-accounts/models/bankAccount.model.js";
+import CashAccount from "../../treasury/cash-management/cash-accounts/models/cashAccount.model.js";
 
 const getOrCreateOpeningBalanceEquityAccount = async (
   workspaceId,
@@ -358,8 +360,147 @@ const setSupplierOpeningBalance = async (
   }
 };
 
+const setBankAccountOpeningBalance = async (
+  workspaceId,
+  companyId,
+  userId,
+  payload
+) => {
+  const { bankAccountId, amount, balanceType } = payload;
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const bankAccount = await BankAccount.findOne({
+      _id: bankAccountId,
+      companyId,
+      workspaceId,
+      isDeleted: false,
+    }).session(session);
+
+    if (!bankAccount) {
+      throw new ApiError(404, "Bank Account not found");
+    }
+
+    if (!bankAccount.ledgerAccountId) {
+      throw new ApiError(400, "Bank Account does not have a linked ledger account");
+    }
+
+    // Update linked Account opening balance fields
+    const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
+      bankAccount.ledgerAccountId,
+      companyId,
+      workspaceId,
+      { session }
+    );
+    if (account) {
+      account.openingBalance = amount;
+      account.openingBalanceType = balanceType;
+      await account.save({ session });
+    }
+
+    let postedVoucher = null;
+    if (amount > 0) {
+      postedVoucher = await postOpeningBalanceJournal(
+        workspaceId,
+        companyId,
+        userId,
+        bankAccount.ledgerAccountId,
+        amount,
+        balanceType,
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      bankAccountId,
+      ledgerAccountId: bankAccount.ledgerAccountId,
+      voucher: postedVoucher,
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
+const setCashAccountOpeningBalance = async (
+  workspaceId,
+  companyId,
+  userId,
+  payload
+) => {
+  const { cashAccountId, amount, balanceType } = payload;
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const cashAccount = await CashAccount.findOne({
+      _id: cashAccountId,
+      companyId,
+      workspaceId,
+      isDeleted: false,
+    }).session(session);
+
+    if (!cashAccount) {
+      throw new ApiError(404, "Cash Account not found");
+    }
+
+    if (!cashAccount.ledgerAccountId) {
+      throw new ApiError(400, "Cash Account does not have a linked ledger account");
+    }
+
+    // Update linked Account opening balance fields
+    const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
+      cashAccount.ledgerAccountId,
+      companyId,
+      workspaceId,
+      { session }
+    );
+    if (account) {
+      account.openingBalance = amount;
+      account.openingBalanceType = balanceType;
+      await account.save({ session });
+    }
+
+    let postedVoucher = null;
+    if (amount > 0) {
+      postedVoucher = await postOpeningBalanceJournal(
+        workspaceId,
+        companyId,
+        userId,
+        cashAccount.ledgerAccountId,
+        amount,
+        balanceType,
+        { session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return {
+      cashAccountId,
+      ledgerAccountId: cashAccount.ledgerAccountId,
+      voucher: postedVoucher,
+    };
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
 export default {
+  postOpeningBalanceJournal,
   setAccountOpeningBalance,
   setCustomerOpeningBalance,
   setSupplierOpeningBalance,
+  setBankAccountOpeningBalance,
+  setCashAccountOpeningBalance,
 };

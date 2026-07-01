@@ -6,6 +6,7 @@ import accountGroupRepository from "../../../../chart-of-accounts/repositories/a
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import JournalLine from "../../../../journal-vouchers/models/journalLine.model.js";
+import openingBalanceService from "../../../../opening-balances/services/openingBalance.service.js";
 
 const createBankAccount = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -19,6 +20,8 @@ const createBankAccount = async (workspaceId, companyId, userId, payload) => {
     registeredMobile,
     accountType,
     isPrimary,
+    openingBalance = 0,
+    openingBalanceType = "dr",
   } = payload;
 
   const session = await mongoose.startSession();
@@ -102,8 +105,8 @@ const createBankAccount = async (workspaceId, companyId, userId, payload) => {
         accountGroupId: bankGroup._id,
         accountNature: "ASSET",
         accountCategory: "BANK",
-        openingBalance: 0,
-        openingBalanceType: "dr",
+        openingBalance: openingBalance || 0,
+        openingBalanceType: openingBalanceType || "dr",
         status: "active",
         isSystemAccount: true,
         createdBy: userId,
@@ -162,6 +165,20 @@ const createBankAccount = async (workspaceId, companyId, userId, payload) => {
           { session },
         );
       }
+    }
+
+    // 8. If opening balance is provided, post an opening balance journal entry
+    //    This will create ledger entries + update account balance for the linked ledger account
+    if (openingBalance && openingBalance > 0) {
+      await openingBalanceService.postOpeningBalanceJournal(
+        workspaceId,
+        companyId,
+        userId,
+        ledgerAccount._id,
+        openingBalance,
+        openingBalanceType,
+        { session },
+      );
     }
 
     await session.commitTransaction();

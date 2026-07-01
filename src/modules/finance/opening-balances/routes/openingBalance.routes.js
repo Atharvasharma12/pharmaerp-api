@@ -9,12 +9,16 @@ import {
   setAccountOpeningBalance,
   setCustomerOpeningBalance,
   setSupplierOpeningBalance,
+  setBankAccountOpeningBalance,
+  setCashAccountOpeningBalance,
 } from "../controllers/openingBalance.controller.js";
 
 import {
   setAccountOpeningBalanceSchema,
   setCustomerOpeningBalanceSchema,
   setSupplierOpeningBalanceSchema,
+  setBankAccountOpeningBalanceSchema,
+  setCashAccountOpeningBalanceSchema,
 } from "../validations/openingBalance.validation.js";
 
 const router = Router();
@@ -39,6 +43,16 @@ router.post(
   "/supplier",
   validate(setSupplierOpeningBalanceSchema),
   setSupplierOpeningBalance,
+);
+router.post(
+  "/bank-account",
+  validate(setBankAccountOpeningBalanceSchema),
+  setBankAccountOpeningBalance,
+);
+router.post(
+  "/cash-account",
+  validate(setCashAccountOpeningBalanceSchema),
+  setCashAccountOpeningBalance,
 );
 
 export default router;
