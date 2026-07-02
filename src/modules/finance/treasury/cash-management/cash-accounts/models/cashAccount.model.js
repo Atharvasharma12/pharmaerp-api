@@ -83,41 +83,6 @@ const cashAccountSchema = new mongoose.Schema(
       ref: "User",
       required: [true, "Created by user is required"],
     },
-
-    // Denormalized snapshot of the most recent CONFIRMED denomination count.
-    // Updated every time a CashDenomination is confirmed for this account.
-    // Allows fast O(1) cash-in-hand lookup without joining CashDenomination.
-    latestCashCount: {
-      cashDenominationId: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "CashDenomination",
-        default: null,
-      },
-      countNumber: {
-        type: String,
-        default: null,
-      },
-      countDate: {
-        type: Date,
-        default: null,
-      },
-      physicalTotal: {
-        type: Number,
-        default: null,
-      },
-      // Denominations snapshot: array of { denomination, quantity, subtotal }
-      denominations: {
-        type: [
-          {
-            denomination: Number,
-            quantity: Number,
-            subtotal: Number,
-            _id: false,
-          },
-        ],
-        default: [],
-      },
-    },
   },
   {
     timestamps: true,

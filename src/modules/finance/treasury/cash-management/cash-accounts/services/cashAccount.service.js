@@ -8,6 +8,7 @@ import JournalLine from "../../../../journal-vouchers/models/journalLine.model.j
 import openingBalanceService from "../../../../opening-balances/services/openingBalance.service.js";
 import cashDenominationRepository from "../../cash-denominations/repositories/cashDenomination.repository.js";
 import { CASH_DENOMINATION_STATUS } from "../../cash-denominations/constants/cashDenomination.constant.js";
+import cashDenominationBalanceRepository from "../../cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
 
 const createCashAccount = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -215,19 +216,36 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
           { session },
         );
 
-        // Update latestCashCount snapshot on the CashAccount
-        await cashAccountRepository.updateLatestCashCount(
-          cashAccount._id,
+        // 9. Create the CashDenominationBalance document with initial quantities
+        //    This is the running balance that will be updated on every cash movement
+        await cashDenominationBalanceRepository.createBalance(
           {
-            cashDenominationId: denomRecord._id,
-            countNumber,
-            countDate: new Date(),
-            physicalTotal,
+            workspaceId,
+            companyId,
+            cashAccountId: cashAccount._id,
+            totalBalance: physicalTotal,
             denominations: processedDenominations,
+            lastUpdatedAt: new Date(),
+            lastUpdatedBy: userId,
           },
           { session },
         );
       }
+    } else {
+      // 9b. Always create an empty CashDenominationBalance document even with zero opening balance
+      //     so the account is always tracked and ready for future movements
+      await cashDenominationBalanceRepository.createBalance(
+        {
+          workspaceId,
+          companyId,
+          cashAccountId: cashAccount._id,
+          totalBalance: 0,
+          denominations: [],
+          lastUpdatedAt: new Date(),
+          lastUpdatedBy: userId,
+        },
+        { session },
+      );
     }
 
     await session.commitTransaction();
@@ -250,8 +268,26 @@ const getCashAccounts = async (workspaceId, companyId, query = {}) => {
     { page, limit, sort, all: all === "true" || all === true },
   );
 
+  // Attach denomination balance for each account in parallel
+  const cashAccountsWithBalance = await Promise.all(
+    result.cashAccounts.map(async (c) => {
+      const denominationBalance =
+        await cashDenominationBalanceRepository.findByCashAccountId(c._id);
+      return {
+        ...c.toSafeObject(),
+        denominationBalance: denominationBalance
+          ? {
+              totalBalance: denominationBalance.totalBalance,
+              denominations: denominationBalance.denominations,
+              lastUpdatedAt: denominationBalance.lastUpdatedAt,
+            }
+          : null,
+      };
+    }),
+  );
+
   return {
-    cashAccounts: result.cashAccounts.map((c) => c.toSafeObject()),
+    cashAccounts: cashAccountsWithBalance,
     total: result.total,
     page: result.page,
     limit: result.limit,
@@ -268,7 +304,21 @@ const getCashAccountById = async (id, companyId, workspaceId) => {
   if (!cashAccount) {
     throw new ApiError(404, "Cash Account not found");
   }
-  return cashAccount.toSafeObject();
+
+  // Attach running denomination balance for full visibility
+  const denominationBalance =
+    await cashDenominationBalanceRepository.findByCashAccountId(cashAccount._id);
+
+  return {
+    ...cashAccount.toSafeObject(),
+    denominationBalance: denominationBalance
+      ? {
+          totalBalance: denominationBalance.totalBalance,
+          denominations: denominationBalance.denominations,
+          lastUpdatedAt: denominationBalance.lastUpdatedAt,
+        }
+      : null,
+  };
 };
 
 const updateCashAccount = async (

@@ -7,6 +7,7 @@ import accountRepository from "../../../../chart-of-accounts/repositories/accoun
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import JournalLine from "../../../../journal-vouchers/models/journalLine.model.js";
 import openingBalanceService from "../../../../opening-balances/services/openingBalance.service.js";
+import accountBalanceRepository from "../../../../account-balances/repositories/accountBalance.repository.js";
 
 const createBankAccount = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -201,8 +202,39 @@ const getBankAccounts = async (workspaceId, companyId, query = {}) => {
     { page, limit, sort, all: all === "true" || all === true },
   );
 
+  const bankAccountsWithBalance = await Promise.all(
+    result.bankAccounts.map(async (b) => {
+      const ledgerAccountId = b.ledgerAccountId?._id || b.ledgerAccountId;
+      let balance = 0;
+      if (ledgerAccountId) {
+        const accountBalanceObj = await accountBalanceRepository.findBalanceByAccountId(
+          ledgerAccountId,
+          companyId,
+          workspaceId
+        );
+        if (accountBalanceObj) {
+          const bal = accountBalanceObj.balance || 0;
+          const balType = accountBalanceObj.balanceType || "dr";
+          balance = balType === "dr" ? bal : -bal;
+        } else {
+          // Fallback to opening balance
+          const ledgerAccount = b.ledgerAccountId;
+          if (ledgerAccount && typeof ledgerAccount === "object") {
+            const opBal = ledgerAccount.openingBalance || 0;
+            const opType = ledgerAccount.openingBalanceType || "dr";
+            balance = opType === "dr" ? opBal : -opBal;
+          }
+        }
+      }
+      return {
+        ...b.toSafeObject(),
+        balance,
+      };
+    })
+  );
+
   return {
-    bankAccounts: result.bankAccounts.map((b) => b.toSafeObject()),
+    bankAccounts: bankAccountsWithBalance,
     total: result.total,
     page: result.page,
     limit: result.limit,
@@ -219,7 +251,34 @@ const getBankAccountById = async (id, companyId, workspaceId) => {
   if (!bankAccount) {
     throw new ApiError(404, "Bank Account not found");
   }
-  return bankAccount.toSafeObject();
+
+  const ledgerAccountId = bankAccount.ledgerAccountId?._id || bankAccount.ledgerAccountId;
+  let balance = 0;
+  if (ledgerAccountId) {
+    const accountBalanceObj = await accountBalanceRepository.findBalanceByAccountId(
+      ledgerAccountId,
+      companyId,
+      workspaceId
+    );
+    if (accountBalanceObj) {
+      const bal = accountBalanceObj.balance || 0;
+      const balType = accountBalanceObj.balanceType || "dr";
+      balance = balType === "dr" ? bal : -bal;
+    } else {
+      // Fallback to opening balance
+      const ledgerAccount = bankAccount.ledgerAccountId;
+      if (ledgerAccount && typeof ledgerAccount === "object") {
+        const opBal = ledgerAccount.openingBalance || 0;
+        const opType = ledgerAccount.openingBalanceType || "dr";
+        balance = opType === "dr" ? opBal : -opBal;
+      }
+    }
+  }
+
+  return {
+    ...bankAccount.toSafeObject(),
+    balance,
+  };
 };
 
 const updateBankAccount = async (

@@ -47,8 +47,8 @@ export const setCashAccountOpeningBalanceSchema = Joi.object({
     "any.required": "Amount is required",
     "number.min": "Amount cannot be negative",
   }),
-  balanceType: Joi.string().valid("dr", "cr").lowercase().required().messages({
+  balanceType: Joi.string().valid("dr").lowercase().required().messages({
     "any.required": "Balance type is required",
-    "any.only": "Balance type must be 'dr' or 'cr'",
+    "any.only": "Balance type must be 'dr' (debit) for Cash Accounts",
   }),
 });

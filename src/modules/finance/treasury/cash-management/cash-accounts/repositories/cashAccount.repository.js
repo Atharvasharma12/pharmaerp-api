@@ -1,6 +1,11 @@
 import mongoose from "mongoose";
 import CashAccount from "../models/cashAccount.model.js";
 
+const POPULATE_FIELDS = [
+  { path: "ledgerAccountId", select: "accountName accountCode status openingBalance openingBalanceType" },
+  { path: "branchId", select: "name branchCode type" },
+];
+
 const findCashAccountById = async (id, options = {}) => {
   if (!mongoose.Types.ObjectId.isValid(id)) return null;
   return CashAccount.findOne({ _id: id, isDeleted: false }).session(
@@ -27,9 +32,7 @@ const findCashAccountByIdCompanyAndWorkspace = async (
     workspaceId,
     isDeleted: false,
   })
-    .populate("ledgerAccountId", "accountName accountCode status openingBalance openingBalanceType")
-    .populate("branchId", "name branchCode type")
-    .populate("latestCashCount.cashDenominationId", "countNumber countDate physicalTotal status")
+    .populate(POPULATE_FIELDS)
     .session(options.session || null);
 };
 
@@ -74,9 +77,7 @@ const getCashAccounts = async (
 
   if (options.all === true) {
     const cashAccounts = await CashAccount.find(query)
-      .populate("ledgerAccountId", "accountName accountCode status openingBalance openingBalanceType")
-      .populate("branchId", "name branchCode type")
-      .populate("latestCashCount.cashDenominationId", "countNumber countDate physicalTotal status")
+      .populate(POPULATE_FIELDS)
       .sort(sort)
       .session(options.session || null);
     return { cashAccounts, total: cashAccounts.length };
@@ -88,9 +89,7 @@ const getCashAccounts = async (
 
   const [cashAccounts, total] = await Promise.all([
     CashAccount.find(query)
-      .populate("ledgerAccountId", "accountName accountCode status openingBalance openingBalanceType")
-      .populate("branchId", "name branchCode type")
-      .populate("latestCashCount.cashDenominationId", "countNumber countDate physicalTotal status")
+      .populate(POPULATE_FIELDS)
       .sort(sort)
       .skip(skip)
       .limit(limit)
@@ -125,35 +124,10 @@ const setPrimaryCashAccount = async (
   return updated;
 };
 
-/**
- * Atomically writes the denormalized latestCashCount snapshot to a CashAccount.
- *
- * @param {ObjectId|string} cashAccountId
- * @param {{ cashDenominationId, countNumber, countDate, physicalTotal, denominations }} snapshot
- * @param {{ session? }} options
- */
-const updateLatestCashCount = async (cashAccountId, snapshot, options = {}) => {
-  const session = options.session || null;
-  return CashAccount.findOneAndUpdate(
-    { _id: cashAccountId, isDeleted: false },
-    {
-      $set: {
-        "latestCashCount.cashDenominationId": snapshot.cashDenominationId,
-        "latestCashCount.countNumber": snapshot.countNumber,
-        "latestCashCount.countDate": snapshot.countDate,
-        "latestCashCount.physicalTotal": snapshot.physicalTotal,
-        "latestCashCount.denominations": snapshot.denominations || [],
-      },
-    },
-    { new: true, session },
-  );
-};
-
 export default {
   findCashAccountById,
   findCashAccountByIdCompanyAndWorkspace,
   createCashAccount,
   getCashAccounts,
   setPrimaryCashAccount,
-  updateLatestCashCount,
 };

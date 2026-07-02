@@ -8,6 +8,7 @@ import {
 
 import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
 import cashAccountRepository from "../../cash-accounts/repositories/cashAccount.repository.js";
+import cashDenominationBalanceRepository from "../../cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
@@ -109,6 +110,22 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
     }
 
     const cashLedgerAccountId = cashAccount.ledgerAccountId;
+
+    // 2a. PRE-FLIGHT: For DEBIT (cash going OUT), validate denomination sufficiency
+    //     This check runs BEFORE any journal posting to prevent partial writes.
+    const processedDenominations = (denominations || []).map((d) => ({
+      denomination: d.denomination,
+      quantity: d.quantity || 0,
+      subtotal: d.denomination * (d.quantity || 0),
+    }));
+
+    if (direction === CASH_TRANSACTION_DIRECTION.DEBIT) {
+      await cashDenominationBalanceRepository.validateSufficientDenominations(
+        cashAccountId,
+        processedDenominations,
+        { session },
+      );
+    }
 
     // 2. Resolve the counterparty (offset) ledger account
     let offsetLedgerAccountId = null;
@@ -262,15 +279,9 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
       createdBy: userId,
     };
 
-    // 10. If denomination breakdown provided → create a CONFIRMED denomination count
+    // 10. Create a CONFIRMED denomination count record and update the running balance
     let cashDenominationId = null;
     if (denominations && denominations.length > 0) {
-      const processedDenominations = denominations.map((d) => ({
-        denomination: d.denomination,
-        quantity: d.quantity || 0,
-        subtotal: d.denomination * (d.quantity || 0),
-      }));
-
       const physicalTotal = processedDenominations.reduce(
         (sum, d) => sum + d.subtotal,
         0,
@@ -311,18 +322,24 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
       );
       cashDenominationId = denomRecord._id;
 
-      // Update latestCashCount snapshot on the CashAccount
-      await cashAccountRepository.updateLatestCashCount(
-        cashAccountId,
-        {
-          cashDenominationId: denomRecord._id,
-          countNumber,
-          countDate: new Date(transactionDate),
-          physicalTotal,
-          denominations: processedDenominations,
-        },
-        { session },
-      );
+      // Update CashDenominationBalance running totals
+      // CREDIT = cash IN → add denominations
+      // DEBIT  = cash OUT → subtract denominations (already validated above)
+      if (direction === CASH_TRANSACTION_DIRECTION.CREDIT) {
+        await cashDenominationBalanceRepository.addDenominations(
+          cashAccountId,
+          processedDenominations,
+          userId,
+          { session },
+        );
+      } else {
+        await cashDenominationBalanceRepository.subtractDenominations(
+          cashAccountId,
+          processedDenominations,
+          userId,
+          { session },
+        );
+      }
     }
 
     if (cashDenominationId) {

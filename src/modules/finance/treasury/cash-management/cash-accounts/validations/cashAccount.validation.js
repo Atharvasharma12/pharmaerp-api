@@ -36,20 +36,28 @@ export const createCashAccountSchema = Joi.object({
     "number.min": "Opening balance cannot be negative",
   }),
   openingBalanceType: Joi.string()
-    .valid("dr", "cr")
+    .valid("dr")
     .lowercase()
     .default("dr")
     .optional()
     .messages({
-      "any.only": "Opening balance type must be 'dr' or 'cr'",
+      "any.only": "Opening balance type must be 'dr' (debit) for Cash Accounts",
     }),
-  // Optional denomination breakdown for opening balance cash count
-  denominations: Joi.array()
-    .items(denominationLineSchema)
-    .optional()
-    .messages({
-      "array.base": "Denominations must be an array",
-    }),
+  // REQUIRED when openingBalance > 0.
+  // Denomination breakdown is mandatory for any cash movement.
+  denominations: Joi.when("openingBalance", {
+    is: Joi.number().greater(0),
+    then: Joi.array()
+      .items(denominationLineSchema)
+      .min(1)
+      .required()
+      .messages({
+        "any.required": "Denomination breakdown is required when opening balance is provided",
+        "array.min": "At least one denomination line is required",
+        "array.base": "Denominations must be an array",
+      }),
+    otherwise: Joi.array().items(denominationLineSchema).optional(),
+  }),
   isPrimary: Joi.boolean().default(false).optional(),
   branchId: objectId.allow(null).optional(),
 });

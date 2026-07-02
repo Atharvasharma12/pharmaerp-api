@@ -58,21 +58,36 @@ export const createFundTransferSchema = Joi.object({
 
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
 
-  // Optional denomination breakdown for the FROM cash account (only when fromAccountType=CASH)
-  fromDenominations: Joi.array()
-    .items(denominationLineSchema)
-    .optional()
-    .messages({
-      "array.base": "fromDenominations must be an array",
-    }),
+  // REQUIRED when fromAccountType = "CASH".
+  // Denomination breakdown is mandatory for any cash movement.
+  fromDenominations: Joi.when("fromAccountType", {
+    is: "CASH",
+    then: Joi.array()
+      .items(denominationLineSchema)
+      .min(1)
+      .required()
+      .messages({
+        "any.required": "Denomination breakdown (fromDenominations) is required when source account is a cash account",
+        "array.min": "At least one denomination line is required in fromDenominations",
+        "array.base": "fromDenominations must be an array",
+      }),
+    otherwise: Joi.array().items(denominationLineSchema).optional(),
+  }),
 
-  // Optional denomination breakdown for the TO cash account (only when toAccountType=CASH)
-  toDenominations: Joi.array()
-    .items(denominationLineSchema)
-    .optional()
-    .messages({
-      "array.base": "toDenominations must be an array",
-    }),
+  // REQUIRED when toAccountType = "CASH".
+  toDenominations: Joi.when("toAccountType", {
+    is: "CASH",
+    then: Joi.array()
+      .items(denominationLineSchema)
+      .min(1)
+      .required()
+      .messages({
+        "any.required": "Denomination breakdown (toDenominations) is required when destination account is a cash account",
+        "array.min": "At least one denomination line is required in toDenominations",
+        "array.base": "toDenominations must be an array",
+      }),
+    otherwise: Joi.array().items(denominationLineSchema).optional(),
+  }),
 });
 
 

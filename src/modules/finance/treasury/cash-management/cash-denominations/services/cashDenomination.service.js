@@ -4,7 +4,7 @@ import cashDenominationRepository from "../repositories/cashDenomination.reposit
 import { CASH_DENOMINATION_STATUS } from "../constants/cashDenomination.constant.js";
 
 import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
-import cashAccountRepository from "../../cash-accounts/repositories/cashAccount.repository.js";
+import cashDenominationBalanceRepository from "../../cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import journalVoucherRepository from "../../../../journal-vouchers/repositories/journalVoucher.repository.js";
@@ -292,18 +292,50 @@ const confirmCashDenomination = async (id, companyId, workspaceId, userId, paylo
     }
     await cashDenomination.save({ session });
 
-    // Update latestCashCount snapshot on the linked CashAccount
-    await cashAccountRepository.updateLatestCashCount(
+    // RECONCILIATION: Replace CashDenominationBalance with the physically verified count.
+    // This ensures denomination balance always equals the accounting balance after a count.
+    // On variance = 0: balance was already accurate, this is a no-op in effect.
+    // On variance ≠ 0 with adjustment: the journal corrects AccountBalance; we now
+    //   set CashDenominationBalance = physical count so both sides agree.
+    const physicalDenoms = cashDenomination.denominations.map((d) => ({
+      denomination: d.denomination,
+      quantity: d.quantity,
+      subtotal: d.subtotal,
+    }));
+    const physicalTotal = physicalDenoms.reduce((sum, d) => sum + d.subtotal, 0);
+
+    const existingBalance = await cashDenominationBalanceRepository.findByCashAccountId(
       cashDenomination.cashAccountId,
-      {
-        cashDenominationId: cashDenomination._id,
-        countNumber: cashDenomination.countNumber,
-        countDate: cashDenomination.countDate,
-        physicalTotal: cashDenomination.physicalTotal,
-        denominations: cashDenomination.denominations,
-      },
       { session },
     );
+
+    if (existingBalance) {
+      // Full reconciliation — replace with physical count
+      existingBalance.denominations = physicalDenoms;
+      existingBalance.totalBalance = physicalTotal;
+      existingBalance.lastUpdatedAt = new Date();
+      existingBalance.lastUpdatedBy = userId;
+      await existingBalance.save({ session });
+    } else {
+      // Create balance document if missing (edge case for accounts created before this module)
+      const cashAcct = await CashAccount.findOne({ _id: cashDenomination.cashAccountId })
+        .select("workspaceId companyId")
+        .session(session);
+      if (cashAcct) {
+        await cashDenominationBalanceRepository.createBalance(
+          {
+            workspaceId: cashAcct.workspaceId,
+            companyId: cashAcct.companyId,
+            cashAccountId: cashDenomination.cashAccountId,
+            totalBalance: physicalTotal,
+            denominations: physicalDenoms,
+            lastUpdatedAt: new Date(),
+            lastUpdatedBy: userId,
+          },
+          { session },
+        );
+      }
+    }
 
     await session.commitTransaction();
     session.endSession();

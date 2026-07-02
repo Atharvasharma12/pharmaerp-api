@@ -63,14 +63,18 @@ export const createCashTransactionSchema = Joi.object({
   referenceNumber: Joi.string().trim().max(100).allow(null, "").optional(),
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
   counterpartyAccountId: objectId.allow(null).optional(),
-  // Optional denomination breakdown for this cash movement
+  // REQUIRED: denomination breakdown is mandatory for all cash movements
   denominations: Joi.array()
     .items(denominationLineSchema)
-    .optional()
+    .min(1)
+    .required()
     .messages({
+      "any.required": "Denomination breakdown is required for all cash transactions",
+      "array.min": "At least one denomination line is required",
       "array.base": "Denominations must be an array",
     }),
 });
+
 
 
 export const cancelCashTransactionSchema = Joi.object({

@@ -41,12 +41,16 @@ const createLedgerEntry = async (session, payload) => {
   if (lastEntry) {
     lastBalance = lastEntry.runningBalance || 0;
   } else {
-    // If no prior entry, initialize from the account's opening balance
-    const opBal = account.openingBalance || 0;
-    if (isAssetOrExpense) {
-      lastBalance = account.openingBalanceType === "dr" ? opBal : -opBal;
-    } else {
-      lastBalance = account.openingBalanceType === "cr" ? opBal : -opBal;
+    // If no prior entry, check if this is the opening balance voucher itself.
+    // If it is, the baseline starts at 0 because the OB entry itself will establish the opening balance.
+    const isOB = voucherNumber && voucherNumber.startsWith("OB-");
+    if (!isOB) {
+      const opBal = account.openingBalance || 0;
+      if (isAssetOrExpense) {
+        lastBalance = account.openingBalanceType === "dr" ? opBal : -opBal;
+      } else {
+        lastBalance = account.openingBalanceType === "cr" ? opBal : -opBal;
+      }
     }
   }
 
@@ -112,8 +116,10 @@ const recalculateLedger = async (
   const entries = entriesResult.entries;
   const isAssetOrExpense = ["ASSET", "EXPENSE"].includes(account.accountNature);
 
-  // Initialize balance from the account's opening balance
-  const opBal = account.openingBalance || 0;
+  // Initialize balance. If the ledger has an OB entry, starting baseline is 0.
+  const hasOB = entries.some((e) => e.voucherNumber && e.voucherNumber.startsWith("OB-"));
+  const opBal = hasOB ? 0 : (account.openingBalance || 0);
+
   let currentBalance = 0;
   if (isAssetOrExpense) {
     currentBalance = account.openingBalanceType === "dr" ? opBal : -opBal;

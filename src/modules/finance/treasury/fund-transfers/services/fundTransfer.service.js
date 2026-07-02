@@ -9,6 +9,7 @@ import {
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
 import CashAccount from "../../cash-management/cash-accounts/models/cashAccount.model.js";
 import cashAccountRepository from "../../cash-management/cash-accounts/repositories/cashAccount.repository.js";
+
 import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
 import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
 import journalCancellationService from "../../../journal-vouchers/services/journalCancellation.service.js";
@@ -17,6 +18,7 @@ import voucherNumberService from "../../../journal-vouchers/services/voucherNumb
 import journalVoucherRepository from "../../../journal-vouchers/repositories/journalVoucher.repository.js";
 import cashDenominationRepository from "../../cash-management/cash-denominations/repositories/cashDenomination.repository.js";
 import { CASH_DENOMINATION_STATUS } from "../../cash-management/cash-denominations/constants/cashDenomination.constant.js";
+import cashDenominationBalanceRepository from "../../cash-management/cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
 
 /**
  * Resolve the ledger Account ID from either a BankAccount or CashAccount.
@@ -91,6 +93,24 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       throw new ApiError(
         400,
         "Source and destination accounts cannot be the same",
+      );
+    }
+
+    // 1b. PRE-FLIGHT: If FROM account is CASH, validate denomination sufficiency before anything
+    if (
+      fromAccountType === "CASH" &&
+      fromDenominations &&
+      fromDenominations.length > 0
+    ) {
+      const processedFrom = fromDenominations.map((d) => ({
+        denomination: d.denomination,
+        quantity: d.quantity || 0,
+        subtotal: d.denomination * (d.quantity || 0),
+      }));
+      await cashDenominationBalanceRepository.validateSufficientDenominations(
+        fromAccountId,
+        processedFrom,
+        { session },
       );
     }
 
@@ -245,7 +265,8 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
           physicalTotal,
           expectedBalance: amount,
           variance: 0,
-          narration: narration || `Fund Transfer ${transferNumber} - denomination count`,
+          narration:
+            narration || `Fund Transfer ${transferNumber} - denomination count`,
           status: CASH_DENOMINATION_STATUS.CONFIRMED,
           confirmedAt: new Date(),
           confirmedBy: userId,
@@ -253,41 +274,44 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
         },
         { session },
       );
-      return { id: record._id, countNumber, physicalTotal, denominations: processedDenominations };
+      return {
+        id: record._id,
+        countNumber,
+        physicalTotal,
+        denominations: processedDenominations,
+      };
     };
 
-    if (fromAccountType === "CASH" && fromDenominations && fromDenominations.length > 0) {
+    if (
+      fromAccountType === "CASH" &&
+      fromDenominations &&
+      fromDenominations.length > 0
+    ) {
       const result = await buildDenomRecord(fromDenominations, fromAccountId);
       if (result) {
         fundTransferPayload.fromCashDenominationId = result.id;
-        // Update latestCashCount snapshot on the FROM cash account
-        await cashAccountRepository.updateLatestCashCount(
+        // Subtract denominations from the FROM cash account running balance
+        await cashDenominationBalanceRepository.subtractDenominations(
           fromAccountId,
-          {
-            cashDenominationId: result.id,
-            countNumber: result.countNumber,
-            countDate: new Date(transferDate),
-            physicalTotal: result.physicalTotal,
-            denominations: result.denominations,
-          },
+          result.denominations,
+          userId,
           { session },
         );
       }
     }
-    if (toAccountType === "CASH" && toDenominations && toDenominations.length > 0) {
+    if (
+      toAccountType === "CASH" &&
+      toDenominations &&
+      toDenominations.length > 0
+    ) {
       const result = await buildDenomRecord(toDenominations, toAccountId);
       if (result) {
         fundTransferPayload.toCashDenominationId = result.id;
-        // Update latestCashCount snapshot on the TO cash account
-        await cashAccountRepository.updateLatestCashCount(
+        // Add denominations to the TO cash account running balance
+        await cashDenominationBalanceRepository.addDenominations(
           toAccountId,
-          {
-            cashDenominationId: result.id,
-            countNumber: result.countNumber,
-            countDate: new Date(transferDate),
-            physicalTotal: result.physicalTotal,
-            denominations: result.denominations,
-          },
+          result.denominations,
+          userId,
           { session },
         );
       }
