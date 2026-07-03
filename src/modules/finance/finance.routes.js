@@ -6,6 +6,7 @@ import ledgerModule from "./ledger/ledger.module.js";
 import financialPeriodModule from "./financial-periods/financialPeriod.module.js";
 import openingBalancesModule from "./opening-balances/openingBalances.module.js";
 import treasuryModule from "./treasury/treasury.module.js";
+import reportsModule from "./reports/reports.module.js";
 
 const router = Router();
 
@@ -29,6 +30,9 @@ router.use(openingBalancesModule.path, openingBalancesModule.router);
 
 // Mount treasury routes
 router.use(treasuryModule.path, treasuryModule.router);
+
+// Mount reports routes
+router.use(reportsModule.path, reportsModule.router);
 
 export default router;
 

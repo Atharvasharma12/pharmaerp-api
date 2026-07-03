@@ -45,9 +45,7 @@ Double Entry Accounting
 Rule:
 
 ```txt
-Total Debit
-=
-Total Credit
+Total Debit = Total Credit
 ```
 
 Example:
@@ -71,15 +69,19 @@ src/modules/finance/
 │
 ├── chart-of-accounts/
 │
+├── account-balances/
+│
 ├── journal-vouchers/
 │
 ├── ledger/
 │
-├── account-balances/
-│
 ├── financial-periods/
 │
-└── reports/
+├── opening-balances/
+│
+├── reports/
+│
+└── treasury/   (Nested inside Finance; see treasurynotes.md)
 ```
 
 ---
@@ -89,20 +91,15 @@ src/modules/finance/
 ```txt
 Business Transaction
           ↓
-
-Journal Voucher
+   Journal Voucher
           ↓
-
-Journal Lines
+    Journal Lines
           ↓
-
-Ledger Entries
+   Ledger Entries
           ↓
-
 Account Balance Update
           ↓
-
-Financial Reports
+  Financial Reports
 ```
 
 ---
@@ -112,17 +109,13 @@ Financial Reports
 ```txt
 1. Account Groups
 2. Accounts
-
 3. Account Balances
-
 4. Journal Vouchers
-5. Journal Lines
-
+5. Journal Lines & Sequences
 6. Ledger
-
 7. Financial Periods
-
-8. Reports
+8. Opening Balances (initializing accounts, customers, suppliers, banks, cash)
+9. Reports
 ```
 
 ---
@@ -144,7 +137,8 @@ chart-of-accounts/
 │
 ├── constants/
 │   ├── account.constant.js
-│   └── accountGroup.constant.js
+│   ├── accountGroup.constant.js
+│   └── defaultCOATemplate.constant.js
 │
 ├── controllers/
 │   ├── account.controller.js
@@ -164,7 +158,8 @@ chart-of-accounts/
 │
 ├── services/
 │   ├── account.service.js
-│   └── accountGroup.service.js
+│   ├── accountGroup.service.js
+│   └── coaSeeder.service.js
 │
 └── validations/
     ├── account.validation.js
@@ -181,13 +176,9 @@ Examples:
 
 ```txt
 Assets
-
 Liabilities
-
 Income
-
 Expenses
-
 Equity
 ```
 
@@ -217,21 +208,13 @@ Examples:
 
 ```txt
 Cash In Hand
-
 HDFC Bank
-
 Inventory
-
 Purchase Account
-
 Sales Account
-
-ABC Medical
-
-XYZ Distributor
-
+ABC Medical (Customer Ledger Account)
+XYZ Distributor (Supplier Ledger Account)
 Input GST
-
 Output GST
 ```
 
@@ -241,29 +224,17 @@ Output GST
 
 ```txt
 CUSTOMER
-
 SUPPLIER
-
 BANK
-
 CASH
-
 INVENTORY
-
 PURCHASE
-
 SALES
-
 GST
-
 EXPENSE
-
 INCOME
-
 FIXED_ASSET
-
 LIABILITY
-
 EQUITY
 ```
 
@@ -271,28 +242,28 @@ EQUITY
 
 # Customer Integration
 
-When customer created:
+When customer is created:
 
 ```txt
 Customer
       ↓
-Create Account
+Create Account (Category: CUSTOMER)
       ↓
-Link ledgerAccountId
+Link ledgerAccountId in Customer document
 ```
 
 ---
 
 # Supplier Integration
 
-When supplier created:
+When supplier is created:
 
 ```txt
 Supplier
       ↓
-Create Account
+Create Account (Category: SUPPLIER)
       ↓
-Link ledgerAccountId
+Link ledgerAccountId in Supplier document
 ```
 
 ---
@@ -311,25 +282,16 @@ Suppose:
 
 ```txt
 5000 Customers
-
-10,00,000 Ledger Entries
+1,00,000 Ledger Entries
 ```
 
-Customer List:
-
-```txt
-Customer Name
-Balance
-Credit Limit
-```
-
-Calculating balance from Ledger every request becomes expensive.
+When displaying Customer list with current outstanding balances, calculating balance from Ledger every request becomes extremely expensive.
 
 ---
 
 # Solution
 
-Maintain summary records.
+Maintain summary records of balances.
 
 ---
 
@@ -337,58 +299,39 @@ Maintain summary records.
 
 ```js
 {
-  (accountId, debitTotal, creditTotal, balance, balanceType, lastTransactionAt);
+  workspaceId: ObjectId,
+  companyId: ObjectId,
+  accountId: ObjectId,
+  debitTotal: Number,
+  creditTotal: Number,
+  balance: Number,
+  balanceType: String, // 'dr' or 'cr'
+  lastTransactionAt: Date
 }
 ```
 
 ---
 
-# Important Rule
+# Cumulative Balance Updates
 
 These are cumulative values.
 
 ```txt
-debitTotal
-only increases
-
-creditTotal
-only increases
+debitTotal only increases
+creditTotal only increases
 ```
 
----
-
-Example:
-
-```txt
-Sale Dr 10000
-
-debitTotal = 10000
-creditTotal = 0
-```
-
----
-
-Customer pays:
-
-```txt
-Receipt Cr 4000
-```
-
-Now:
-
-```txt
-debitTotal = 10000
-creditTotal = 4000
-balance = 6000 DR
-```
-
----
-
-Formula
+Formula:
 
 ```txt
 balance = debitTotal - creditTotal
 ```
+
+Example:
+1. Sale Dr 10000
+   - `debitTotal = 10000`, `creditTotal = 0`, `balance = 10000 DR`
+2. Customer pays Receipt Cr 4000
+   - `debitTotal = 10000`, `creditTotal = 4000`, `balance = 6000 DR`
 
 ---
 
@@ -396,9 +339,7 @@ balance = debitTotal - creditTotal
 
 Purpose:
 
-Store accounting transactions.
-
-Every financial transaction starts here.
+Store accounting transactions. Every financial transaction starts here.
 
 ---
 
@@ -410,18 +351,22 @@ journal-vouchers/
 ├── journalVoucher.module.js
 │
 ├── constants/
-│   └── journalVoucher.constant.js
+│   ├── voucherNumber.constant.js
+│   ├── voucherStatus.constant.js
+│   └── voucherType.constant.js
 │
 ├── controllers/
 │   └── journalVoucher.controller.js
 │
 ├── models/
 │   ├── journalVoucher.model.js
-│   └── journalLine.model.js
+│   ├── journalLine.model.js
+│   └── voucherSequence.model.js
 │
 ├── repositories/
 │   ├── journalVoucher.repository.js
-│   └── journalLine.repository.js
+│   ├── journalLine.repository.js
+│   └── voucherSequence.repository.js
 │
 ├── routes/
 │   └── journalVoucher.routes.js
@@ -430,8 +375,10 @@ journal-vouchers/
 │   ├── journalVoucher.service.js
 │   ├── journalPosting.service.js
 │   ├── journalValidation.service.js
-│   ├── journalNumber.service.js
-│   └── openingBalance.service.js
+│   ├── journalApproval.service.js
+│   ├── journalCancellation.service.js
+│   ├── journalReversal.service.js
+│   └── voucherNumber.service.js
 │
 ├── validations/
 │   └── journalVoucher.validation.js
@@ -439,33 +386,36 @@ journal-vouchers/
 └── helpers/
     ├── calculateJournalTotals.js
     ├── validateDebitCreditBalance.js
-    └── buildJournalReference.js
+    ├── buildJournalReference.js
+    ├── buildVoucherNumber.js
+    ├── normalizeJournalLines.js
+    └── validateVoucherDate.js
 ```
 
 ---
 
-# Journal Voucher
+# Journal Voucher Model
 
-Voucher Header.
-
-Example:
-
-```txt
-JV000001
-```
-
-Stores:
+Voucher Header. Stores metadata and totals.
 
 ```js
 {
-  (voucherNumber,
-    voucherDate,
-    voucherType,
-    referenceNumber,
-    narration,
-    totalDebit,
-    totalCredit,
-    status);
+  workspaceId: ObjectId,
+  companyId: ObjectId,
+  voucherNumber: String,
+  voucherDate: Date,
+  voucherType: String, // PURCHASE, SALE, PAYMENT, RECEIPT, etc.
+  referenceNumber: String,
+  narration: String,
+  totalDebit: Number,
+  totalCredit: Number,
+  status: String, // DRAFT, POSTED, CANCELLED, REVERSED
+  createdBy: ObjectId,
+  postedBy: ObjectId,
+  postedAt: Date,
+  cancelledBy: ObjectId,
+  cancelledAt: Date,
+  cancellationReason: String
 }
 ```
 
@@ -475,21 +425,13 @@ Stores:
 
 ```txt
 PURCHASE
-
 PURCHASE_RETURN
-
 SALE
-
 SALE_RETURN
-
 PAYMENT
-
 RECEIPT
-
 JOURNAL
-
 CONTRA
-
 OPENING_BALANCE
 ```
 
@@ -497,22 +439,17 @@ OPENING_BALANCE
 
 # Journal Lines
 
-Stores accounting entries.
-
-Example:
-
-```txt
-Sale ₹10,000
-
-Customer A/c Dr 10,000
-Sales A/c Cr    10,000
-```
-
-Stored as:
+Stores accounting entries matching the double-entry format.
 
 ```js
 {
-  (voucherId, accountId, debit, credit, narration);
+  workspaceId: ObjectId,
+  companyId: ObjectId,
+  voucherId: ObjectId,
+  accountId: ObjectId,
+  debit: Number,
+  credit: Number,
+  narration: String
 }
 ```
 
@@ -520,87 +457,75 @@ Stored as:
 
 # Journal Validation
 
-Responsible for:
+Responsible for validating constraints prior to posting:
 
 ```txt
-Debit = Credit
-
+Total Debit = Total Credit
 Account Exists
-
-Financial Period Open
-
-Voucher Date Valid
+Financial Period is Open
+Voucher Date falls within the Open Period
 ```
 
 ---
 
 # Journal Posting
 
-Most important finance service.
-
 Flow:
 
 ```txt
-Journal Voucher
-        ↓
-Post
-        ↓
-Create Ledger Entries
-        ↓
-Update Account Balances
+Journal Voucher (Status: DRAFT)
+              ↓
+            Post
+              ↓
+    Create Ledger Entries
+              ↓
+  Update Account Balances (debitTotal, creditTotal, balance)
+              ↓
+Journal Voucher (Status: POSTED)
 ```
 
 ---
 
-# Journal Number Service
+# Opening Balances
 
-Generates:
+Purpose:
 
-```txt
-JV000001
-JV000002
-JV000003
-```
+Used to initialize starting ledger balances for accounts, customers, suppliers, bank accounts, and cash accounts.
 
-Future:
+---
+
+## Structure
 
 ```txt
-SAL000001
-PUR000001
-PAY000001
-REC000001
+opening-balances/
+│
+├── openingBalances.module.js
+│
+├── controllers/
+│   └── openingBalance.controller.js
+│
+├── routes/
+│   └── openingBalance.routes.js
+│
+├── services/
+│   └── openingBalance.service.js
+│
+└── validations/
+    └── openingBalance.validation.js
 ```
 
 ---
 
-# Opening Balance Service
+## Double Entry Initialization
 
-Used by:
+Every opening balance amount entered (Dr or Cr) generates an offsetting entry to a system equity account named **Opening Balance Equity** (`OB-EQUITY`).
 
-```txt
-Customer Opening Balance
-
-Supplier Opening Balance
-
-Account Opening Balance
-```
-
-Example:
-
-```txt
-ABC Medical
-
-Opening Balance
-50,000 DR
-```
-
-Creates:
-
-```txt
-Customer A/c Dr
-
-Opening Balance A/c Cr
-```
+Flow:
+1. Target account is updated with its `openingBalance` and `openingBalanceType`.
+2. A Journal Voucher of type `OPENING_BALANCE` is automatically generated:
+   - Line 1: Target account gets the opening balance (e.g. Customer Account Dr ₹50,000).
+   - Line 2: Offsetting entry goes to the Opening Balance Equity Account Cr ₹50,000.
+3. The journal voucher is posted, updating the ledger and account balance registers.
 
 ---
 
@@ -608,9 +533,7 @@ Opening Balance A/c Cr
 
 Purpose:
 
-Permanent accounting history.
-
-Ledger is the accounting source of truth.
+Permanent accounting history. Ledger is the primary accounting source of truth.
 
 ---
 
@@ -637,6 +560,7 @@ ledger/
 │   └── ledger.service.js
 │
 └── validations/
+    └── ledger.validation.js
 ```
 
 ---
@@ -645,37 +569,17 @@ ledger/
 
 ```js
 {
-  (accountId,
-    voucherId,
-    voucherNumber,
-    voucherDate,
-    debit,
-    credit,
-    runningBalance,
-    narration);
+  workspaceId: ObjectId,
+  companyId: ObjectId,
+  accountId: ObjectId,
+  voucherId: ObjectId,
+  voucherNumber: String,
+  voucherDate: Date,
+  debit: Number,
+  credit: Number,
+  runningBalance: Number,
+  narration: String
 }
-```
-
----
-
-Example:
-
-```txt
-ABC Medical
-
-01 Jan
-Sale
-Dr 10,000
-
-Balance 10,000
-```
-
-```txt
-05 Jan
-Receipt
-Cr 4,000
-
-Balance 6,000
 ```
 
 ---
@@ -684,7 +588,7 @@ Balance 6,000
 
 Purpose:
 
-Manage accounting periods.
+Manage fiscal periods and enforce posting restrictions on closed periods.
 
 ---
 
@@ -719,132 +623,71 @@ financial-periods/
 
 ---
 
-# Why Financial Periods
-
-Supports future:
-
-```txt
-YEAR
-
-QUARTER
-
-MONTH
-
-ADJUSTMENT PERIOD
-```
-
-Current implementation:
-
-```txt
-YEAR
-```
-
-only.
-
----
-
 ## financialPeriod.model.js
 
 ```js
 {
-  (periodCode, periodType, startDate, endDate, isCurrent, status);
+  workspaceId: ObjectId,
+  companyId: ObjectId,
+  periodCode: String, // e.g. FY2026
+  periodType: String, // YEAR, QUARTER, MONTH
+  startDate: Date,
+  endDate: Date,
+  isCurrent: Boolean,
+  status: String // OPEN, CLOSED, LOCKED
 }
-```
-
----
-
-# Status
-
-```txt
-OPEN
-
-CLOSED
-
-LOCKED
 ```
 
 ---
 
 # Reports
 
-Generated from:
+Reports generated dynamically from the Ledger and Account Balances:
 
-```txt
-Ledger
-
-Account Balances
-```
-
----
-
-## Reports
-
-```txt
-Trial Balance
-
-Profit & Loss
-
-Balance Sheet
-
-General Ledger
-
-Customer Ledger
-
-Supplier Ledger
-
-Cash Book
-
-Bank Book
-
-GST Reports
-```
+- **Trial Balance**
+- **Profit & Loss Statement**
+- **Balance Sheet**
+- **General Ledger**
+- **Customer Ledger**
+- **Supplier Ledger**
+- **Cash Book**
+- **Bank Book**
+- **GST Reports**
 
 ---
 
 # Accounting Flows
 
-## Sales
+## Sales Flow
 
 ```txt
-Sale
-     ↓
-
+Sale Transaction
+      ↓
 Customer A/c Dr
-     ↓
-
 Sales A/c Cr
-     ↓
-
-Journal Voucher
-     ↓
-
-Ledger
-     ↓
-
-Account Balance
+      ↓
+Journal Voucher (SALE)
+      ↓
+Ledger Entry
+      ↓
+Account Balance Updated
 ```
 
 ---
 
-## Purchase
+## Purchase Flow
 
 ```txt
-Purchase
+Purchase Transaction
       ↓
-
 Inventory A/c Dr
-      ↓
-
 Supplier A/c Cr
       ↓
-
-Journal Voucher
+Journal Voucher (PURCHASE)
       ↓
-
-Ledger
+Ledger Entry
       ↓
-
-Account Balance
+Account Balance Updated
 ```
 
 ---
@@ -853,8 +696,6 @@ Account Balance
 
 ```txt
 Bank A/c Dr
-      ↓
-
 Customer A/c Cr
 ```
 
@@ -864,8 +705,6 @@ Customer A/c Cr
 
 ```txt
 Supplier A/c Dr
-      ↓
-
 Bank A/c Cr
 ```
 
@@ -873,74 +712,16 @@ Bank A/c Cr
 
 # Integration With Treasury
 
-```txt
-Treasury
-      ↓
-
-Bank Transactions
-Cash Transactions
-Fund Transfers
-UPI Collections
-Cheque Operations
-
-      ↓
-
-Journal Voucher
-
-      ↓
-
-Ledger
-
-      ↓
-
-Account Balance
-```
-
----
-
-# Final Finance Principle
+Every movement of money within the Treasury module (cash collections, bank slips, fund transfers, cheques) is routed through Finance to generate double-entry Journal Vouchers.
 
 ```txt
-Chart Of Accounts
-         ↓
-
-Journal Voucher
-         ↓
-
-Journal Lines
-         ↓
-
-Ledger
-         ↓
-
-Account Balance
-         ↓
-
-Reports
+Treasury Movement (Cash/Bank/UPI/Cheque)
+                    ↓
+        Treasury Transaction Record
+                    ↓
+        Journal Voucher Auto-Creation
+                    ↓
+               Ledger Entry
+                    ↓
+           Account Balance Update
 ```
-
-And:
-
-```txt
-Customer
-     ↓
-Account
-
-Supplier
-     ↓
-Account
-
-Journal
-     ↓
-Ledger
-
-Ledger
-     ↓
-Account Balance
-
-Account Balance
-     ↓
-Reports
-```
-
-This architecture is scalable, multi-tenant, ERP-ready, pharmacy-ready, and follows the same accounting lifecycle used by enterprise accounting systems.

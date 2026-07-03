@@ -6,7 +6,7 @@ Treasury Management is responsible for managing actual money movement inside the
 
 Finance records accounting transactions.
 
-Treasury manages:
+Treasury manages physical money and bank accounts:
 
 ```txt
 Cash
@@ -17,6 +17,7 @@ Deposits
 Withdrawals
 Fund Transfers
 Cash Flow
+Physical Note Denomination Quantities
 ```
 
 ---
@@ -24,793 +25,335 @@ Cash Flow
 # Finance vs Treasury
 
 ```txt
-Finance
-    ↓
-Accounting Records
-
-Treasury
-    ↓
-Money Movement
+Finance  → Accounting Records (Source of Truth)
+Treasury → Money Movement & Physical cash/bank tracking
 ```
 
 Examples:
 
 ```txt
 Sale
-    ↓
-Finance Entry
+  ↓
+Finance Entry (Sales A/c Cr, Customer A/c Dr)
 
 Customer Payment
-    ↓
-Treasury Movement
-    ↓
-Finance Entry
+  ↓
+Treasury Movement (UPI / Cash / Cheque)
+  ↓
+Finance Entry (Cash/Bank A/c Dr, Customer A/c Cr)
 ```
 
 ---
 
 # Treasury Module Structure
 
+All treasury submodules are located inside the Finance module directory at `src/modules/finance/treasury/`.
+
 ```txt
-src/modules/treasury/
+src/modules/finance/treasury/
 │
 ├── treasury.module.js
 ├── treasury.routes.js
 │
-├── bank-accounts/
+├── bank-management/
+│   ├── bank-accounts/
+│   ├── bank-slips/
+│   └── bank-transactions/
 │
-├── cash-accounts/
-│
-├── fund-transfers/
-│
-├── bank-transactions/
-│
-├── cash-transactions/
+├── cash-management/
+│   ├── cash-accounts/
+│   ├── cash-denomination-balances/
+│   ├── cash-denominations/
+│   └── cash-transactions/
 │
 ├── cheque-management/
 │
-├── payment-qr/
+├── fund-transfers/
 │
-├── bank-slips/
-│
-└── cash-denominations/
+└── payment-qr/
 ```
 
 ---
 
 # Treasury Processing Flow
 
+All Treasury operations must generate accounting entries. Treasury never bypasses Finance.
+
 ```txt
 Cash / Bank Movement
           ↓
-Treasury Transaction
+Treasury Transaction Record (e.g. Bank slip, Cheque clearance)
           ↓
-Journal Voucher
+Journal Voucher (Auto-created and posted)
           ↓
-Ledger
+Ledger Entry
           ↓
-Account Balance
-```
-
-Treasury never bypasses Finance.
-
-All Treasury operations must generate accounting entries.
-
----
-
-# Module Build Order
-
-```txt
-1. Bank Accounts
-2. Cash Accounts
-
-3. Fund Transfers
-
-4. Bank Transactions
-5. Cash Transactions
-
-6. Payment QR
-
-7. Cheque Management
-
-8. Bank Slips
-
-9. Cash Denominations
+Account Balance Updated
 ```
 
 ---
 
-# 1. Bank Accounts
+# Submodules
 
-## Purpose
+## 1. Bank Accounts
 
-Store company bank accounts.
+Manage company-owned bank accounts.
 
----
-
-## Examples
-
-```txt
-HDFC Current Account
-
-ICICI Current Account
-
-Axis Bank
-
-SBI Current Account
-```
-
----
-
-## Structure
-
-```txt
-bank-accounts/
-│
-├── bankAccount.module.js
-│
-├── constants/
-│   └── bankAccount.constant.js
-│
-├── controllers/
-│   └── bankAccount.controller.js
-│
-├── models/
-│   └── bankAccount.model.js
-│
-├── repositories/
-│   └── bankAccount.repository.js
-│
-├── routes/
-│   └── bankAccount.routes.js
-│
-├── services/
-│   └── bankAccount.service.js
-│
-└── validations/
-    └── bankAccount.validation.js
-```
+- **Location**: `bank-management/bank-accounts/`
+- **Bank Account Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    branchId: ObjectId,
+    accountName: String,
+    accountNumber: String,
+    ifscCode: String,
+    bankName: String,
+    branchName: String,
+    accountType: String, // CURRENT, SAVINGS, OVERDRAFT, etc.
+    ledgerAccountId: ObjectId, // Linked Chart of Accounts account
+    isPrimary: Boolean,
+    status: String
+  }
+  ```
 
 ---
 
-## Bank Account Model
+## 2. Cash Accounts
 
-```js
-{
-  (workspaceId,
-    companyId,
-    branchId,
-    accountName,
-    accountNumber,
-    ifscCode,
-    bankName,
-    branchName,
-    accountType,
-    ledgerAccountId,
-    isPrimary,
-    status);
-}
-```
+Manage physical cash points (e.g., cash counters, safes, petty cash drawers).
 
----
-
-# Integration
-
-Every bank account should be linked with:
-
-```txt
-Finance Account
-```
-
-Example:
-
-```txt
-HDFC Current Account
-       ↓
-Account
-       ↓
-Ledger
-```
+- **Location**: `cash-management/cash-accounts/`
+- **Cash Account Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    branchId: ObjectId,
+    accountName: String,
+    description: String,
+    ledgerAccountId: ObjectId, // Linked cash ledger account
+    isPrimary: Boolean,
+    status: String
+  }
+  ```
 
 ---
 
-# 2. Cash Accounts
+## 3. Cash Denomination Balances
 
-## Purpose
+Tracks the exact physical count and running quantities of cash notes (e.g., ₹500, ₹200, ₹100, etc.) currently in a cash account. Updated atomically during cash transactions, opening balances, or transfers.
 
-Manage physical cash.
-
----
-
-## Examples
-
-```txt
-Main Cash
-
-Petty Cash
-
-Counter Cash
-
-Warehouse Cash
-```
-
----
-
-## Structure
-
-```txt
-cash-accounts/
-│
-├── cashAccount.module.js
-│
-├── constants/
-│   └── cashAccount.constant.js
-│
-├── controllers/
-│   └── cashAccount.controller.js
-│
-├── models/
-│   └── cashAccount.model.js
-│
-├── repositories/
-│   └── cashAccount.repository.js
-│
-├── routes/
-│   └── cashAccount.routes.js
-│
-├── services/
-│   └── cashAccount.service.js
-│
-└── validations/
-    └── cashAccount.validation.js
-```
+- **Location**: `cash-management/cash-denomination-balances/`
+- **Cash Denomination Balance Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    cashAccountId: ObjectId,
+    totalBalance: Number, // Sum of all denomination subtotals
+    denominations: [
+      {
+        denomination: Number, // e.g. 500
+        quantity: Number,     // e.g. 14
+        subtotal: Number      // e.g. 7000
+      }
+    ],
+    lastUpdatedAt: Date,
+    lastUpdatedBy: ObjectId
+  }
+  ```
 
 ---
 
-## Cash Account Model
+## 4. Cash Denominations (Counts & Reconciliation)
 
-```js
-{
-  (workspaceId,
-    companyId,
-    branchId,
-    accountName,
-    ledgerAccountId,
-    openingBalance,
-    status);
-}
-```
+Tracks physical cash verification counts. Enables checking for cash variances (`physicalTotal - expectedBalance`) and creating adjustment journal entries for any short/excess cash.
 
----
-
-# 3. Fund Transfers
-
-## Purpose
-
-Transfer money between treasury accounts.
-
----
-
-## Examples
-
-```txt
-Cash → Bank
-
-Bank → Cash
-
-Bank → Bank
-```
+- **Location**: `cash-management/cash-denominations/`
+- **Cash Denomination Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    cashAccountId: ObjectId,
+    branchId: ObjectId,
+    countNumber: String, // e.g. CD-YYYY-NNNNN
+    countDate: Date,
+    denominations: [
+      { denomination: Number, quantity: Number, subtotal: Number }
+    ],
+    physicalTotal: Number,
+    expectedBalance: Number,
+    variance: Number, // physicalTotal - expectedBalance
+    narration: String,
+    status: String, // DRAFT, CONFIRMED, CANCELLED
+    confirmedAt: Date,
+    confirmedBy: ObjectId,
+    adjustmentJournalVoucherId: ObjectId // Linked journal voucher for variance adjustment
+  }
+  ```
 
 ---
 
-## Structure
+## 5. Fund Transfers
 
-```txt
-fund-transfers/
-│
-├── fundTransfer.module.js
-│
-├── constants/
-│   └── fundTransfer.constant.js
-│
-├── controllers/
-│   └── fundTransfer.controller.js
-│
-├── models/
-│   └── fundTransfer.model.js
-│
-├── repositories/
-│   └── fundTransfer.repository.js
-│
-├── routes/
-│   └── fundTransfer.routes.js
-│
-├── services/
-│   └── fundTransfer.service.js
-│
-└── validations/
-    └── fundTransfer.validation.js
-```
+Used to transfer funds between treasury accounts (Cash → Bank, Bank → Cash, Bank → Bank).
+
+- **Location**: `fund-transfers/`
+- **Fund Transfer Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    transferNumber: String,
+    transferDate: Date,
+    fromAccountType: String, // BANK or CASH
+    fromAccountId: ObjectId,
+    toAccountType: String,   // BANK or CASH
+    toAccountId: ObjectId,
+    amount: Number,
+    narration: String,
+    status: String // DRAFT, POSTED, CANCELLED
+  }
+  ```
+- **Accounting entry** (e.g. Cash Deposit):
+  ```txt
+  To-Bank A/c Dr
+  From-Cash A/c Cr
+  ```
 
 ---
 
-## Examples
+## 6. Bank Transactions
 
-```txt
-HDFC
-   ↓
-ICICI
+Maintains the record of all bank transaction entries.
 
-₹50,000
-```
-
----
-
-## Accounting Entry
-
-```txt
-ICICI Bank A/c Dr
-
-HDFC Bank A/c Cr
-```
-
----
-
-# 4. Bank Transactions
-
-## Purpose
-
-Track bank activity.
+- **Location**: `bank-management/bank-transactions/`
+- **Bank Transaction Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    transactionNumber: String,
+    transactionDate: Date,
+    bankAccountId: ObjectId,
+    transactionType: String, // DEPOSIT, WITHDRAWAL, BANK_CHARGES, etc.
+    direction: String,       // INFLOW, OUTFLOW
+    amount: Number,
+    referenceNumber: String, // UTR, Cheque number
+    narration: String,
+    counterpartyAccountId: ObjectId,
+    journalVoucherId: ObjectId,
+    status: String
+  }
+  ```
 
 ---
 
-## Examples
+## 7. Cash Transactions
 
-```txt
-Deposit
+Maintains the record of all cash transactions.
 
-Withdrawal
-
-Bank Charges
-
-Interest
-
-NEFT
-
-RTGS
-
-IMPS
-
-UPI
-```
-
----
-
-## Accounting Example
-
-```txt
-Cash Deposit
-
-Bank A/c Dr
-
-Cash A/c Cr
-```
+- **Location**: `cash-management/cash-transactions/`
+- **Cash Transaction Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    transactionNumber: String,
+    transactionDate: Date,
+    cashAccountId: ObjectId,
+    transactionType: String, // CASH_IN, CASH_OUT
+    direction: String,       // INFLOW, OUTFLOW
+    amount: Number,
+    referenceNumber: String,
+    narration: String,
+    counterpartyAccountId: ObjectId,
+    journalVoucherId: ObjectId,
+    cashDenominationId: ObjectId, // Linked physical denomination count sheet
+    status: String
+  }
+  ```
 
 ---
 
-## Structure
+## 8. Payment QR
 
-```txt
-bank-transactions/
-│
-├── bankTransaction.module.js
-│
-├── constants/
-│
-├── controllers/
-│
-├── models/
-│
-├── repositories/
-│
-├── routes/
-│
-├── services/
-│
-└── validations/
-```
+Manages company UPI QR codes linked directly to primary bank accounts.
+
+- **Location**: `payment-qr/`
+- **Payment QR Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    bankAccountId: ObjectId,
+    upiId: String,
+    qrImage: String,
+    isPrimary: Boolean,
+    status: String
+  }
+  ```
 
 ---
 
-# 5. Cash Transactions
+## 9. Cheque Management
 
-## Purpose
+Manages physical cheque lifecycle (both issued to suppliers and received from customers).
 
-Track physical cash movement.
-
----
-
-## Examples
-
-```txt
-Cash In
-
-Cash Out
-
-Expense
-
-Petty Cash Expense
-```
-
----
-
-## Accounting Example
-
-```txt
-Expense A/c Dr
-
-Cash A/c Cr
-```
+- **Location**: `cheque-management/`
+- **Cheque Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    chequeNumber: String,
+    chequeDate: Date,
+    amount: Number,
+    chequeType: String, // RECEIPT, PAYMENT
+    bankName: String,
+    partyId: ObjectId,
+    status: String // PENDING, DEPOSITED, CLEARED, BOUNCED, CANCELLED
+  }
+  ```
 
 ---
 
-## Structure
-
-```txt
-cash-transactions/
-│
-├── cashTransaction.module.js
-│
-├── constants/
-│
-├── controllers/
-│
-├── models/
-│
-├── repositories/
-│
-├── routes/
-│
-├── services/
-│
-└── validations/
-```
-
----
-
-# 6. Payment QR
-
-## Purpose
-
-Manage UPI QR codes.
-
----
-
-## Examples
-
-```txt
-pay@upi
-
-store@oksbi
-
-company@okhdfcbank
-```
-
----
-
-## Structure
-
-```txt
-payment-qr/
-│
-├── paymentQr.module.js
-│
-├── constants/
-│
-├── controllers/
-│
-├── models/
-│
-├── repositories/
-│
-├── routes/
-│
-├── services/
-│
-└── validations/
-```
-
----
-
-## Model
-
-```js
-{
-  (bankAccountId, upiId, qrImage, isPrimary, status);
-}
-```
-
----
-
-# 7. Cheque Management
-
-## Purpose
-
-Manage issued and received cheques.
-
----
-
-## Status
-
-```txt
-PENDING
-
-DEPOSITED
-
-CLEARED
-
-BOUNCED
-
-CANCELLED
-```
-
----
-
-## Structure
-
-```txt
-cheque-management/
-│
-├── cheque.module.js
-│
-├── constants/
-│
-├── controllers/
-│
-├── models/
-│
-├── repositories/
-│
-├── routes/
-│
-├── services/
-│
-└── validations/
-```
-
----
-
-## Examples
-
-```txt
-Received Cheque
-
-Issued Cheque
-
-Cheque Deposit
-
-Cheque Bounce
-```
-
----
-
-# 8. Bank Slips
-
-## Purpose
-
-Track physical deposit and withdrawal slips.
-
----
-
-## Examples
-
-```txt
-Cash Deposit Slip
-
-Cash Withdrawal Slip
-```
-
----
-
-## Structure
-
-```txt
-bank-slips/
-│
-├── bankSlip.module.js
-│
-├── constants/
-│
-├── controllers/
-│
-├── models/
-│
-├── repositories/
-│
-├── routes/
-│
-├── services/
-│
-└── validations/
-```
-
----
-
-## Example
-
-```txt
-Deposit Slip
-
-₹1,00,000
-```
-
----
-
-# 9. Cash Denominations
-
-## Purpose
-
-Manage physical currency counts.
-
----
-
-## Examples
-
-```txt
-₹500 × 20
-
-₹200 × 50
-
-₹100 × 100
-
-₹50 × 20
-```
-
----
-
-## Uses
-
-```txt
-Counter Closing
-
-Cash Verification
-
-Day End Closing
-```
-
----
-
-## Structure
-
-```txt
-cash-denominations/
-│
-├── cashDenomination.module.js
-│
-├── constants/
-│
-├── controllers/
-│
-├── models/
-│
-├── repositories/
-│
-├── routes/
-│
-├── services/
-│
-└── validations/
-```
+## 10. Bank Slips
+
+Manages bank slips (deposit slips / withdrawal slips). Confirming a bank slip updates the bank balance by posting a Bank Transaction and generating a corresponding Journal Voucher.
+
+- **Location**: `bank-management/bank-slips/`
+- **Bank Slip Model**:
+  ```js
+  {
+    workspaceId: ObjectId,
+    companyId: ObjectId,
+    slipNumber: String, // BS-YYYY-NNNNN
+    bankAccountId: ObjectId,
+    slipType: String, // DEPOSIT, WITHDRAWAL
+    bankSlipReference: String,
+    slipDate: Date,
+    amount: Number,
+    narration: String,
+    status: String, // PENDING, CONFIRMED, REJECTED, CANCELLED
+    bankTransactionId: ObjectId,
+    journalVoucherId: ObjectId
+  }
+  ```
 
 ---
 
 # Treasury Reports
 
-Generated from Treasury + Finance.
+Generated by querying both Treasury records and Finance ledgers:
 
----
-
-## Reports
-
-```txt
-Cash Book
-
-Bank Book
-
-Fund Transfer Report
-
-Cheque Report
-
-Cash Flow Report
-
-Bank Reconciliation
-
-Daily Cash Summary
-
-UPI Collection Report
-```
-
----
-
-# Integration With Finance
-
-Treasury never directly changes balances.
-
-Every treasury operation generates:
-
-```txt
-Treasury Transaction
-       ↓
-Journal Voucher
-       ↓
-Ledger Entry
-       ↓
-Account Balance Update
-```
-
----
-
-# Example Flow
-
-## Customer Receipt Through UPI
-
-```txt
-Customer Pays ₹5,000
-        ↓
-Payment QR
-        ↓
-Bank Transaction
-        ↓
-Journal Voucher
-
-Bank A/c Dr 5,000
-
-Customer A/c Cr 5,000
-        ↓
-Ledger
-        ↓
-Account Balance
-```
-
----
-
-# Final Treasury Principle
-
-```txt
-Bank Accounts
-      ↓
-
-Cash Accounts
-      ↓
-
-Fund Transfers
-      ↓
-
-Bank Transactions
-      ↓
-
-Cash Transactions
-      ↓
-
-Payment QR
-      ↓
-
-Cheque Management
-      ↓
-
-Bank Slips
-      ↓
-
-Cash Denominations
-      ↓
-
-Finance
-      ↓
-
-Ledger
-      ↓
-
-Reports
-```
-
-Treasury manages actual money movement, while Finance records accounting impact. Together they provide complete cash, bank, UPI, cheque, and fund management for the Pharmacy ERP.
+- **Cash Book** & **Bank Book**
+- **Fund Transfer Report**
+- **Cheque Register**
+- **Cash Flow Report**
+- **Bank Reconciliation Statement**
+- **Daily Cash Summary** (Physical vs Expected)
+- **UPI Collection Report**
