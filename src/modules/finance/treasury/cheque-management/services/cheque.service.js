@@ -191,7 +191,7 @@ const createCheque = async (workspaceId, companyId, userId, payload) => {
     const chequeInTransit = await findOrCreateSystemAccount(
       workspaceId, companyId, userId,
       "CHEQ_IN_TRANSIT", "Cheques In Transit",
-      "ASSET", "ASSET",
+      "ASSET", "CASH",
       "CHEQ_IN_TRANSIT_GRP", "Cheques In Transit",
       session,
     );
@@ -298,8 +298,15 @@ const clearCheque = async (id, companyId, workspaceId, userId, payload) => {
       .session(session);
 
     if (!cheque) throw new ApiError(404, "Cheque not found");
-    if (cheque.status !== CHEQUE_STATUS.DEPOSITED) {
-      throw new ApiError(400, `Cheque cannot be cleared from status: ${cheque.status}`);
+    const allowedStatus = cheque.chequeType === CHEQUE_TYPE.ISSUED
+      ? [CHEQUE_STATUS.PENDING]
+      : [CHEQUE_STATUS.DEPOSITED];
+
+    if (!allowedStatus.includes(cheque.status)) {
+      throw new ApiError(
+        400,
+        `Cheque cannot be cleared from status: ${cheque.status} for ${cheque.chequeType} cheque`,
+      );
     }
 
     // Get the bank ledger account
@@ -311,7 +318,7 @@ const clearCheque = async (id, companyId, workspaceId, userId, payload) => {
     const chequeInTransit = await findOrCreateSystemAccount(
       workspaceId, companyId, userId,
       "CHEQ_IN_TRANSIT", "Cheques In Transit",
-      "ASSET", "ASSET",
+      "ASSET", "CASH",
       "CHEQ_IN_TRANSIT_GRP", "Cheques In Transit",
       session,
     );
@@ -395,7 +402,7 @@ const bounceCheque = async (id, companyId, workspaceId, userId, payload) => {
     const chequeInTransit = await findOrCreateSystemAccount(
       workspaceId, companyId, userId,
       "CHEQ_IN_TRANSIT", "Cheques In Transit",
-      "ASSET", "ASSET",
+      "ASSET", "CASH",
       "CHEQ_IN_TRANSIT_GRP", "Cheques In Transit",
       session,
     );
