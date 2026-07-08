@@ -2,17 +2,20 @@ import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 
 import authService from "../services/auth.service.js";
+import onboardingService from "../services/onboarding.service.js";
 
 import { setAuthCookie, clearAuthCookie } from "../../../../utils/cookies.js";
 
 export const register = asyncHandler(async (req, res) => {
-  const result = await authService.register(req.body);
+  const result = await onboardingService.registerWithOnboarding(req.body);
 
   setAuthCookie(res, result.token);
 
   return res.status(201).json(
-    new ApiResponse(201, "User registered successfully", {
+    new ApiResponse(201, "Registration successful. Your workspace and free trial are ready!", {
       user: result.user,
+      workspace: result.workspace,
+      subscription: result.subscription,
       token: result.token,
     }),
   );

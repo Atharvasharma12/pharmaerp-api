@@ -7,6 +7,7 @@ import {
   PLAN_MODULES,
   DEFAULT_PLAN_FEATURES,
   PLAN_CODE_PREFIX,
+  FREE_PLAN_SLUG,
 } from "../constants/plan.constant.js";
 
 const featureSchema = new mongoose.Schema(
@@ -146,6 +147,17 @@ const planSchema = new mongoose.Schema(
       default: 0,
     },
 
+    isFree: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    neverExpires: {
+      type: Boolean,
+      default: false,
+    },
+
     status: {
       type: String,
       enum: Object.values(PLAN_STATUS),
@@ -220,6 +232,14 @@ planSchema.pre("validate", async function () {
 
   if (!this.slug && this.name) {
     this.slug = createSlug(this.name);
+  }
+
+  // Auto-flag free plans
+  if (this.type === PLAN_TYPE.FREE) {
+    this.isFree = true;
+    this.neverExpires = true;
+    this.pricePerUser = 0;
+    this.trialDays = 0;
   }
 });
 

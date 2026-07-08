@@ -289,6 +289,9 @@ const removeWorkspaceMember = async (workspaceId, userId, memberUserId) => {
   return removedMember.toSafeObject();
 };
 
+// Named export so onboarding service can import it directly
+export { createWorkspace };
+
 export default {
   createWorkspace,
   getMyWorkspaces,

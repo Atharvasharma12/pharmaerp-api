@@ -9,7 +9,8 @@
     "start": "node src/server.js",
     "test": "jest",
     "lint": "eslint .",
-    "seed:platform-user": "node scripts/seedPlatformUser.js"
+    "seed:platform-user": "node scripts/seedPlatformUser.js",
+    "seed:free-plan": "node scripts/seedFreePlan.js"
   },
   "keywords": [
     "node",

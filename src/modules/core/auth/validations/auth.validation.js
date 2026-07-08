@@ -1,6 +1,9 @@
 import Joi from "joi";
 
+import { WORKSPACE_TYPE } from "../../../organization/workspaces/constants/workspace.constant.js";
+
 export const registerSchema = Joi.object({
+  // ── Account fields ──────────────────────────────
   email: Joi.string().trim().lowercase().email().max(200).required(),
 
   password: Joi.string().min(6).max(128).required(),
@@ -14,6 +17,27 @@ export const registerSchema = Joi.object({
     .messages({
       "string.pattern.base": "Invalid phone number",
     }),
+
+  // ── Workspace fields ─────────────────────────────
+  workspaceName: Joi.string().trim().min(2).max(100).required().messages({
+    "any.required": "Workspace name is required",
+    "string.min": "Workspace name must be at least 2 characters",
+    "string.max": "Workspace name cannot exceed 100 characters",
+  }),
+
+  workspaceType: Joi.string()
+    .valid(...Object.values(WORKSPACE_TYPE))
+    .optional()
+    .default("pharmacy")
+    .messages({
+      "any.only": `Workspace type must be one of: ${Object.values(WORKSPACE_TYPE).join(", ")}`,
+    }),
+
+  // ── Plan / Trial fields ───────────────────────────
+  planId: Joi.string().hex().length(24).optional().messages({
+    "string.hex": "Invalid plan ID format",
+    "string.length": "Invalid plan ID format",
+  }),
 });
 
 export const loginSchema = Joi.object({

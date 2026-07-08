@@ -187,7 +187,14 @@ const subscriptionSchema = new mongoose.Schema(
 
     expiresAt: {
       type: Date,
-      required: [true, "Subscription expiry date is required"],
+      // Not required for free/neverExpires plans
+      required: [
+        function () {
+          return this.status !== SUBSCRIPTION_STATUS.FREE;
+        },
+        "Subscription expiry date is required",
+      ],
+      default: null,
       index: true,
     },
 

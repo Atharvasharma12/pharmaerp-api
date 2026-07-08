@@ -1,4 +1,5 @@
 export const SUBSCRIPTION_STATUS = {
+  FREE: "free",
   TRIAL: "trial",
   ACTIVE: "active",
   EXPIRED: "expired",

@@ -10,6 +10,7 @@ export const PLAN_INTERVAL = {
 };
 
 export const PLAN_TYPE = {
+  FREE: "free",
   STARTER: "starter",
   BUSINESS: "business",
   ENTERPRISE: "enterprise",
@@ -30,10 +31,12 @@ export const PLAN_MODULES = {
 };
 
 export const DEFAULT_PLAN_FEATURES = {
-  companiesUnlimited: true,
-  branchesUnlimited: true,
+  companiesUnlimited: false,
+  branchesUnlimited: false,
   customBranding: false,
   prioritySupport: false,
 };
+
+export const FREE_PLAN_SLUG = "free";
 
 export const PLAN_CODE_PREFIX = "PLAN";
