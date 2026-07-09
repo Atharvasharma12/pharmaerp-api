@@ -68,22 +68,26 @@ const _createUser = async ({ email, password, fullName, phone }) => {
 
 // ─── Step 2: Create Workspace ─────────────────────────────────────────────────
 
-const _createWorkspace = async (userId, { workspaceName, workspaceType }) => {
-  const slug = createSlug(workspaceName);
+/**
+ * Auto-generates workspace name from the user's full name:
+ *   e.g. "Devansh Upadhyay" → "Devansh Upadhyay's Workspace"
+ * Handles slug collisions by appending a short random suffix.
+ */
+const _createWorkspace = async (userId, fullName) => {
+  const workspaceName = `${fullName.trim()}'s Workspace`;
+  let slug = createSlug(workspaceName);
 
+  // If slug already taken, append a 4-char random hex suffix
   const existingWorkspace = await workspaceRepository.findWorkspaceBySlug(slug);
-
   if (existingWorkspace) {
-    throw new ApiError(
-      400,
-      "A workspace with this name already exists. Please choose a different name.",
-    );
+    slug = `${slug}-${Math.random().toString(16).slice(2, 6)}`;
   }
 
+  // Always default to pharmacy for now
   const workspace = await workspaceRepository.createWorkspace({
     name: workspaceName,
     slug,
-    type: workspaceType || "pharmacy",
+    type: "pharmacy",
     ownerId: userId,
   });
 
@@ -176,7 +180,7 @@ const _activateFreePlan = async (userId, workspaceId) => {
 /**
  * Combined registration onboarding:
  *  1. Create User
- *  2. Create Workspace
+ *  2. Create Workspace (name auto-derived from fullName, type always "pharmacy")
  *  3. Activate Free Plan subscription (permanent, no expiry)
  *
  * @param {object} payload
@@ -184,27 +188,15 @@ const _activateFreePlan = async (userId, workspaceId) => {
  * @param {string} payload.email
  * @param {string} payload.password
  * @param {string} [payload.phone]
- * @param {string} payload.workspaceName
- * @param {string} [payload.workspaceType]  - defaults to "pharmacy"
  */
 const registerWithOnboarding = async (payload) => {
-  const {
-    fullName,
-    email,
-    password,
-    phone,
-    workspaceName,
-    workspaceType,
-  } = payload;
+  const { fullName, email, password, phone } = payload;
 
   // Step 1 — Create user account
   const user = await _createUser({ email, password, fullName, phone });
 
-  // Step 2 — Create workspace owned by this user
-  const workspace = await _createWorkspace(user._id, {
-    workspaceName,
-    workspaceType,
-  });
+  // Step 2 — Create workspace (name auto-generated, type = pharmacy)
+  const workspace = await _createWorkspace(user._id, fullName);
 
   // Step 3 — Activate the free plan for the workspace (no expiry)
   const subscription = await _activateFreePlan(user._id, workspace._id);

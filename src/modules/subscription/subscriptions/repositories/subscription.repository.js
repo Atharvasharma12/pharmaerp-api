@@ -39,7 +39,7 @@ const findCurrentSubscriptionByWorkspace = async (
     isDeleted: false,
     status: {
       $in: [
-        SUBSCRIPTION_STATUS.TRIAL,
+        SUBSCRIPTION_STATUS.FREE,
         SUBSCRIPTION_STATUS.ACTIVE,
         SUBSCRIPTION_STATUS.EXPIRED,
         SUBSCRIPTION_STATUS.SUSPENDED,
@@ -56,30 +56,19 @@ const findActiveSubscriptionByWorkspace = async (workspaceId, options = {}) => {
     return null;
   }
 
+  // Free plans have null expiresAt (never expire). Paid/active plans have a future expiresAt.
   return Subscription.findOne({
     workspaceId,
     isDeleted: false,
-    status: {
-      $in: [SUBSCRIPTION_STATUS.TRIAL, SUBSCRIPTION_STATUS.ACTIVE],
-    },
-    expiresAt: {
-      $gt: new Date(),
-    },
-  })
-    .sort({ createdAt: -1 })
-    .populate(options.populate || "")
-    .select(options.select || "");
-};
-
-const findTrialUsedByWorkspace = async (workspaceId, options = {}) => {
-  if (!mongoose.Types.ObjectId.isValid(workspaceId)) {
-    return null;
-  }
-
-  return Subscription.findOne({
-    workspaceId,
-    isDeleted: false,
-    trialUsed: true,
+    $or: [
+      // Free plan — never expires
+      { status: SUBSCRIPTION_STATUS.FREE },
+      // Paid plan — has an active status and not yet expired
+      {
+        status: SUBSCRIPTION_STATUS.ACTIVE,
+        expiresAt: { $gt: new Date() },
+      },
+    ],
   })
     .sort({ createdAt: -1 })
     .populate(options.populate || "")
@@ -94,12 +83,10 @@ const getWorkspaceSeatLimit = async (workspaceId) => {
   const subscription = await Subscription.findOne({
     workspaceId,
     isDeleted: false,
-    status: {
-      $in: [SUBSCRIPTION_STATUS.TRIAL, SUBSCRIPTION_STATUS.ACTIVE],
-    },
-    expiresAt: {
-      $gt: new Date(),
-    },
+    $or: [
+      { status: SUBSCRIPTION_STATUS.FREE },
+      { status: SUBSCRIPTION_STATUS.ACTIVE, expiresAt: { $gt: new Date() } },
+    ],
   })
     .sort({ createdAt: -1 })
     .select("seatQuantity");
@@ -115,12 +102,10 @@ const getWorkspaceSubscriptionSeatInfo = async (workspaceId) => {
   const subscription = await Subscription.findOne({
     workspaceId,
     isDeleted: false,
-    status: {
-      $in: [SUBSCRIPTION_STATUS.TRIAL, SUBSCRIPTION_STATUS.ACTIVE],
-    },
-    expiresAt: {
-      $gt: new Date(),
-    },
+    $or: [
+      { status: SUBSCRIPTION_STATUS.FREE },
+      { status: SUBSCRIPTION_STATUS.ACTIVE, expiresAt: { $gt: new Date() } },
+    ],
   })
     .sort({ createdAt: -1 })
     .select(
@@ -166,15 +151,12 @@ const getWorkspaceSubscriptions = async (workspaceId, options = {}) => {
 };
 
 const markExpiredSubscriptions = async () => {
+  // Only mark ACTIVE paid plans as expired (free plans have null expiresAt and never expire)
   return Subscription.updateMany(
     {
       isDeleted: false,
-      status: {
-        $in: [SUBSCRIPTION_STATUS.TRIAL, SUBSCRIPTION_STATUS.ACTIVE],
-      },
-      expiresAt: {
-        $lte: new Date(),
-      },
+      status: SUBSCRIPTION_STATUS.ACTIVE,
+      expiresAt: { $lte: new Date() },
     },
     {
       status: SUBSCRIPTION_STATUS.EXPIRED,
@@ -187,7 +169,6 @@ export default {
   findSubscriptionByCode,
   findCurrentSubscriptionByWorkspace,
   findActiveSubscriptionByWorkspace,
-  findTrialUsedByWorkspace,
 
   getWorkspaceSeatLimit,
   getWorkspaceSubscriptionSeatInfo,

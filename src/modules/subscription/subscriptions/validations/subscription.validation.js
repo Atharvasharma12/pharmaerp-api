@@ -9,31 +9,6 @@ const objectId = Joi.string()
     "string.pattern.base": "Invalid id",
   });
 
-export const purchaseSubscriptionSchema = Joi.object({
-  workspaceId: objectId.required(),
-
-  planId: objectId.required(),
-
-  billingCycle: Joi.string()
-    .valid(...Object.values(SUBSCRIPTION_BILLING_CYCLE))
-    .required(),
-
-  seatQuantity: Joi.number().integer().min(1).required(),
-
-  currency: Joi.string().trim().uppercase().length(3).optional(),
-});
-
-/**
- * NEW TRIAL SCHEMA
- */
-export const startTrialSubscriptionSchema = Joi.object({
-  workspaceId: objectId.required(),
-
-  planId: objectId.required(),
-
-  seatQuantity: Joi.number().integer().min(1).default(1),
-});
-
 export const renewSubscriptionSchema = Joi.object({
   subscriptionId: objectId.required(),
 

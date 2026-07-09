@@ -7,36 +7,6 @@ import upgradeService from "../services/upgrade.service.js";
 import downgradeService from "../services/downgrade.service.js";
 import seatService from "../services/seat.service.js";
 
-export const purchaseSubscription = asyncHandler(async (req, res) => {
-  const subscription = await subscriptionService.purchaseSubscription(
-    req.user._id,
-    req.body,
-  );
-
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(201, "Subscription purchased successfully", subscription),
-    );
-});
-
-export const startTrialSubscription = asyncHandler(async (req, res) => {
-  const subscription = await subscriptionService.startTrialSubscription(
-    req.user._id,
-    req.body,
-  );
-
-  return res
-    .status(201)
-    .json(
-      new ApiResponse(
-        201,
-        "Trial subscription started successfully",
-        subscription,
-      ),
-    );
-});
-
 export const renewSubscription = asyncHandler(async (req, res) => {
   const subscription = await renewalService.renewSubscription(
     req.user._id,

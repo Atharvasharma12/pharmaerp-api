@@ -60,10 +60,39 @@ const getActivePlans = async (options = {}) => {
     .select(options.select || "");
 };
 
+/**
+ * Find an active (non-deleted) plan by its type.
+ * Used to enforce the one-active-plan-per-type rule.
+ */
+const findActivePlanByType = async (type, excludeId = null) => {
+  const query = {
+    type,
+    status: PLAN_STATUS.ACTIVE,
+    isDeleted: false,
+  };
+
+  if (excludeId) {
+    query._id = { $ne: excludeId };
+  }
+
+  return Plan.findOne(query);
+};
+
+const createPlan = async (payload) => {
+  return Plan.create(payload);
+};
+
+const savePlan = async (plan) => {
+  return plan.save();
+};
+
 export default {
   findPlanById,
   findPlanBySlug,
   findPlanByCode,
+  findActivePlanByType,
   getPlans,
   getActivePlans,
+  createPlan,
+  savePlan,
 };

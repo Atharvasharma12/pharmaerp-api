@@ -22,11 +22,9 @@ export const SUBSCRIPTION_BILLING_CYCLE = {
 };
 
 export const SUBSCRIPTION_ACTION = {
-  PURCHASE: "purchase",
-  START_TRIAL: "start_trial",
-  RENEW: "renew",
   UPGRADE: "upgrade",
   DOWNGRADE: "downgrade",
+  RENEW: "renew",
   CHANGE_SEATS: "change_seats",
   CANCEL: "cancel",
 };
@@ -57,7 +55,6 @@ export const SUBSCRIPTION_BLOCKED_WRITE_ACTIONS = {
 
 export const SUBSCRIPTION_CODE_PREFIX = "SUB";
 
-export const SUBSCRIPTION_TRIAL_DAYS_DEFAULT = 0;
 
 export const SUBSCRIPTION_MIN_SEATS = 1;
 

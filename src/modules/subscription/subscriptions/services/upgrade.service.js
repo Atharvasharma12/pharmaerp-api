@@ -8,6 +8,8 @@ import planRepository from "../../plans/repositories/plan.repository.js";
 
 import calculateSubscriptionAmount from "../../../../utils/subscription/calculateSubscriptionAmount.js";
 
+import calculateSubscriptionExpiry from "../../../../utils/subscription/calculateSubscriptionExpiry.js";
+
 import {
   SUBSCRIPTION_STATUS,
   SUBSCRIPTION_PAYMENT_STATUS,
@@ -65,6 +67,21 @@ const upgradeSubscription = async (userId, payload) => {
     throw new ApiError(400, "Subscription is already using this plan");
   }
 
+  const PLAN_TIER_ORDER = {
+    free: 1,
+    starter: 2,
+    business: 3,
+    enterprise: 4,
+  };
+
+  const currentPlanType = subscription.currentPlanSnapshot?.type || subscription.planId?.type || "free";
+  const currentWeight = PLAN_TIER_ORDER[currentPlanType] || 1;
+  const newWeight = PLAN_TIER_ORDER[newPlan.type] || 1;
+
+  if (newWeight <= currentWeight) {
+    throw new ApiError(400, "You can only upgrade to a higher tier plan.");
+  }
+
   const nextBillingCycle = billingCycle || subscription.billingCycle;
 
   const nextSeatQuantity = seatQuantity || subscription.seatQuantity;
@@ -88,6 +105,15 @@ const upgradeSubscription = async (userId, payload) => {
   subscription.subtotalAmount = amountDetails.subtotal;
 
   subscription.totalAmount = amountDetails.totalAmount;
+
+  const startsAt = new Date();
+
+  subscription.startsAt = startsAt;
+  subscription.expiresAt = calculateSubscriptionExpiry({
+    billingCycle: nextBillingCycle,
+    startDate: startsAt,
+    trialDays: 0,
+  });
 
   subscription.status = SUBSCRIPTION_STATUS.ACTIVE;
 

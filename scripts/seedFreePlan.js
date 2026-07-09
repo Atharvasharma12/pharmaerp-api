@@ -51,10 +51,14 @@ const seedFreePlan = async () => {
       ],
 
       features: {
-        companiesUnlimited: false,
-        branchesUnlimited: false,
         customBranding: false,
         prioritySupport: false,
+      },
+
+      limits: {
+        maxCompanies: 1,
+        maxBranches: 1,
+        maxUsers: 3,
       },
 
       featureItems: [
@@ -112,7 +116,6 @@ const seedFreePlan = async () => {
       // Free plan flags (also auto-set by model pre-validate for type FREE)
       isFree: true,
       neverExpires: true,
-      trialDays: 0,
 
       isPopular: false,
       sortOrder: 0,

@@ -30,9 +30,20 @@ export const PLAN_MODULES = {
   ECOMMERCE: "ecommerce",
 };
 
+/**
+ * Hard limits every plan enforces.
+ * Free plan defaults are the most restrictive.
+ * Paid plans should override these when created.
+ */
+export const PLAN_LIMITS = {
+  FREE: { maxCompanies: 1, maxBranches: 1, maxUsers: 1 },
+  STARTER: { maxCompanies: 2, maxBranches: 5, maxUsers: 5 },
+  BUSINESS: { maxCompanies: 5, maxBranches: 10, maxUsers: 10 },
+  ENTERPRISE: { maxCompanies: 10, maxBranches: 50, maxUsers: 50 },
+};
+
+/** Default feature flags (UI-level capabilities, not limits) */
 export const DEFAULT_PLAN_FEATURES = {
-  companiesUnlimited: false,
-  branchesUnlimited: false,
   customBranding: false,
   prioritySupport: false,
 };

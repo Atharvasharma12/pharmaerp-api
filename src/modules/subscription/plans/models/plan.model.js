@@ -5,23 +5,18 @@ import {
   PLAN_INTERVAL,
   PLAN_TYPE,
   PLAN_MODULES,
+  PLAN_LIMITS,
   DEFAULT_PLAN_FEATURES,
   PLAN_CODE_PREFIX,
   FREE_PLAN_SLUG,
 } from "../constants/plan.constant.js";
 
+/**
+ * UI-level feature flags — things like custom branding, priority support.
+ * NOT for limits (use limitsSchema for that).
+ */
 const featureSchema = new mongoose.Schema(
   {
-    companiesUnlimited: {
-      type: Boolean,
-      default: DEFAULT_PLAN_FEATURES.companiesUnlimited,
-    },
-
-    branchesUnlimited: {
-      type: Boolean,
-      default: DEFAULT_PLAN_FEATURES.branchesUnlimited,
-    },
-
     customBranding: {
       type: Boolean,
       default: DEFAULT_PLAN_FEATURES.customBranding,
@@ -30,6 +25,35 @@ const featureSchema = new mongoose.Schema(
     prioritySupport: {
       type: Boolean,
       default: DEFAULT_PLAN_FEATURES.prioritySupport,
+    },
+  },
+  { _id: false },
+);
+
+/**
+ * Hard resource limits per plan.
+ * maxCompanies — how many companies the workspace can create.
+ * maxBranches  — how many branches across all companies.
+ * maxUsers     — how many users (seats) the workspace can have.
+ */
+const limitsSchema = new mongoose.Schema(
+  {
+    maxCompanies: {
+      type: Number,
+      min: 1,
+      default: 1,
+    },
+
+    maxBranches: {
+      type: Number,
+      min: 1,
+      default: 1,
+    },
+
+    maxUsers: {
+      type: Number,
+      min: 1,
+      default: 1,
     },
   },
   { _id: false },
@@ -131,6 +155,15 @@ const planSchema = new mongoose.Schema(
       default: () => ({ ...DEFAULT_PLAN_FEATURES }),
     },
 
+    /**
+     * Hard resource limits for this plan.
+     * These are enforced server-side when creating companies, branches, or adding users.
+     */
+    limits: {
+      type: limitsSchema,
+      default: () => ({ ...PLAN_LIMITS.FREE }),
+    },
+
     featureItems: {
       type: [featureItemSchema],
       default: [],
@@ -139,12 +172,6 @@ const planSchema = new mongoose.Schema(
     isPopular: {
       type: Boolean,
       default: false,
-    },
-
-    trialDays: {
-      type: Number,
-      min: 0,
-      default: 0,
     },
 
     isFree: {
@@ -234,12 +261,23 @@ planSchema.pre("validate", async function () {
     this.slug = createSlug(this.name);
   }
 
-  // Auto-flag free plans
+  // Auto-configure free plans — price and flags are always forced.
+  // Limits are only seeded on creation; admin can override them via update.
   if (this.type === PLAN_TYPE.FREE) {
     this.isFree = true;
     this.neverExpires = true;
     this.pricePerUser = 0;
-    this.trialDays = 0;
+
+    // Only set default limits when creating a new free plan without explicit limits
+    if (
+      this.isNew &&
+      (!this.limits ||
+        (!this.limits.maxCompanies &&
+          !this.limits.maxBranches &&
+          !this.limits.maxUsers))
+    ) {
+      this.limits = { ...PLAN_LIMITS.FREE };
+    }
   }
 });
 
@@ -283,6 +321,22 @@ planSchema.index({
 planSchema.index({
   updatedBy: 1,
 });
+
+/**
+ * Unique constraint: only ONE active plan per type is allowed at a time.
+ * e.g. Cannot have two active "free" or two active "starter" plans.
+ */
+planSchema.index(
+  { type: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      isDeleted: false,
+      status: PLAN_STATUS.ACTIVE,
+    },
+    name: "unique_active_plan_type",
+  },
+);
 
 const Plan = mongoose.models.Plan || mongoose.model("Plan", planSchema);
 
