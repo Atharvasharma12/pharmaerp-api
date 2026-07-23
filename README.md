@@ -1,15 +1,16 @@
 # ERP Backend
 
-A modular backend for a retail pharmacy ERP platform. The project is built with Node.js, Express, MongoDB, JWT-based authentication, and a feature-driven module structure that separates platform operations, organization management, subscription handling, and catalog management.
+A modular backend for a retail pharmacy ERP platform built on top of the **Pahuch** ecosystem. The project is built with Node.js, Express, MongoDB, JWT-based authentication, and a feature-driven module structure that separates platform operations, organization management, subscription handling, catalog management, and a Quick Commerce marketplace layer.
 
 ---
 
 ## Overview
 
-This backend is designed to support two main product areas:
+This backend supports three main product areas:
 
-1. **ERP customer side** for pharmacy/workspace users
-2. **Platform/admin side** for internal ERP owners and operators
+1. **ERP customer side** — for pharmacy/workspace users managing their business
+2. **Platform/admin side** — for Pahuch internal team (subscription management, store verification, marketplace operations)
+3. **Marketplace side** — for ERP partner pharmacies participating in the Pahuch Quick Commerce platform
 
 The API is served under the base prefix:
 
@@ -24,7 +25,7 @@ The API is served under the base prefix:
 - **Runtime:** Node.js
 - **Framework:** Express.js
 - **Database:** MongoDB + Mongoose
-- **Auth:** JWT (ERP users) and platform JWT
+- **Auth:** JWT (ERP users) and platform JWT (Pahuch internal)
 - **Validation:** Joi
 - **Security:** Helmet, CORS, cookie parsing
 - **Logging:** Winston + daily rotate file logs
@@ -42,6 +43,10 @@ The API is served under the base prefix:
 - Subscription plans and subscription lifecycle handling
 - Workspace-level catalog/product management
 - Platform-level global catalog management
+- Pharmacy finance, accounting, and treasury management
+- Partner and customer (parties) management
+- Marketplace store registration and partner fulfillment operations
+- Platform-controlled marketplace commerce (availability, routing, orders, delivery, settlements)
 - Request and error handling middleware
 - Environment-based configuration
 - Email-based auth flows
@@ -67,6 +72,7 @@ erp-backend/
 │   │   └── platformStatus.constant.js
 │   ├── middlewares/
 │   │   ├── auth.middleware.js
+│   │   ├── branchContext.middleware.js
 │   │   ├── companyContext.middleware.js
 │   │   ├── error.middleware.js
 │   │   ├── notFound.middleware.js
@@ -76,14 +82,16 @@ erp-backend/
 │   │   ├── requestLogger.middleware.js
 │   │   ├── subscriptionGuard.middleware.js
 │   │   ├── validate.middleware.js
-│   │   ├── workspaceContext.middleware.js
-│   │   └── branchContext.middleware.js
+│   │   └── workspaceContext.middleware.js
 │   ├── modules/
 │   │   ├── core/
 │   │   ├── organization/
 │   │   ├── platform/
 │   │   ├── subscription/
-│   │   └── catalog/
+│   │   ├── catalog/
+│   │   ├── finance/
+│   │   ├── parties/
+│   │   └── marketplace/
 │   ├── routes/
 │   │   └── index.routes.js
 │   ├── utils/
@@ -106,7 +114,7 @@ erp-backend/
 
 ## API Base Routing
 
-All routes are mounted from [src/routes/index.routes.js](src/routes/index.routes.js), and the application exposes these main API groups:
+All routes are mounted from `src/routes/index.routes.js`:
 
 ```txt
 /api/v1/core/*
@@ -114,40 +122,35 @@ All routes are mounted from [src/routes/index.routes.js](src/routes/index.routes
 /api/v1/organization/*
 /api/v1/subscription/*
 /api/v1/catalog/*
+/api/v1/finance/*
+/api/v1/parties/*
+/api/v1/marketplace/*
 ```
 
 ---
 
 ## Module Breakdown
 
-### 1. Core Module
+### 1. `core/`
 
 Purpose: common auth, user profile, health checks, and access control.
 
-Mounted at:
-
-```txt
-/api/v1/core
-```
+Mounted at: `/api/v1/core`
 
 Included areas:
 
 - `/health` — server health check
 - `/auth` — register, login, forgot/reset password, OTP flows, logout
 - `/users` — me/profile, avatar, email/phone updates, account deletion
-- `/access-control` — access control related endpoints
+- `/access-control` — role and permission management
 
 ---
 
-### 2. Organization Module
+### 2. `organization/`
 
 Purpose: workspace, company, and branch management for ERP tenants.
 
-Mounted at:
-
-```txt
-/api/v1/organization
-```
+Mounted at: `/api/v1/organization`
 
 Included areas:
 
@@ -159,56 +162,58 @@ These APIs are built around workspace/company/branch context and are intended fo
 
 ---
 
-### 3. Platform Module
+### 3. `platform/`
 
-Purpose: admin/internal operations for the platform owner.
+Purpose: admin/internal operations for the Pahuch platform team.
 
-Mounted at:
+Mounted at: `/api/v1/platform`
 
-```txt
-/api/v1/platform
-```
-
-Included areas:
+#### Existing Platform Modules
 
 - `/auth` — platform login/logout/me
 - `/users` — platform user CRUD
-- `/plans` — platform subscription plan management
-- `/subscriptions` — platform subscription lifecycle management
+- `/dashboard` — platform analytics overview
+- `/customers` — ERP customer workspace management
+- `/plans` — subscription plan management
+- `/subscriptions` — subscription lifecycle management
 - `/global-catalog` — platform-wide catalog masters and products
+- `/audit-logs` — platform admin action tracking
 
-This module is used for internal platform operations such as customer onboarding, subscription oversight, and global master-data control.
+#### New Marketplace Platform Modules
+
+- `/marketplace-settings` — global marketplace configuration
+- `/store-verification` — approve/reject partner store registrations
+- `/pricing` — customer pricing, partner settlement prices, platform margin
+- `/commission` — commission rules and rates
+- `/availability-engine` — determine which stores can fulfill an order
+- `/routing-engine` — select the best fulfillment store
+- `/customer-orders` — all customer orders, Pahuch view
+- `/delivery` — delivery partners, tracking, proof of delivery
+- `/settlements` — partner payout management
+- `/refunds` — customer refund management
+- `/coupons` — platform-wide offers and coupons
+- `/marketplace-analytics` — Pahuch marketplace business intelligence
 
 ---
 
-### 4. Subscription Module
+### 4. `subscription/`
 
 Purpose: customer-facing subscription operations for workspaces.
 
-Mounted at:
-
-```txt
-/api/v1/subscription
-```
+Mounted at: `/api/v1/subscription`
 
 Included areas:
 
 - `/plans` — active and available plan retrieval
-- `/subscriptions` — purchase, trial, renew, upgrade, downgrade, cancel, and reporting flows
-
-This is used to manage workspace subscription state, billing cycles, seat availability, and subscription actions.
+- `/subscriptions` — purchase, trial, renew, upgrade, downgrade, cancel
 
 ---
 
-### 5. Catalog Module
+### 5. `catalog/`
 
 Purpose: workspace-level catalog and product management for ERP users.
 
-Mounted at:
-
-```txt
-/api/v1/catalog
-```
+Mounted at: `/api/v1/catalog`
 
 Included areas:
 
@@ -223,35 +228,188 @@ Included areas:
 
 ---
 
-## Catalog Master Details
+### 6. `finance/`
 
-The catalog area is one of the most important sections of the backend. It supports both product-level data and master records needed for pharmacy ERP operations.
+Purpose: financial accounting and treasury operations for ERP workspaces.
 
-### Products
+Mounted at: `/api/v1/finance`
 
-- Create/update/delete workspace products
-- Fetch product details and lists
-- Operate under the current workspace context
+Included areas:
 
-### Global Products
+- `/chart-of-accounts` — chart of accounts management
+- `/journal-vouchers` — journal entry management
+- `/ledger` — ledger view and reporting
+- `/account-balances` — account balance tracking
+- `/opening-balances` — opening balance setup
+- `/financial-periods` — financial period management
+- `/treasury` — treasury and payment tracking
+- `/reports` — financial reports
 
-- Access shared/global catalog products
-- Used for cross-workspace catalog reference or central product data
+---
 
-### Masters
+### 7. `parties/`
 
-- **HSN Master** — HSN code and tax-related reference records
-- **Manufacturer Master** — manufacturer information and reference data
-- **UOM Master** — unit-of-measure definitions
-- **Category Master** — product categorization
-- **Product Form Master** — dosage/form classification
-- **Salt Master** — active ingredient/salt definitions
+Purpose: customer and supplier management for ERP workspaces.
+
+Mounted at: `/api/v1/parties`
+
+Included areas:
+
+- `/customers` — pharmacy customer CRUD and ledger
+- `/suppliers` — supplier CRUD and ledger
+
+---
+
+### 8. `marketplace/`
+
+Purpose: ERP partner pharmacy operations for the Pahuch Marketplace.
+
+Mounted at: `/api/v1/marketplace`
+
+Partner pharmacies (ERP users) use this module to manage their online store participation.
+
+Included areas:
+
+- `/stores` — partner store registration, online/offline management
+- `/products` — enable/disable ERP products for online selling
+- `/inventory` — read-only view of sellable stock
+- `/fulfillment-orders` — accept, pack, and dispatch fulfillment tasks from Pahuch
+- `/pricing` — read-only view of partner settlement pricing
+- `/dashboard` — partner store performance dashboard
+
+---
+
+## Platform vs Marketplace Split
+
+The Pahuch system introduces a clear two-layer commerce architecture on top of the ERP:
+
+```txt
+ERP (Source of Truth)
+│   Products, Inventory, Finance, Customers, Branches
+│
+├── platform/                   ← Pahuch Internal Management
+│   │   Marketplace Settings, Store Verification, Pricing,
+│   │   Commission, Availability Engine, Routing Engine,
+│   │   Customer Orders, Delivery, Settlements, Refunds,
+│   │   Coupons, Marketplace Analytics
+│
+└── marketplace/                ← Partner Pharmacy Operations
+        Stores, Products, Inventory (View), Fulfillment Orders,
+        Pricing (View), Store Dashboard
+```
+
+### Who controls what
+
+| Concern | Owner |
+| ------------------------------------------------- | ----------- |
+| Customer-facing price | Platform |
+| Partner settlement price | Platform |
+| Store approval / rejection | Platform |
+| Commission rules | Platform |
+| Routing and availability decisions | Platform |
+| Customer orders | Platform |
+| Delivery management | Platform |
+| Refund processing | Platform |
+| Partner settlement payout | Platform |
+| Store online/offline toggle | Marketplace |
+| Product enabled/disabled for online selling | Marketplace |
+| Order acceptance and packing | Marketplace |
+| Store working hours | Marketplace |
+| Store dashboard and reports | Marketplace |
+
+---
+
+## File & Folder Naming Convention
+
+Every module follows the same naming pattern:
+
+```txt
+<submoduleName>.<layer>.js
+```
+
+### Examples
+
+```txt
+company.model.js
+company.controller.js
+company.service.js
+company.repository.js
+company.routes.js
+company.validation.js
+company.constant.js
+company.module.js
+```
+
+```txt
+platformPlan.controller.js
+platformPlan.service.js
+platformPlan.routes.js
+platformPlan.validation.js
+platformPlan.constant.js
+platformPlan.module.js
+```
+
+```txt
+marketplaceStore.model.js
+marketplaceStore.controller.js
+marketplaceStore.service.js
+marketplaceStore.repository.js
+marketplaceStore.routes.js
+marketplaceStore.validation.js
+marketplaceStore.constant.js
+marketplaceStore.module.js
+```
+
+### Naming Rules
+
+```txt
+Platform module files    →  platformXxx.layer.js
+Marketplace module files →  marketplaceXxx.layer.js
+ERP module files         →  entityName.layer.js
+```
+
+---
+
+## Standard Module Pattern
+
+Every module follows this folder structure:
+
+```txt
+module-name/
+├── models/
+│   └── moduleName.model.js
+├── controllers/
+│   └── moduleName.controller.js
+├── services/
+│   └── moduleName.service.js
+├── repositories/
+│   └── moduleName.repository.js
+├── routes/
+│   └── moduleName.routes.js
+├── validations/
+│   └── moduleName.validation.js
+├── constants/
+│   └── moduleName.constant.js
+└── moduleName.module.js
+```
+
+Layer responsibility:
+
+```txt
+models        → database schema definition
+controllers   → HTTP request/response handling
+services      → business logic
+repositories  → database queries
+routes        → endpoint definitions
+validations   → Joi request validation schemas
+constants     → module-level constants and enums
+```
+
+Note: Some modules (e.g. engines, dashboards, analytics) skip `models/` and/or `repositories/` because they are computational/read-only services.
 
 ---
 
 ## Authentication Model
-
-The project uses two authentication flows:
 
 ### ERP User Authentication
 
@@ -261,25 +419,362 @@ The project uses two authentication flows:
 
 ### Platform Authentication
 
-- Separate JWT flow for platform/internal users
+- Separate JWT flow for Pahuch internal users
 - Platform routes use dedicated platform auth middleware
+
+---
+
+## Platform Role Constants
+
+```js
+// src/constants/platformRoles.constant.js
+
+SUPER_ADMIN
+ADMIN
+SUPPORT
+BILLING_MANAGER
+CATALOG_MANAGER
+READ_ONLY
+```
 
 ---
 
 ## Middleware Layer
 
-Common middleware in the app includes:
+```txt
+requestLogger          → logs request details
+authMiddleware         → validates ERP user tokens
+platformAuthMiddleware → validates platform (Pahuch) tokens
+workspaceContextMiddleware → sets workspace context
+companyContextMiddleware   → sets company context
+branchContextMiddleware    → sets branch context
+subscriptionGuard      → validates subscription state
+validate               → validates request payloads using Joi schemas
+error.middleware       → global error handling
+notFound.middleware    → 404 responses
+```
 
-- `requestLogger` — logs request details
-- `authMiddleware` — validates ERP user tokens
-- `platformAuthMiddleware` — validates platform tokens
-- `workspaceContextMiddleware` — sets workspace context
-- `companyContextMiddleware` — sets company context
-- `branchContextMiddleware` — sets branch context
-- `subscriptionGuard` — validates subscription state where needed
-- `validate` — validates request payloads using Joi schemas
-- `error.middleware` — global error handling
-- `notFound.middleware` — 404 responses
+---
+
+## Platform Module — Full Structure
+
+```txt
+src/modules/platform/
+│
+├── platform.module.js
+├── platform.routes.js
+│
+├── auth/
+├── users/
+├── dashboard/
+├── customers/
+├── plans/
+├── subscriptions/
+├── global-catalog/
+├── audit-logs/
+│
+├── marketplace-settings/
+│   ├── models/
+│   │   └── platformMarketplaceSettings.model.js
+│   ├── controllers/
+│   │   └── platformMarketplaceSettings.controller.js
+│   ├── services/
+│   │   └── platformMarketplaceSettings.service.js
+│   ├── repositories/
+│   │   └── platformMarketplaceSettings.repository.js
+│   ├── routes/
+│   │   └── platformMarketplaceSettings.routes.js
+│   ├── validations/
+│   │   └── platformMarketplaceSettings.validation.js
+│   ├── constants/
+│   │   └── platformMarketplaceSettings.constant.js
+│   └── platformMarketplaceSettings.module.js
+│
+├── store-verification/
+│   ├── models/
+│   │   └── platformStoreVerification.model.js
+│   ├── controllers/
+│   │   └── platformStoreVerification.controller.js
+│   ├── services/
+│   │   └── platformStoreVerification.service.js
+│   ├── repositories/
+│   │   └── platformStoreVerification.repository.js
+│   ├── routes/
+│   │   └── platformStoreVerification.routes.js
+│   ├── validations/
+│   │   └── platformStoreVerification.validation.js
+│   ├── constants/
+│   │   └── platformStoreVerification.constant.js
+│   └── platformStoreVerification.module.js
+│
+├── pricing/
+│   ├── models/
+│   │   └── platformMarketplacePricing.model.js
+│   ├── controllers/
+│   │   └── platformMarketplacePricing.controller.js
+│   ├── services/
+│   │   └── platformMarketplacePricing.service.js
+│   ├── repositories/
+│   │   └── platformMarketplacePricing.repository.js
+│   ├── routes/
+│   │   └── platformMarketplacePricing.routes.js
+│   ├── validations/
+│   │   └── platformMarketplacePricing.validation.js
+│   ├── constants/
+│   │   └── platformMarketplacePricing.constant.js
+│   └── platformMarketplacePricing.module.js
+│
+├── commission/
+│   ├── models/
+│   │   └── platformCommission.model.js
+│   ├── controllers/
+│   │   └── platformCommission.controller.js
+│   ├── services/
+│   │   └── platformCommission.service.js
+│   ├── repositories/
+│   │   └── platformCommission.repository.js
+│   ├── routes/
+│   │   └── platformCommission.routes.js
+│   ├── validations/
+│   │   └── platformCommission.validation.js
+│   ├── constants/
+│   │   └── platformCommission.constant.js
+│   └── platformCommission.module.js
+│
+├── availability-engine/
+│   ├── controllers/
+│   │   └── platformAvailabilityEngine.controller.js
+│   ├── services/
+│   │   └── platformAvailabilityEngine.service.js
+│   ├── repositories/
+│   │   └── platformAvailabilityEngine.repository.js
+│   ├── routes/
+│   │   └── platformAvailabilityEngine.routes.js
+│   ├── constants/
+│   │   └── platformAvailabilityEngine.constant.js
+│   └── platformAvailabilityEngine.module.js
+│
+├── routing-engine/
+│   ├── controllers/
+│   │   └── platformRoutingEngine.controller.js
+│   ├── services/
+│   │   └── platformRoutingEngine.service.js
+│   ├── routes/
+│   │   └── platformRoutingEngine.routes.js
+│   ├── constants/
+│   │   └── platformRoutingEngine.constant.js
+│   └── platformRoutingEngine.module.js
+│
+├── customer-orders/
+│   ├── models/
+│   │   └── platformCustomerOrder.model.js
+│   ├── controllers/
+│   │   └── platformCustomerOrder.controller.js
+│   ├── services/
+│   │   └── platformCustomerOrder.service.js
+│   ├── repositories/
+│   │   └── platformCustomerOrder.repository.js
+│   ├── routes/
+│   │   └── platformCustomerOrder.routes.js
+│   ├── validations/
+│   │   └── platformCustomerOrder.validation.js
+│   ├── constants/
+│   │   └── platformCustomerOrder.constant.js
+│   └── platformCustomerOrder.module.js
+│
+├── delivery/
+│   ├── models/
+│   │   └── platformDelivery.model.js
+│   ├── controllers/
+│   │   └── platformDelivery.controller.js
+│   ├── services/
+│   │   └── platformDelivery.service.js
+│   ├── repositories/
+│   │   └── platformDelivery.repository.js
+│   ├── routes/
+│   │   └── platformDelivery.routes.js
+│   ├── validations/
+│   │   └── platformDelivery.validation.js
+│   ├── constants/
+│   │   └── platformDelivery.constant.js
+│   └── platformDelivery.module.js
+│
+├── settlements/
+│   ├── models/
+│   │   └── platformSettlement.model.js
+│   ├── controllers/
+│   │   └── platformSettlement.controller.js
+│   ├── services/
+│   │   └── platformSettlement.service.js
+│   ├── repositories/
+│   │   └── platformSettlement.repository.js
+│   ├── routes/
+│   │   └── platformSettlement.routes.js
+│   ├── validations/
+│   │   └── platformSettlement.validation.js
+│   ├── constants/
+│   │   └── platformSettlement.constant.js
+│   └── platformSettlement.module.js
+│
+├── refunds/
+│   ├── models/
+│   │   └── platformRefund.model.js
+│   ├── controllers/
+│   │   └── platformRefund.controller.js
+│   ├── services/
+│   │   └── platformRefund.service.js
+│   ├── repositories/
+│   │   └── platformRefund.repository.js
+│   ├── routes/
+│   │   └── platformRefund.routes.js
+│   ├── validations/
+│   │   └── platformRefund.validation.js
+│   ├── constants/
+│   │   └── platformRefund.constant.js
+│   └── platformRefund.module.js
+│
+├── coupons/
+│   ├── models/
+│   │   └── platformCoupon.model.js
+│   ├── controllers/
+│   │   └── platformCoupon.controller.js
+│   ├── services/
+│   │   └── platformCoupon.service.js
+│   ├── repositories/
+│   │   └── platformCoupon.repository.js
+│   ├── routes/
+│   │   └── platformCoupon.routes.js
+│   ├── validations/
+│   │   └── platformCoupon.validation.js
+│   ├── constants/
+│   │   └── platformCoupon.constant.js
+│   └── platformCoupon.module.js
+│
+└── marketplace-analytics/
+    ├── controllers/
+    │   └── platformMarketplaceAnalytics.controller.js
+    ├── services/
+    │   └── platformMarketplaceAnalytics.service.js
+    ├── repositories/
+    │   └── platformMarketplaceAnalytics.repository.js
+    ├── routes/
+    │   └── platformMarketplaceAnalytics.routes.js
+    ├── constants/
+    │   └── platformMarketplaceAnalytics.constant.js
+    └── platformMarketplaceAnalytics.module.js
+```
+
+---
+
+## Marketplace Module — Full Structure
+
+```txt
+src/modules/marketplace/
+│
+├── marketplace.module.js
+├── marketplace.routes.js
+│
+├── stores/
+│   ├── models/
+│   │   └── marketplaceStore.model.js
+│   ├── controllers/
+│   │   └── marketplaceStore.controller.js
+│   ├── services/
+│   │   └── marketplaceStore.service.js
+│   ├── repositories/
+│   │   └── marketplaceStore.repository.js
+│   ├── routes/
+│   │   └── marketplaceStore.routes.js
+│   ├── validations/
+│   │   └── marketplaceStore.validation.js
+│   ├── constants/
+│   │   └── marketplaceStore.constant.js
+│   └── marketplaceStore.module.js
+│
+├── products/
+│   ├── models/
+│   │   └── marketplaceProduct.model.js
+│   ├── controllers/
+│   │   └── marketplaceProduct.controller.js
+│   ├── services/
+│   │   └── marketplaceProduct.service.js
+│   ├── repositories/
+│   │   └── marketplaceProduct.repository.js
+│   ├── routes/
+│   │   └── marketplaceProduct.routes.js
+│   ├── validations/
+│   │   └── marketplaceProduct.validation.js
+│   ├── constants/
+│   │   └── marketplaceProduct.constant.js
+│   └── marketplaceProduct.module.js
+│
+├── inventory/
+│   ├── models/
+│   │   └── marketplaceInventory.model.js
+│   ├── controllers/
+│   │   └── marketplaceInventory.controller.js
+│   ├── services/
+│   │   └── marketplaceInventory.service.js
+│   ├── repositories/
+│   │   └── marketplaceInventory.repository.js
+│   ├── routes/
+│   │   └── marketplaceInventory.routes.js
+│   ├── constants/
+│   │   └── marketplaceInventory.constant.js
+│   └── marketplaceInventory.module.js
+│
+├── fulfillment-orders/
+│   ├── models/
+│   │   └── marketplaceFulfillmentOrder.model.js
+│   ├── controllers/
+│   │   └── marketplaceFulfillmentOrder.controller.js
+│   ├── services/
+│   │   └── marketplaceFulfillmentOrder.service.js
+│   ├── repositories/
+│   │   └── marketplaceFulfillmentOrder.repository.js
+│   ├── routes/
+│   │   └── marketplaceFulfillmentOrder.routes.js
+│   ├── validations/
+│   │   └── marketplaceFulfillmentOrder.validation.js
+│   ├── constants/
+│   │   └── marketplaceFulfillmentOrder.constant.js
+│   └── marketplaceFulfillmentOrder.module.js
+│
+├── pricing/
+│   ├── controllers/
+│   │   └── marketplacePricing.controller.js
+│   ├── services/
+│   │   └── marketplacePricing.service.js
+│   ├── routes/
+│   │   └── marketplacePricing.routes.js
+│   └── marketplacePricing.module.js
+│
+└── dashboard/
+    ├── controllers/
+    │   └── marketplaceDashboard.controller.js
+    ├── services/
+    │   └── marketplaceDashboard.service.js
+    ├── routes/
+    │   └── marketplaceDashboard.routes.js
+    ├── constants/
+    │   └── marketplaceDashboard.constant.js
+    └── marketplaceDashboard.module.js
+```
+
+---
+
+## Core Application Flow
+
+1. `src/server.js` loads environment variables and starts the HTTP server.
+2. `src/app.js` applies middleware, parsers, security, CORS, routes, and error handlers.
+3. `src/routes/index.routes.js` registers module routers.
+4. Request enters the correct module route.
+5. Middleware validates authentication and authorization.
+6. Controller receives the request.
+7. Service handles business logic.
+8. Repository performs the database operation.
+9. API response is returned using `ApiResponse`.
+10. Errors are handled by the global error middleware.
 
 ---
 
@@ -292,989 +787,6 @@ cp .env.example .env
 ```
 
 Important variables:
-
-```env
-NODE_ENV=development
-PORT=5000
-DB_URI=mongodb://localhost:27017/erp-backend
-JWT_SECRET=your-jwt-secret
-PLATFORM_JWT_SECRET=your-platform-jwt-secret
-CORS_ORIGIN=http://localhost:3000
-API_PREFIX=/api/v1
-```
-
----
-
-## Installation
-
-```bash
-npm install
-```
-
----
-
-## Running the Server
-
-Development mode:
-
-```bash
-npm run dev
-```
-
-Production mode:
-
-```bash
-npm start
-```
-
----
-
-## Useful Scripts
-
-```bash
-npm run dev
-npm start
-npm test
-npm run lint
-npm run seed:platform-user
-```
-
-- `seed:platform-user` seeds a platform user for admin/platform setup.
-
----
-
-## Testing
-
-The repository includes Jest-based tests under the `tests` folder:
-
-```txt
-tests/
-├── api/
-└── unit/
-```
-
----
-
-## Logging and File Storage
-
-- Request and application logs are written to the `logs` directory.
-- Uploads are stored under the `uploads` directory.
-- The logger is configured to support rotating logs for better production monitoring.
-
----
-
-## Notes on Architecture
-
-The backend follows a clean separation of concerns:
-
-- **Routes** define API endpoints
-- **Controllers** handle requests and responses
-- **Services** contain business logic
-- **Repositories/models** manage database access
-- **Middlewares** handle auth, validation, context, and error handling
-
-This keeps each module focused and easier to maintain as the application grows.
-
----
-
-## Recommended Development Flow
-
-1. Start the server with `npm run dev`
-2. Configure the `.env` file properly
-3. Use the platform auth flow to create platform users
-4. Create workspace/company/branch records for ERP customers
-5. Manage subscription lifecycle and catalog data
-6. Test APIs using Postman or your frontend integration layer
-
----
-
-## Summary
-
-The backend currently covers:
-
-- ERP user and organization flows
-- Platform admin and global catalog operations
-- Subscription management for workspaces
-- Workspace and platform-level catalog master data
-- Secure authentication and request handling
-
-This makes the project a strong foundation for a full pharmacy ERP ecosystem.
-│   ├── controllers/
-│   │   └── platformSubscription.controller.js
-│   ├── services/
-│   │   └── platformSubscription.service.js
-│   ├── repositories/
-│   │   └── platformSubscription.repository.js
-│   ├── routes/
-│   │   └── platformSubscription.routes.js
-│   ├── validations/
-│   │   └── platformSubscription.validation.js
-│   ├── constants/
-│   │   └── platformSubscription.constant.js
-│   └── platformSubscription.module.js
-│
-├── global-catalog/
-│   ├── medicines/
-│   │   ├── models/
-│   │   │   └── globalMedicine.model.js
-│   │   ├── controllers/
-│   │   │   └── globalMedicine.controller.js
-│   │   ├── services/
-│   │   │   └── globalMedicine.service.js
-│   │   ├── repositories/
-│   │   │   └── globalMedicine.repository.js
-│   │   ├── routes/
-│   │   │   └── globalMedicine.routes.js
-│   │   ├── validations/
-│   │   │   └── globalMedicine.validation.js
-│   │   └── globalMedicine.module.js
-│   │
-│   ├── categories/
-│   │   ├── models/
-│   │   │   └── globalCategory.model.js
-│   │   ├── controllers/
-│   │   │   └── globalCategory.controller.js
-│   │   ├── services/
-│   │   │   └── globalCategory.service.js
-│   │   ├── repositories/
-│   │   │   └── globalCategory.repository.js
-│   │   ├── routes/
-│   │   │   └── globalCategory.routes.js
-│   │   ├── validations/
-│   │   │   └── globalCategory.validation.js
-│   │   └── globalCategory.module.js
-│   │
-│   ├── globalCatalog.routes.js
-│   └── globalCatalog.module.js
-│
-└── audit-logs/
-    ├── models/
-    │   └── platformAuditLog.model.js
-    ├── controllers/
-    │   └── platformAuditLog.controller.js
-    ├── services/
-    │   └── platformAuditLog.service.js
-    ├── repositories/
-    │   └── platformAuditLog.repository.js
-    ├── routes/
-    │   └── platformAuditLog.routes.js
-    └── platformAuditLog.module.js
-```
-
----
-
-# 📌 Platform Feature Modules
-
-## 1. `auth/`
-
-Used for platform team login/logout.
-
-Responsibilities:
-
-- Platform admin login
-- Generate platform JWT
-- Validate platform user credentials
-- Store last login time
-- Protect platform routes
-
-Example routes:
-
-```txt
-POST /api/v1/platform/auth/login
-POST /api/v1/platform/auth/logout
-GET  /api/v1/platform/auth/me
-```
-
----
-
-## 2. `users/`
-
-Used to manage internal platform team members.
-
-Responsibilities:
-
-- Create platform user
-- Update platform user
-- Disable platform user
-- Change platform user role
-- List internal team users
-
-Example roles:
-
-```txt
-SUPER_ADMIN
-ADMIN
-SUPPORT
-BILLING_MANAGER
-CATALOG_MANAGER
-READ_ONLY
-```
-
-Example routes:
-
-```txt
-GET    /api/v1/platform/users
-POST   /api/v1/platform/users
-GET    /api/v1/platform/users/:id
-PATCH  /api/v1/platform/users/:id
-DELETE /api/v1/platform/users/:id
-```
-
----
-
-## 3. `dashboard/`
-
-Used for platform-level analytics and overview.
-
-Responsibilities:
-
-- Total ERP customers
-- Active subscriptions
-- Expired subscriptions
-- Monthly revenue
-- New signups
-- Plan-wise customer count
-- Recent activities
-
-Example routes:
-
-```txt
-GET /api/v1/platform/dashboard/stats
-GET /api/v1/platform/dashboard/revenue
-GET /api/v1/platform/dashboard/subscription-summary
-GET /api/v1/platform/dashboard/recent-activity
-```
-
----
-
-## 4. `customers/`
-
-Used to manage ERP customers.
-
-Here, customer means pharmacy/business that purchased the ERP.
-
-Responsibilities:
-
-- View all ERP customers
-- View customer workspace
-- View customer companies
-- View customer branches
-- Suspend or activate customer
-- View customer subscription
-- View customer usage
-- Support customer account
-
-Example routes:
-
-```txt
-GET   /api/v1/platform/customers
-GET   /api/v1/platform/customers/:workspaceId
-GET   /api/v1/platform/customers/:workspaceId/companies
-GET   /api/v1/platform/customers/:workspaceId/branches
-GET   /api/v1/platform/customers/:workspaceId/subscription
-PATCH /api/v1/platform/customers/:workspaceId/status
-```
-
----
-
-## 5. `plans/`
-
-Used to manage master SaaS plans.
-
-Plan means the package you sell.
-
-Example plans:
-
-```txt
-Starter
-Professional
-Enterprise
-```
-
-Responsibilities:
-
-- Create plan
-- Update plan pricing
-- Update plan limits
-- Enable/disable plan
-- Manage plan features
-
-Example plan data:
-
-```js
-{
-  name: "Professional",
-  monthlyPrice: 1999,
-  yearlyPrice: 19999,
-  features: ["Inventory", "POS", "Reports"],
-  limits: {
-    branches: 10,
-    users: 50,
-    products: 10000
-  },
-  status: "ACTIVE"
-}
-```
-
-Example routes:
-
-```txt
-GET    /api/v1/platform/plans
-POST   /api/v1/platform/plans
-GET    /api/v1/platform/plans/:id
-PATCH  /api/v1/platform/plans/:id
-DELETE /api/v1/platform/plans/:id
-```
-
----
-
-## 6. `subscriptions/`
-
-Used to manage customer subscriptions.
-
-Subscription means a customer’s active purchase of a plan.
-
-Responsibilities:
-
-- View all subscriptions
-- View subscription by workspace
-- Change customer plan
-- Renew subscription
-- Cancel subscription
-- Mark subscription expired
-- Extend trial
-- View billing cycle
-
-Example subscription data:
-
-```js
-{
-  workspaceId: "...",
-  planId: "...",
-  status: "ACTIVE",
-  startsAt: "2026-05-01",
-  expiresAt: "2026-06-01",
-  billingCycle: "MONTHLY"
-}
-```
-
-Example routes:
-
-```txt
-GET   /api/v1/platform/subscriptions
-GET   /api/v1/platform/subscriptions/:id
-PATCH /api/v1/platform/subscriptions/:id/change-plan
-PATCH /api/v1/platform/subscriptions/:id/renew
-PATCH /api/v1/platform/subscriptions/:id/cancel
-PATCH /api/v1/platform/subscriptions/:id/extend-trial
-```
-
----
-
-## 7. `global-catalog/`
-
-Used to manage global/master catalog.
-
-This is different from each pharmacy’s local catalog.
-
-Responsibilities:
-
-- Manage global medicine database
-- Manage global medicine categories
-- Provide master medicine data to customer workspaces
-- Help customers import common medicines quickly
-- Keep standardized medicine names, salt, manufacturer, HSN, GST, etc.
-
-Example global medicine data:
-
-```js
-{
-  name: "Paracetamol 500mg",
-  salt: "Paracetamol",
-  manufacturer: "Example Pharma",
-  categoryId: "...",
-  hsnCode: "3004",
-  gstRate: 12,
-  isPrescriptionRequired: false,
-  status: "ACTIVE"
-}
-```
-
-Example routes:
-
-```txt
-GET    /api/v1/platform/global-catalog/medicines
-POST   /api/v1/platform/global-catalog/medicines
-GET    /api/v1/platform/global-catalog/medicines/:id
-PATCH  /api/v1/platform/global-catalog/medicines/:id
-DELETE /api/v1/platform/global-catalog/medicines/:id
-
-GET    /api/v1/platform/global-catalog/categories
-POST   /api/v1/platform/global-catalog/categories
-PATCH  /api/v1/platform/global-catalog/categories/:id
-DELETE /api/v1/platform/global-catalog/categories/:id
-```
-
----
-
-## 8. `audit-logs/`
-
-Used to track important platform admin actions.
-
-Responsibilities:
-
-- Track who changed a plan
-- Track who changed a subscription
-- Track who suspended a customer
-- Track who updated global catalog
-- Track platform login events
-- Help debug and investigate issues
-
-Example audit log:
-
-```js
-{
-  action: "PLAN_UPDATED",
-  entityType: "PLAN",
-  entityId: "...",
-  performedBy: "...",
-  performedByRole: "SUPER_ADMIN",
-  metadata: {
-    oldPrice: 999,
-    newPrice: 1499
-  },
-  ipAddress: "...",
-  userAgent: "...",
-  createdAt: "2026-05-13T10:00:00.000Z"
-}
-```
-
-Example routes:
-
-```txt
-GET /api/v1/platform/audit-logs
-GET /api/v1/platform/audit-logs/:id
-GET /api/v1/platform/audit-logs?entityType=PLAN
-GET /api/v1/platform/audit-logs?performedBy=userId
-```
-
----
-
-# 🔐 Platform Auth Design
-
-Platform users should not use the normal ERP customer `User` model.
-
-Use separate model:
-
-```txt
-PlatformUser
-```
-
-Recommended schema:
-
-```js
-{
-  name: String,
-
-  email: {
-    type: String,
-    unique: true,
-    required: true,
-    lowercase: true,
-    trim: true
-  },
-
-  password: {
-    type: String,
-    required: true
-  },
-
-  role: {
-    type: String,
-    enum: [
-      "SUPER_ADMIN",
-      "ADMIN",
-      "SUPPORT",
-      "BILLING_MANAGER",
-      "CATALOG_MANAGER",
-      "READ_ONLY"
-    ],
-    default: "READ_ONLY"
-  },
-
-  status: {
-    type: String,
-    enum: ["ACTIVE", "SUSPENDED", "INVITED"],
-    default: "ACTIVE"
-  },
-
-  lastLoginAt: Date,
-
-  createdBy: {
-    type: ObjectId,
-    ref: "PlatformUser"
-  },
-
-  createdAt: Date,
-  updatedAt: Date
-}
-```
-
----
-
-## Platform JWT Payload
-
-```js
-{
-  id: platformUser._id,
-  email: platformUser.email,
-  role: platformUser.role,
-  userType: "PLATFORM_USER"
-}
-```
-
----
-
-## ERP Customer JWT Payload
-
-```js
-{
-  id: user._id,
-  workspaceId: user.workspaceId,
-  role: user.role,
-  userType: "ERP_USER"
-}
-```
-
----
-
-# 🔑 Platform Role Constants
-
-```js
-// src/constants/platformRoles.constant.js
-
-export const PLATFORM_ROLES = {
-  SUPER_ADMIN: "SUPER_ADMIN",
-  ADMIN: "ADMIN",
-  SUPPORT: "SUPPORT",
-  BILLING_MANAGER: "BILLING_MANAGER",
-  CATALOG_MANAGER: "CATALOG_MANAGER",
-  READ_ONLY: "READ_ONLY",
-};
-```
-
----
-
-# 🛡️ Platform Role Middleware
-
-```js
-// src/middlewares/platformRole.middleware.js
-
-import { ApiError } from "../utils/ApiError.js";
-
-export const allowPlatformRoles = (...roles) => {
-  return (req, res, next) => {
-    if (!req.platformUser) {
-      throw new ApiError(401, "Unauthorized");
-    }
-
-    if (!roles.includes(req.platformUser.role)) {
-      throw new ApiError(403, "Forbidden");
-    }
-
-    next();
-  };
-};
-```
-
-Example usage:
-
-```js
-router.post(
-  "/plans",
-  platformAuth,
-  allowPlatformRoles("SUPER_ADMIN", "ADMIN", "BILLING_MANAGER"),
-  createPlan,
-);
-```
-
----
-
-# 🌐 API Routing
-
-All routes use the `/api/v1` prefix.
-
-## Main API Modules
-
-```txt
-/api/v1/core
-/api/v1/platform
-/api/v1/organization
-/api/v1/subscription
-/api/v1/catalog
-/api/v1/inventory
-/api/v1/parties
-/api/v1/purchase
-/api/v1/sales
-/api/v1/billing
-/api/v1/invoicing
-/api/v1/taxation
-/api/v1/finance
-/api/v1/orders
-/api/v1/ecommerce
-/api/v1/crm
-/api/v1/hrm
-/api/v1/reports
-/api/v1/notifications
-/api/v1/system
-```
-
----
-
-## Route Registration Example
-
-```js
-// src/routes/index.routes.js
-
-import express from "express";
-
-import coreRoutes from "../modules/core/core.routes.js";
-import platformRoutes from "../modules/platform/platform.routes.js";
-import organizationRoutes from "../modules/organization/organization.routes.js";
-import subscriptionRoutes from "../modules/subscription/subscription.routes.js";
-
-const router = express.Router();
-
-router.use("/core", coreRoutes);
-router.use("/platform", platformRoutes);
-router.use("/organization", organizationRoutes);
-router.use("/subscription", subscriptionRoutes);
-
-export default router;
-```
-
----
-
-## Platform Route Registration Example
-
-```js
-// src/modules/platform/platform.routes.js
-
-import express from "express";
-
-import platformAuthRoutes from "./auth/routes/platformAuth.routes.js";
-import platformUserRoutes from "./users/routes/platformUser.routes.js";
-import platformDashboardRoutes from "./dashboard/routes/platformDashboard.routes.js";
-import platformCustomerRoutes from "./customers/routes/platformCustomer.routes.js";
-import platformPlanRoutes from "./plans/routes/platformPlan.routes.js";
-import platformSubscriptionRoutes from "./subscriptions/routes/platformSubscription.routes.js";
-import globalCatalogRoutes from "./global-catalog/globalCatalog.routes.js";
-import platformAuditLogRoutes from "./audit-logs/routes/platformAuditLog.routes.js";
-
-const router = express.Router();
-
-router.use("/auth", platformAuthRoutes);
-router.use("/users", platformUserRoutes);
-router.use("/dashboard", platformDashboardRoutes);
-router.use("/customers", platformCustomerRoutes);
-router.use("/plans", platformPlanRoutes);
-router.use("/subscriptions", platformSubscriptionRoutes);
-router.use("/global-catalog", globalCatalogRoutes);
-router.use("/audit-logs", platformAuditLogRoutes);
-
-export default router;
-```
-
----
-
-# 🧱 Existing ERP Business Modules
-
-## `core/`
-
-Core application functionality.
-
-Includes:
-
-```txt
-auth
-users
-access-control
-settings
-health
-```
-
-Used for:
-
-- ERP customer login
-- ERP users
-- ERP roles and permissions
-- Health check
-- User settings
-
----
-
-## `organization/`
-
-Multi-tenant organization structure.
-
-Includes:
-
-```txt
-workspaces
-companies
-branches
-```
-
-Used for:
-
-- Customer workspace
-- Multiple companies
-- Multiple branches
-
----
-
-## `subscription/`
-
-Customer subscription system.
-
-Includes:
-
-```txt
-plans
-subscriptions
-usage
-```
-
-Used for:
-
-- Plan definitions
-- Customer subscription records
-- Usage tracking
-- Subscription limit checks
-
----
-
-## `catalog/`
-
-Pharmacy product catalog.
-
-Includes:
-
-```txt
-products
-medicines
-categories
-batches
-```
-
-Used for:
-
-- Medicine records
-- Product records
-- Categories
-- Batch tracking
-
----
-
-## `inventory/`
-
-Stock management.
-
-Includes:
-
-```txt
-stock
-stock-movements
-expiry
-```
-
-Used for:
-
-- Current stock
-- Stock in/out
-- Expiry tracking
-- Batch-wise inventory
-
----
-
-## `parties/`
-
-Customer and supplier management.
-
-Includes:
-
-```txt
-customers
-suppliers
-```
-
----
-
-## `purchase/`
-
-Purchase management.
-
-Includes:
-
-```txt
-purchases
-purchase-returns
-```
-
----
-
-## `sales/`
-
-Sales management.
-
-Includes:
-
-```txt
-sales
-sales-returns
-```
-
----
-
-## `billing/`
-
-POS and bill generation.
-
-Includes:
-
-```txt
-pos
-bills
-```
-
----
-
-## `invoicing/`
-
-Invoice management.
-
-Includes:
-
-```txt
-invoices
-```
-
----
-
-## `taxation/`
-
-Tax and GST handling.
-
-Includes:
-
-```txt
-gst
-taxes
-```
-
----
-
-## `finance/`
-
-Financial accounting.
-
-Includes:
-
-```txt
-payments
-transactions
-ledger
-expenses
-income
-```
-
----
-
-## `orders/`
-
-Order processing.
-
-Includes:
-
-```txt
-orders
-shipping
-delivery
-```
-
----
-
-## `ecommerce/`
-
-Optional online ordering features.
-
-Includes:
-
-```txt
-cart
-checkout
-wishlist
-coupons
-```
-
----
-
-## `crm/`
-
-Customer relationship management.
-
-Includes:
-
-```txt
-leads
-followups
-```
-
----
-
-## `hrm/`
-
-Human resource management.
-
-Includes:
-
-```txt
-employees
-attendance
-payroll
-```
-
----
-
-## `reports/`
-
-Business reports and analytics.
-
----
-
-## `notifications/`
-
-Notification system.
-
----
-
-## `system/`
-
-System utilities.
-
-Includes:
-
-```txt
-files
-logs
-audit
-```
-
----
-
-# ⚙️ Environment Variables
-
-Create `.env` from `.env.example`.
 
 ```env
 NODE_ENV=development
@@ -1320,16 +832,16 @@ RAZORPAY_KEY_SECRET=your-key-secret
 
 ---
 
-# ⚙️ Installation
+## Installation
 
-## Requirements
+Requirements:
 
 - Node.js v14 or higher
 - npm
 - MongoDB
 - Git
 
-## Setup
+Setup:
 
 ```bash
 git clone <repository-url>
@@ -1342,13 +854,15 @@ Update `.env` with your values.
 
 ---
 
-# ▶️ Run Locally
+## Running the Server
+
+Development mode:
 
 ```bash
 npm run dev
 ```
 
-For production:
+Production mode:
 
 ```bash
 npm start
@@ -1356,7 +870,7 @@ npm start
 
 ---
 
-# ✅ Verify Server
+## Verify Server
 
 ```bash
 curl http://localhost:5000/api/v1/core/health
@@ -1376,269 +890,192 @@ Expected response:
 
 ---
 
-# 🛠 Core Application Flow
-
-1. `src/server.js` loads environment variables and starts the HTTP server.
-2. `src/app.js` applies middleware, parsers, security, CORS, routes, and error handlers.
-3. `src/routes/index.routes.js` registers module routers.
-4. Request enters correct module route.
-5. Middleware validates authentication and authorization.
-6. Controller receives request.
-7. Service handles business logic.
-8. Repository performs database operation.
-9. API response is returned using `ApiResponse`.
-10. Errors are handled by global error middleware.
-
----
-
-# 🧩 Standard Module Pattern
-
-Every module should follow this structure:
+## NPM Scripts
 
 ```txt
-module-name/
-├── models/
-├── controllers/
-├── services/
-├── repositories/
-├── routes/
-├── validations/
-├── constants/
-└── module-name.module.js
-```
-
-Layer responsibility:
-
-```txt
-models        = database schema
-controllers   = HTTP request/response
-services      = business logic
-repositories  = database queries
-routes        = endpoint definitions
-validations   = request validation schemas
-constants     = module constants
+npm run dev              Start development server
+npm start                Start production server
+npm test                 Run tests
+npm run test:watch       Run tests in watch mode
+npm run test:coverage    Generate test coverage
+npm run lint             Run ESLint
+npm run lint:fix         Fix ESLint issues
+npm run seed             Seed database
+npm run seed:platform-user  Seed a platform admin user
 ```
 
 ---
 
-# 🧪 Testing
+## Security Features
 
-Run tests:
-
-```bash
-npm test
-```
-
-Run test in watch mode:
-
-```bash
-npm run test:watch
-```
-
-Run test coverage:
-
-```bash
-npm run test:coverage
-```
-
----
-
-# 🧹 Code Quality
-
-Run lint:
-
-```bash
-npm run lint
-```
-
-Auto-fix lint issues:
-
-```bash
-npm run lint:fix
-```
-
----
-
-# 📋 NPM Scripts
-
-```txt
-npm run dev            Start development server
-npm start              Start production server
-npm test               Run tests
-npm run test:watch     Run tests in watch mode
-npm run test:coverage  Generate test coverage
-npm run lint           Run ESLint
-npm run lint:fix       Fix ESLint issues
-npm run seed           Seed database
-npm run migrate        Run migrations
-```
-
----
-
-# 🔐 Security Features
-
-- JWT authentication
-- Separate ERP and platform auth
+- JWT authentication (separate for ERP and platform)
 - Password hashing
 - Role-based authorization
 - ERP permission-based authorization
 - Platform role-only authorization
-- Request validation
+- Request validation via Joi
 - Rate limiting
 - CORS protection
 - Helmet security headers
 - Audit logging
-- Error handling
+- Global error handling
 - Input sanitization
 
 ---
 
-# 🧭 Recommended MVP Order
+## Testing
 
-Build in this order:
+```bash
+npm test
+npm run test:watch
+npm run test:coverage
+```
+
+Tests live under:
+
+```txt
+tests/
+├── api/
+└── unit/
+```
+
+---
+
+## Important Architecture Decisions
+
+### ERP customer users
+
+Uses: `User`, `Role`, `Permission`, `Workspace`, `Company`, `Branch`
+
+ERP customers may have multiple companies, branches, and staff members.
+
+### Platform internal users
+
+Uses: `PlatformUser`, `Role`
+
+Internal Pahuch team is managed separately from ERP users.
+
+### Plans vs Subscriptions
+
+```txt
+Plan         = package/template you sell (e.g. Professional ₹1999/month)
+Subscription = customer's active purchase of that plan
+```
+
+### Global Catalog vs Customer Catalog
+
+```txt
+Global Catalog   = master medicine database managed by platform team
+Customer Catalog = pharmacy-specific products/medicines inside workspace
+```
+
+### ERP vs Platform vs Marketplace
+
+```txt
+ERP          = operational backbone (products, inventory, finance, accounting)
+Platform     = commerce brain (pricing, routing, orders, delivery, settlements)
+Marketplace  = partner interface (store, products, fulfillment, dashboard)
+```
+
+---
+
+## Build Order Reference
+
+### ERP MVP
 
 ```txt
 1. core/auth
 2. core/users
 3. organization/workspaces
-4. subscription/plans
-5. subscription/subscriptions
-6. platform/auth
-7. platform/users
-8. platform/dashboard
-9. platform/customers
-10. platform/plans
-11. platform/subscriptions
-12. platform/global-catalog
-13. platform/audit-logs
+4. organization/companies
+5. organization/branches
+6. subscription/plans
+7. subscription/subscriptions
+8. platform/auth
+9. platform/users
+10. platform/dashboard
+11. platform/customers
+12. platform/plans
+13. platform/subscriptions
+14. platform/global-catalog
+15. platform/audit-logs
+16. catalog/products
+17. finance/chart-of-accounts
+18. finance/journal-vouchers
+19. finance/ledger
+20. parties/customers
+21. parties/suppliers
+```
+
+### Marketplace Build Order
+
+```txt
+PHASE 1 — FOUNDATION
+1. platform/marketplace-settings
+2. marketplace/stores
+3. platform/store-verification
+
+PHASE 2 — CATALOG
+4. marketplace/products
+5. platform/pricing
+6. marketplace/inventory
+
+PHASE 3 — INTELLIGENCE
+7. platform/availability-engine
+8. platform/routing-engine
+9. platform/availability-engine (inventory reservation)
+
+PHASE 4 — OPERATIONS
+10. platform/customer-orders
+11. marketplace/fulfillment-orders
+12. marketplace/fulfillment-orders (packing & dispatch)
+
+PHASE 5 — DELIVERY
+13. platform/delivery (delivery partners)
+14. platform/delivery (tracking)
+15. platform/delivery (proof of delivery)
+
+PHASE 6 — FINANCE
+16. platform/settlements
+17. platform/commission
+18. platform/refunds
+
+PHASE 7 — ANALYTICS
+19. platform/marketplace-analytics
+20. marketplace/dashboard
+21. platform/marketplace-analytics (reports)
 ```
 
 ---
 
-# ✅ Current Platform MVP Modules
-
-Minimum required platform modules:
-
-```txt
-auth
-users
-dashboard
-customers
-plans
-subscriptions
-```
-
-Add after MVP:
-
-```txt
-global-catalog
-audit-logs
-```
-
-Full useful platform modules:
-
-```txt
-8 modules
-```
-
----
-
-# 📌 Important Architecture Decisions
-
-## ERP customer users
-
-Use:
-
-```txt
-User
-Role
-Permission
-Workspace
-Company
-Branch
-```
-
-Reason:
-
-ERP customers may have multiple companies, branches, and staff members.
-
----
-
-## Platform internal users
-
-Use:
-
-```txt
-PlatformUser
-Role
-```
-
-Reason:
-
-Internal team is small and does not need complex permissions yet.
-
----
-
-## Plans vs Subscriptions
-
-```txt
-Plan = package/template you sell
-Subscription = customer purchase of that plan
-```
-
-Example:
-
-```txt
-Professional Plan
-₹1999/month
-10 branches
-50 users
-```
-
-Customer subscription:
-
-```txt
-ABC Pharmacy subscribed to Professional Plan
-Status: ACTIVE
-Expires: 2026-06-01
-```
-
----
-
-## Global Catalog vs Customer Catalog
-
-```txt
-Global Catalog = master medicine database managed by platform team
-Customer Catalog = pharmacy-specific products/medicines inside workspace
-```
-
----
-
-# 🚧 Future Improvements
+## Future Improvements
 
 - Swagger/OpenAPI documentation
 - Admin activity timeline
 - Advanced platform reporting
-- Payment gateway integration
+- Payment gateway integration (Razorpay)
 - Subscription invoices
 - Usage-based billing
 - Notification center
 - Customer support tickets
 - Platform impersonation mode
 - Advanced permission system for platform team
+- AI-based routing and availability scoring
+- Dark store and warehouse support
+- Multi-city marketplace expansion
 - Microservices support
-- Queue-based background jobs
+- Queue-based background jobs (Bull/BullMQ)
 - Redis caching
 - Kubernetes deployment
 
 ---
 
-# 📄 License
+## License
 
 ISC
 
 ---
 
-# 👥 Team
+## Team
 
-Developed for retail pharmacy ERP SaaS operations.
+Developed for retail pharmacy ERP SaaS operations — powering the Pahuch Quick Commerce ecosystem.
