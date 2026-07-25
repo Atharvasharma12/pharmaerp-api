@@ -1,0 +1,4 @@
+export const PLATFORM_PRICING_STATUS = {
+  ACTIVE: "ACTIVE",
+  INACTIVE: "INACTIVE",
+};
