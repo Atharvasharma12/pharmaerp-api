@@ -37,52 +37,14 @@ const workingHoursSchema = Joi.object({
 
 export const createMarketplaceStoreSchema = Joi.object({
   storeName: Joi.string().trim().min(2).max(160).required(),
-
-  deliveryRadiusKm: Joi.number().min(1).max(100).optional(),
-
-  minimumOrderAmount: Joi.number().min(0).optional(),
-
-  estimatedPreparationTimeMinutes: Joi.number()
-    .integer()
-    .min(1)
-    .max(120)
-    .optional(),
-
-  autoAcceptOrders: Joi.boolean().optional(),
-
-  autoRejectTimeoutSeconds: Joi.number()
-    .integer()
-    .min(10)
-    .max(600)
-    .optional(),
-
-  acceptsScheduledOrders: Joi.boolean().optional(),
+  companyId: objectId.optional(),
+  branchId: objectId.optional(),
 
   workingHours: workingHoursSchema.optional(),
 });
 
 export const updateMarketplaceStoreSchema = Joi.object({
   storeName: Joi.string().trim().min(2).max(160).optional(),
-
-  deliveryRadiusKm: Joi.number().min(1).max(100).optional(),
-
-  minimumOrderAmount: Joi.number().min(0).optional(),
-
-  estimatedPreparationTimeMinutes: Joi.number()
-    .integer()
-    .min(1)
-    .max(120)
-    .optional(),
-
-  autoAcceptOrders: Joi.boolean().optional(),
-
-  autoRejectTimeoutSeconds: Joi.number()
-    .integer()
-    .min(10)
-    .max(600)
-    .optional(),
-
-  acceptsScheduledOrders: Joi.boolean().optional(),
 
   workingHours: workingHoursSchema.optional(),
 }).min(1);

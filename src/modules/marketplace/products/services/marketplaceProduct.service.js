@@ -1,3 +1,5 @@
+// C:/Users/Intel/Desktop/erp/erp-backend/src/modules/marketplace/products/services/marketplaceProduct.service.js
+
 import ApiError from "../../../../utils/ApiError.js";
 
 import marketplaceProductRepository from "../repositories/marketplaceProduct.repository.js";
@@ -20,13 +22,35 @@ const GLOBAL_PRODUCT_POPULATE = {
     "name globalProductCode marketer productType productForm pack qty imageUrl medicineDetails.prescriptionRequired medicineDetails.composition status",
 };
 
-const getStoreForUser = async (user) => {
-  const { workspaceId } = user;
+const getStoreForUser = async (workspaceId, user, targetStoreId = null) => {
+  if (!workspaceId) {
+    throw new ApiError(400, "Workspace ID is required");
+  }
 
-  // Partner must have a verified & active store to manage products
-  const store = await marketplaceStoreRepository.findStoreByBranchId(
-    user.branchId,
-  );
+  let store = null;
+
+  // 1. Try to find the store by ID & Workspace
+  if (targetStoreId) {
+    store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
+      workspaceId,
+      targetStoreId,
+    );
+  }
+
+  // 2. Fallback: try by user branchId
+  if (!store && user?.branchId) {
+    store = await marketplaceStoreRepository.findStoreByBranchId(
+      user.branchId,
+    );
+  }
+
+  // 3. Fallback: find any store registered in this workspace
+  if (!store) {
+    const stores = await marketplaceStoreRepository.getStoresByWorkspace(
+      workspaceId,
+    );
+    store = stores?.[0] || null;
+  }
 
   if (!store) {
     throw new ApiError(
@@ -35,20 +59,11 @@ const getStoreForUser = async (user) => {
     );
   }
 
-  if (
-    store.verificationStatus !== MARKETPLACE_STORE_VERIFICATION_STATUS.APPROVED
-  ) {
-    throw new ApiError(
-      403,
-      "Your store must be approved before managing products.",
-    );
-  }
-
   return store;
 };
 
-const enableProduct = async (payload, user) => {
-  const store = await getStoreForUser(user);
+const enableProduct = async (workspaceId, payload, user) => {
+  const store = await getStoreForUser(workspaceId, user, payload.marketplaceStoreId);
 
   // Check if this global product is already enabled
   const existing = await marketplaceProductRepository.findByStoreAndGlobalProduct(
@@ -64,7 +79,7 @@ const enableProduct = async (payload, user) => {
   }
 
   const product = await marketplaceProductRepository.createProduct({
-    workspaceId: user.workspaceId,
+    workspaceId,
     marketplaceStoreId: store._id,
     globalProductId: payload.globalProductId,
     visibility: payload.visibility || MARKETPLACE_PRODUCT_VISIBILITY.VISIBLE,
@@ -86,8 +101,8 @@ const enableProduct = async (payload, user) => {
   return populated.toSafeObject();
 };
 
-const getEnabledProducts = async (user, filters = {}) => {
-  const store = await getStoreForUser(user);
+const getEnabledProducts = async (workspaceId, user, filters = {}) => {
+  const store = await getStoreForUser(workspaceId, user, filters.marketplaceStoreId);
 
   const products = await marketplaceProductRepository.getProductsByStore(
     store._id,
@@ -98,8 +113,8 @@ const getEnabledProducts = async (user, filters = {}) => {
   return products.map((p) => p.toSafeObject());
 };
 
-const getEnabledProductById = async (productId, user) => {
-  const store = await getStoreForUser(user);
+const getEnabledProductById = async (productId, workspaceId, user) => {
+  const store = await getStoreForUser(workspaceId, user);
 
   const product = await marketplaceProductRepository.findByStoreAndId(
     store._id,
@@ -114,8 +129,8 @@ const getEnabledProductById = async (productId, user) => {
   return product.toSafeObject();
 };
 
-const updateProduct = async (productId, payload, user) => {
-  const store = await getStoreForUser(user);
+const updateProduct = async (productId, workspaceId, payload, user) => {
+  const store = await getStoreForUser(workspaceId, user, payload.marketplaceStoreId);
 
   const product = await marketplaceProductRepository.findByStoreAndId(
     store._id,
@@ -145,8 +160,8 @@ const updateProduct = async (productId, payload, user) => {
   return product.toSafeObject();
 };
 
-const disableProduct = async (productId, user) => {
-  const store = await getStoreForUser(user);
+const disableProduct = async (productId, workspaceId, user) => {
+  const store = await getStoreForUser(workspaceId, user);
 
   const product = await marketplaceProductRepository.findByStoreAndId(
     store._id,

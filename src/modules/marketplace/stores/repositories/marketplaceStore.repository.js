@@ -125,6 +125,11 @@ const getAllStores = async (filters = {}, options = {}) => {
     ];
   }
 
+  if (filters.isPlatformOwned !== undefined) {
+    query.isPlatformOwned =
+      filters.isPlatformOwned === "true" || filters.isPlatformOwned === true;
+  }
+
   const page = parseInt(options.page) || 1;
   const limit = parseInt(options.limit) || 20;
   const skip = (page - 1) * limit;
@@ -134,6 +139,10 @@ const getAllStores = async (filters = {}, options = {}) => {
       .sort(options.sort || { createdAt: -1 })
       .skip(skip)
       .limit(limit)
+      .populate("companyId", "name companyName legalName email phone phones owner code companyCode")
+      .populate("branchId", "branchName branchCode address phone email")
+      .populate("createdBy", "name email phone")
+      .populate("workspaceId", "name slug workspaceCode")
       .select(options.select || ""),
     MarketplaceStore.countDocuments(query),
   ]);
@@ -150,6 +159,7 @@ const countByStatus = async () => {
           status: "$status",
           verificationStatus: "$verificationStatus",
           onlineStatus: "$onlineStatus",
+          isPlatformOwned: "$isPlatformOwned",
         },
         count: { $sum: 1 },
       },

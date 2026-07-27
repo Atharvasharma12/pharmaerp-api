@@ -1,6 +1,6 @@
 import ApiError from "../../../../utils/ApiError.js";
-
 import marketplaceStoreRepository from "../repositories/marketplaceStore.repository.js";
+import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import platformStoreVerificationService from "../../../platform/store-verification/services/platformStoreVerification.service.js";
 
 import {
@@ -14,8 +14,26 @@ const getUserId = (user) => {
   return user?._id || user?.id || null;
 };
 
-const createMarketplaceStore = async (payload, user) => {
-  const { workspaceId, companyId, branchId } = user;
+const createMarketplaceStore = async (payload, user, reqWorkspaceId) => {
+  const branchId = payload.branchId || user?.branchId;
+
+  if (!branchId) {
+    throw new ApiError(400, "Branch ID is required to create a store");
+  }
+
+  const branch = await branchRepository.findBranchById(branchId);
+  if (!branch) {
+    throw new ApiError(404, "Branch not found");
+  }
+
+  const workspaceId =
+    reqWorkspaceId || payload.workspaceId || user?.workspaceId || branch.workspaceId;
+  const companyId =
+    payload.companyId || user?.companyId || branch.companyId;
+
+  if (!workspaceId) {
+    throw new ApiError(400, "Workspace ID is required to create a store");
+  }
 
   const existing = await marketplaceStoreRepository.findStoreByBranchId(branchId);
 
@@ -30,13 +48,7 @@ const createMarketplaceStore = async (payload, user) => {
     workspaceId,
     companyId,
     branchId,
-    storeName: payload.storeName,
-    deliveryRadiusKm: payload.deliveryRadiusKm,
-    minimumOrderAmount: payload.minimumOrderAmount,
-    estimatedPreparationTimeMinutes: payload.estimatedPreparationTimeMinutes,
-    autoAcceptOrders: payload.autoAcceptOrders,
-    autoRejectTimeoutSeconds: payload.autoRejectTimeoutSeconds,
-    acceptsScheduledOrders: payload.acceptsScheduledOrders,
+    storeName: payload.storeName || branch.name || branch.branchName || "Store",
     workingHours: payload.workingHours,
     verificationStatus: MARKETPLACE_STORE_VERIFICATION_STATUS.PENDING,
     onlineStatus: MARKETPLACE_STORE_ONLINE_STATUS.OFFLINE,
@@ -56,8 +68,12 @@ const createMarketplaceStore = async (payload, user) => {
   return store.toSafeObject();
 };
 
-const getMarketplaceStores = async (user, filters = {}) => {
-  const { workspaceId } = user;
+const getMarketplaceStores = async (user, reqWorkspaceId, filters = {}) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
+
+  if (!workspaceId) {
+    throw new ApiError(400, "Workspace ID is required");
+  }
 
   const stores = await marketplaceStoreRepository.getStoresByWorkspace(
     workspaceId,
@@ -67,8 +83,8 @@ const getMarketplaceStores = async (user, filters = {}) => {
   return stores.map((s) => s.toSafeObject());
 };
 
-const getMarketplaceStoreById = async (storeId, user) => {
-  const { workspaceId } = user;
+const getMarketplaceStoreById = async (storeId, user, reqWorkspaceId) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,
@@ -82,8 +98,13 @@ const getMarketplaceStoreById = async (storeId, user) => {
   return store.toSafeObject();
 };
 
-const updateMarketplaceStore = async (storeId, payload, user) => {
-  const { workspaceId } = user;
+const updateMarketplaceStore = async (
+  storeId,
+  payload,
+  user,
+  reqWorkspaceId,
+) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,
@@ -94,16 +115,7 @@ const updateMarketplaceStore = async (storeId, payload, user) => {
     throw new ApiError(404, "Marketplace store not found");
   }
 
-  const allowedFields = [
-    "storeName",
-    "deliveryRadiusKm",
-    "minimumOrderAmount",
-    "estimatedPreparationTimeMinutes",
-    "autoAcceptOrders",
-    "autoRejectTimeoutSeconds",
-    "acceptsScheduledOrders",
-    "workingHours",
-  ];
+  const allowedFields = ["storeName", "workingHours"];
 
   allowedFields.forEach((field) => {
     if (payload[field] !== undefined) {
@@ -116,8 +128,8 @@ const updateMarketplaceStore = async (storeId, payload, user) => {
   return store.toSafeObject();
 };
 
-const goOnline = async (storeId, user) => {
-  const { workspaceId } = user;
+const goOnline = async (storeId, user, reqWorkspaceId) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,
@@ -148,8 +160,8 @@ const goOnline = async (storeId, user) => {
   return store.toSafeObject();
 };
 
-const goOffline = async (storeId, user) => {
-  const { workspaceId } = user;
+const goOffline = async (storeId, user, reqWorkspaceId) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,
@@ -167,8 +179,8 @@ const goOffline = async (storeId, user) => {
   return store.toSafeObject();
 };
 
-const pauseStore = async (storeId, user) => {
-  const { workspaceId } = user;
+const pauseStore = async (storeId, user, reqWorkspaceId) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,
@@ -186,8 +198,8 @@ const pauseStore = async (storeId, user) => {
   return store.toSafeObject();
 };
 
-const resumeStore = async (storeId, user) => {
-  const { workspaceId } = user;
+const resumeStore = async (storeId, user, reqWorkspaceId) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,
@@ -211,8 +223,8 @@ const resumeStore = async (storeId, user) => {
   return store.toSafeObject();
 };
 
-const deleteMarketplaceStore = async (storeId, user) => {
-  const { workspaceId } = user;
+const deleteMarketplaceStore = async (storeId, user, reqWorkspaceId) => {
+  const workspaceId = reqWorkspaceId || user?.workspaceId;
 
   const store = await marketplaceStoreRepository.findStoreByWorkspaceAndId(
     workspaceId,

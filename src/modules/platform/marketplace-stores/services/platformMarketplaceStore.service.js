@@ -36,6 +36,7 @@ const getAllStores = async (filters = {}) => {
         onlineStatus: filters.onlineStatus,
         workspaceId: filters.workspaceId,
         search: filters.search,
+        isPlatformOwned: filters.isPlatformOwned,
       },
       {
         page: filters.page,
@@ -102,12 +103,30 @@ const closeStore = async (storeId, platformUser) => {
   return { success: true };
 };
 
+// Platform admin marks/unmarks a store as Pahuch-owned
+const setPlatformOwned = async (storeId, isPlatformOwned, platformUser) => {
+  const store = await marketplaceStoreRepository.findStoreById(storeId);
+
+  if (!store) {
+    throw new ApiError(404, "Marketplace store not found");
+  }
+
+  store.isPlatformOwned = isPlatformOwned;
+  store.platformOwnedSetAt = new Date();
+  store.platformOwnedSetBy = getPlatformUserId(platformUser);
+
+  await marketplaceStoreRepository.saveStore(store);
+
+  return store.toSafeObject();
+};
+
 // Dashboard stat summary
 const getStoreStats = async () => {
   const groups = await marketplaceStoreRepository.countByStatus();
 
   const stats = {
     total: 0,
+    platformOwned: 0,
     byStatus: {
       ACTIVE: 0,
       INACTIVE: 0,
@@ -128,6 +147,10 @@ const getStoreStats = async () => {
 
   groups.forEach(({ _id, count }) => {
     stats.total += count;
+
+    if (_id.isPlatformOwned) {
+      stats.platformOwned += count;
+    }
 
     if (_id.status && stats.byStatus[_id.status] !== undefined) {
       stats.byStatus[_id.status] += count;
@@ -152,6 +175,7 @@ export default {
   getAllStores,
   getStoreById,
   setOnlineStatus,
+  setPlatformOwned,
   closeStore,
   getStoreStats,
 };

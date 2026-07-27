@@ -59,3 +59,17 @@ export const getStoreStats = asyncHandler(async (req, res) => {
       new ApiResponse(200, "Store statistics fetched successfully", stats),
     );
 });
+
+export const setPlatformOwned = asyncHandler(async (req, res) => {
+  const store = await platformMarketplaceStoreService.setPlatformOwned(
+    req.params.storeId,
+    req.body.isPlatformOwned,
+    req.platformUser,
+  );
+
+  const message = store.isPlatformOwned
+    ? "Store marked as Pahuch-owned successfully"
+    : "Store unmarked as Pahuch-owned successfully";
+
+  return res.status(200).json(new ApiResponse(200, message, store));
+});

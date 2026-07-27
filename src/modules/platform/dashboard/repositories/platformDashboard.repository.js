@@ -6,6 +6,7 @@ import MarketplaceStore from "../../../marketplace/stores/models/marketplaceStor
 import PlatformStoreVerification from "../../store-verification/models/platformStoreVerification.model.js";
 import GlobalProduct from "../../global-catalog/products/models/globalProduct.model.js";
 import PlatformUser from "../../users/models/platformUser.model.js";
+import { STORE_VERIFICATION_STATUS } from "../../store-verification/constants/platformStoreVerification.constant.js";
 
 const getDashboardOverview = async () => {
   const [
@@ -23,7 +24,10 @@ const getDashboardOverview = async () => {
     Subscription.find({ status: "ACTIVE", isDeleted: false }).lean(),
     MarketplaceStore.countDocuments({ isDeleted: false }),
     MarketplaceStore.countDocuments({ onlineStatus: "online", isDeleted: false }),
-    PlatformStoreVerification.countDocuments({ status: "pending", isDeleted: false }),
+    PlatformStoreVerification.countDocuments({
+      verificationStatus: STORE_VERIFICATION_STATUS?.PENDING || "PENDING",
+      isDeleted: false,
+    }),
     GlobalProduct.countDocuments({ isDeleted: false }),
     PlatformUser.countDocuments({ isDeleted: false }),
   ]);
@@ -58,7 +62,7 @@ const getRecentVerifications = async (limit = 5) => {
   return PlatformStoreVerification.find({ isDeleted: false })
     .sort({ createdAt: -1 })
     .limit(limit)
-    .populate("storeId", "name slug phone")
+    .populate("marketplaceStoreId", "storeName storeCode onlineStatus")
     .lean();
 };
 
@@ -66,7 +70,8 @@ const getRecentStores = async (limit = 5) => {
   return MarketplaceStore.find({ isDeleted: false })
     .sort({ createdAt: -1 })
     .limit(limit)
-    .populate("ownerId", "name email phone")
+    .populate("createdBy", "name email phone")
+    .populate("workspaceId", "name slug")
     .lean();
 };
 

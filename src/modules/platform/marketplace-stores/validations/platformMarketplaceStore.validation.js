@@ -39,7 +39,15 @@ export const listStoresQuerySchema = Joi.object({
 
   search: Joi.string().trim().max(100).optional(),
 
+  isPlatformOwned: Joi.boolean().optional(),
+
   page: Joi.number().integer().min(1).default(1),
 
   limit: Joi.number().integer().min(1).max(100).default(20),
+});
+
+export const setPlatformOwnedSchema = Joi.object({
+  isPlatformOwned: Joi.boolean().required().messages({
+    "any.required": "isPlatformOwned is required",
+  }),
 });

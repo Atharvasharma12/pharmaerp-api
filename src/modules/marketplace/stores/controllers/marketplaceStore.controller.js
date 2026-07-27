@@ -7,6 +7,7 @@ export const createMarketplaceStore = asyncHandler(async (req, res) => {
   const store = await marketplaceStoreService.createMarketplaceStore(
     req.body,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -17,6 +18,7 @@ export const createMarketplaceStore = asyncHandler(async (req, res) => {
 export const getMarketplaceStores = asyncHandler(async (req, res) => {
   const stores = await marketplaceStoreService.getMarketplaceStores(
     req.user,
+    req.workspaceId,
     req.query,
   );
 
@@ -31,6 +33,7 @@ export const getMarketplaceStoreById = asyncHandler(async (req, res) => {
   const store = await marketplaceStoreService.getMarketplaceStoreById(
     req.params.storeId,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -45,6 +48,7 @@ export const updateMarketplaceStore = asyncHandler(async (req, res) => {
     req.params.storeId,
     req.body,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -58,6 +62,7 @@ export const goOnline = asyncHandler(async (req, res) => {
   const store = await marketplaceStoreService.goOnline(
     req.params.storeId,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -69,6 +74,7 @@ export const goOffline = asyncHandler(async (req, res) => {
   const store = await marketplaceStoreService.goOffline(
     req.params.storeId,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -80,6 +86,7 @@ export const pauseStore = asyncHandler(async (req, res) => {
   const store = await marketplaceStoreService.pauseStore(
     req.params.storeId,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -91,6 +98,7 @@ export const resumeStore = asyncHandler(async (req, res) => {
   const store = await marketplaceStoreService.resumeStore(
     req.params.storeId,
     req.user,
+    req.workspaceId,
   );
 
   return res
@@ -102,6 +110,7 @@ export const deleteMarketplaceStore = asyncHandler(async (req, res) => {
   await marketplaceStoreService.deleteMarketplaceStore(
     req.params.storeId,
     req.user,
+    req.workspaceId,
   );
 
   return res

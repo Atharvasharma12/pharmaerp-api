@@ -3,9 +3,7 @@ import ApiError from "../../../../utils/ApiError.js";
 import platformStoreVerificationRepository from "../repositories/platformStoreVerification.repository.js";
 import marketplaceStoreRepository from "../../../marketplace/stores/repositories/marketplaceStore.repository.js";
 
-import {
-  STORE_VERIFICATION_STATUS,
-} from "../constants/platformStoreVerification.constant.js";
+import { STORE_VERIFICATION_STATUS } from "../constants/platformStoreVerification.constant.js";
 
 import {
   MARKETPLACE_STORE_STATUS,
@@ -15,6 +13,26 @@ import {
 
 const getPlatformUserId = (platformUser) => {
   return platformUser?._id || platformUser?.id || null;
+};
+
+// Helper: resolves both MarketplaceStore and PlatformStoreVerification from either ID
+const resolveStoreAndVerification = async (id) => {
+  let store = await marketplaceStoreRepository.findStoreById(id);
+  let verification;
+
+  if (store) {
+    verification =
+      await platformStoreVerificationRepository.findByMarketplaceStoreId(id);
+  } else {
+    verification = await platformStoreVerificationRepository.findById(id);
+    if (verification) {
+      store = await marketplaceStoreRepository.findStoreById(
+        verification.marketplaceStoreId,
+      );
+    }
+  }
+
+  return { store, verification };
 };
 
 // Called internally when a marketplace store is created
@@ -44,29 +62,21 @@ const getAllVerifications = async (filters = {}) => {
   return records.map((r) => r.toSafeObject());
 };
 
-const getVerificationByStoreId = async (storeId) => {
-  const store = await marketplaceStoreRepository.findStoreById(storeId);
-
-  if (!store) {
-    throw new ApiError(404, "Marketplace store not found");
-  }
-
-  const verification =
-    await platformStoreVerificationRepository.findByMarketplaceStoreId(storeId);
+const getVerificationByStoreId = async (id) => {
+  const { verification } = await resolveStoreAndVerification(id);
 
   if (!verification) {
-    throw new ApiError(404, "Verification record not found for this store");
+    throw new ApiError(404, "Verification record not found");
   }
 
   return verification.toSafeObject();
 };
 
-const markUnderReview = async (storeId, platformUser) => {
-  const verification =
-    await platformStoreVerificationRepository.findByMarketplaceStoreId(storeId);
+const markUnderReview = async (id, platformUser) => {
+  const { verification } = await resolveStoreAndVerification(id);
 
   if (!verification) {
-    throw new ApiError(404, "Verification record not found for this store");
+    throw new ApiError(404, "Verification record not found");
   }
 
   if (
@@ -87,18 +97,11 @@ const markUnderReview = async (storeId, platformUser) => {
   return verification.toSafeObject();
 };
 
-const approveStore = async (storeId, payload, platformUser) => {
-  const store = await marketplaceStoreRepository.findStoreById(storeId);
-
-  if (!store) {
-    throw new ApiError(404, "Marketplace store not found");
-  }
-
-  const verification =
-    await platformStoreVerificationRepository.findByMarketplaceStoreId(storeId);
+const approveStore = async (id, payload, platformUser) => {
+  const { store, verification } = await resolveStoreAndVerification(id);
 
   if (!verification) {
-    throw new ApiError(404, "Verification record not found for this store");
+    throw new ApiError(404, "Verification record not found");
   }
 
   if (
@@ -117,36 +120,31 @@ const approveStore = async (storeId, payload, platformUser) => {
   verification.reviewedBy = platformUserId;
   verification.reviewedAt = now;
 
-  if (payload?.reviewNotes) {
-    verification.reviewNotes = payload.reviewNotes;
+  if (payload?.reviewNotes || payload?.remarks) {
+    verification.reviewNotes = payload.reviewNotes || payload.remarks;
   }
 
   await platformStoreVerificationRepository.saveVerification(verification);
 
-  // Update marketplace store
-  store.verificationStatus = MARKETPLACE_STORE_VERIFICATION_STATUS.APPROVED;
-  store.status = MARKETPLACE_STORE_STATUS.ACTIVE;
-  store.approvedBy = platformUserId;
-  store.approvedAt = now;
-  store.rejectionReason = null;
+  // Update marketplace store if it exists
+  if (store) {
+    store.verificationStatus = MARKETPLACE_STORE_VERIFICATION_STATUS.APPROVED;
+    store.status = MARKETPLACE_STORE_STATUS.ACTIVE;
+    store.approvedBy = platformUserId;
+    store.approvedAt = now;
+    store.rejectionReason = null;
 
-  await marketplaceStoreRepository.saveStore(store);
+    await marketplaceStoreRepository.saveStore(store);
+  }
 
   return verification.toSafeObject();
 };
 
-const rejectStore = async (storeId, payload, platformUser) => {
-  const store = await marketplaceStoreRepository.findStoreById(storeId);
-
-  if (!store) {
-    throw new ApiError(404, "Marketplace store not found");
-  }
-
-  const verification =
-    await platformStoreVerificationRepository.findByMarketplaceStoreId(storeId);
+const rejectStore = async (id, payload, platformUser) => {
+  const { store, verification } = await resolveStoreAndVerification(id);
 
   if (!verification) {
-    throw new ApiError(404, "Verification record not found for this store");
+    throw new ApiError(404, "Verification record not found");
   }
 
   if (
@@ -163,73 +161,82 @@ const rejectStore = async (storeId, payload, platformUser) => {
 
   // Update verification record
   verification.verificationStatus = STORE_VERIFICATION_STATUS.REJECTED;
-  verification.rejectionReason = payload.rejectionReason;
+  verification.rejectionReason = payload?.rejectionReason || "Non-compliant";
   verification.rejectedBy = platformUserId;
   verification.rejectedAt = now;
   verification.reviewedBy = platformUserId;
   verification.reviewedAt = now;
 
-  if (payload?.reviewNotes) {
-    verification.reviewNotes = payload.reviewNotes;
+  if (payload?.reviewNotes || payload?.remarks) {
+    verification.reviewNotes = payload.reviewNotes || payload.remarks;
   }
 
   await platformStoreVerificationRepository.saveVerification(verification);
 
-  // Update marketplace store
-  store.verificationStatus = MARKETPLACE_STORE_VERIFICATION_STATUS.REJECTED;
-  store.status = MARKETPLACE_STORE_STATUS.INACTIVE;
-  store.onlineStatus = MARKETPLACE_STORE_ONLINE_STATUS.OFFLINE;
-  store.rejectedBy = platformUserId;
-  store.rejectedAt = now;
-  store.rejectionReason = payload.rejectionReason;
+  // Update marketplace store if it exists
+  if (store) {
+    store.verificationStatus = MARKETPLACE_STORE_VERIFICATION_STATUS.REJECTED;
+    store.status = MARKETPLACE_STORE_STATUS.INACTIVE;
+    store.onlineStatus = MARKETPLACE_STORE_ONLINE_STATUS.OFFLINE;
+    store.rejectedBy = platformUserId;
+    store.rejectedAt = now;
+    store.rejectionReason = payload?.rejectionReason;
 
-  await marketplaceStoreRepository.saveStore(store);
+    await marketplaceStoreRepository.saveStore(store);
+  }
 
   return verification.toSafeObject();
 };
 
-const suspendStore = async (storeId, payload, platformUser) => {
-  const store = await marketplaceStoreRepository.findStoreById(storeId);
-
-  if (!store) {
-    throw new ApiError(404, "Marketplace store not found");
-  }
-
-  if (store.status === MARKETPLACE_STORE_STATUS.SUSPENDED) {
-    throw new ApiError(400, "Store is already suspended");
-  }
+const suspendStore = async (id, payload, platformUser) => {
+  const { store, verification } = await resolveStoreAndVerification(id);
 
   const platformUserId = getPlatformUserId(platformUser);
   const now = new Date();
 
-  store.status = MARKETPLACE_STORE_STATUS.SUSPENDED;
-  store.onlineStatus = MARKETPLACE_STORE_ONLINE_STATUS.OFFLINE;
-  store.suspendedBy = platformUserId;
-  store.suspendedAt = now;
-  store.suspensionReason = payload.suspensionReason;
+  if (verification) {
+    verification.verificationStatus = STORE_VERIFICATION_STATUS.SUSPENDED;
+    await platformStoreVerificationRepository.saveVerification(verification);
+  }
 
-  await marketplaceStoreRepository.saveStore(store);
+  if (store) {
+    store.status = MARKETPLACE_STORE_STATUS.SUSPENDED;
+    store.onlineStatus = MARKETPLACE_STORE_ONLINE_STATUS.OFFLINE;
+    store.suspendedBy = platformUserId;
+    store.suspendedAt = now;
+    store.suspensionReason = payload?.suspensionReason || payload?.reason;
 
-  return store.toSafeObject();
+    await marketplaceStoreRepository.saveStore(store);
+    return store.toSafeObject();
+  }
+
+  if (verification) {
+    return verification.toSafeObject();
+  }
+
+  throw new ApiError(404, "Marketplace store not found");
 };
 
-const unsuspendStore = async (storeId, platformUser) => {
-  const store = await marketplaceStoreRepository.findStoreById(storeId);
+const unsuspendStore = async (id, platformUser) => {
+  const { store, verification } = await resolveStoreAndVerification(id);
 
-  if (!store) {
-    throw new ApiError(404, "Marketplace store not found");
+  if (verification) {
+    verification.verificationStatus = STORE_VERIFICATION_STATUS.APPROVED;
+    await platformStoreVerificationRepository.saveVerification(verification);
   }
 
-  if (store.status !== MARKETPLACE_STORE_STATUS.SUSPENDED) {
-    throw new ApiError(400, "Store is not suspended");
+  if (store) {
+    store.status = MARKETPLACE_STORE_STATUS.ACTIVE;
+    store.suspensionReason = null;
+    await marketplaceStoreRepository.saveStore(store);
+    return store.toSafeObject();
   }
 
-  store.status = MARKETPLACE_STORE_STATUS.ACTIVE;
-  store.suspensionReason = null;
+  if (verification) {
+    return verification.toSafeObject();
+  }
 
-  await marketplaceStoreRepository.saveStore(store);
-
-  return store.toSafeObject();
+  throw new ApiError(404, "Marketplace store not found");
 };
 
 const getVerificationStats = async () => {

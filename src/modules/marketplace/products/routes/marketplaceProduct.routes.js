@@ -18,21 +18,16 @@ import {
   listProductsQuerySchema,
 } from "../validations/marketplaceProduct.validation.js";
 
+import workspaceContextMiddleware from "../../../../middlewares/workspaceContext.middleware.js";
+
 const router = Router();
 
 router.use(authMiddleware);
+router.use(workspaceContextMiddleware);
 
-router.get(
-  "/",
-  validate(listProductsQuerySchema, "query"),
-  getEnabledProducts,
-);
+router.get("/", validate(listProductsQuerySchema, "query"), getEnabledProducts);
 
-router.post(
-  "/",
-  validate(enableProductSchema),
-  enableProduct,
-);
+router.post("/", validate(enableProductSchema), enableProduct);
 
 router.get(
   "/:productId",

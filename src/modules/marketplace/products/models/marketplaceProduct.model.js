@@ -118,9 +118,21 @@ marketplaceProductSchema.index(
   },
 );
 
-marketplaceProductSchema.index({ marketplaceStoreId: 1, status: 1, isDeleted: 1 });
-marketplaceProductSchema.index({ marketplaceStoreId: 1, visibility: 1, isDeleted: 1 });
-marketplaceProductSchema.index({ marketplaceStoreId: 1, isFeatured: 1, isDeleted: 1 });
+marketplaceProductSchema.index({
+  marketplaceStoreId: 1,
+  status: 1,
+  isDeleted: 1,
+});
+marketplaceProductSchema.index({
+  marketplaceStoreId: 1,
+  visibility: 1,
+  isDeleted: 1,
+});
+marketplaceProductSchema.index({
+  marketplaceStoreId: 1,
+  isFeatured: 1,
+  isDeleted: 1,
+});
 
 const MarketplaceProduct =
   mongoose.models.MarketplaceProduct ||

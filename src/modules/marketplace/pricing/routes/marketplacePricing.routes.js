@@ -6,6 +6,7 @@ import authMiddleware from "../../../../middlewares/auth.middleware.js";
 import {
   getMyStorePricing,
   getMyProductPricing,
+  getAvailablePricingCatalog,
 } from "../controllers/marketplacePricing.controller.js";
 
 import Joi from "joi";
@@ -19,14 +20,36 @@ const globalProductIdParamSchema = Joi.object({
   globalProductId: objectId.required(),
 });
 
+const catalogQuerySchema = Joi.object({
+  search: Joi.string().trim().max(200).optional().allow(""),
+
+  productType: Joi.string()
+    .valid("medicine", "otc", "device", "other")
+    .optional(),
+
+  page: Joi.number().integer().min(1).default(1),
+
+  limit: Joi.number().integer().min(1).max(100).default(20),
+});
+
 const router = Router();
 
 router.use(authMiddleware);
 
-// Get settlement pricing for all enabled products in the partner's store
+// ── Catalog Browse (before /:globalProductId to avoid param conflict) ─────────
+// Returns ALL platform-priced products (with customerPrice visible) so partners
+// can browse and decide what to enable in their store.
+router.get(
+  "/catalog",
+  validate(catalogQuerySchema, "query"),
+  getAvailablePricingCatalog,
+);
+
+// ── My Store Pricing ──────────────────────────────────────────────────────────
+// Get settlement pricing for all products the partner has already enabled
 router.get("/", getMyStorePricing);
 
-// Get settlement pricing for a specific product (by global product ID)
+// Get settlement pricing for a specific already-enabled product
 router.get(
   "/:globalProductId",
   validate(globalProductIdParamSchema, "params"),

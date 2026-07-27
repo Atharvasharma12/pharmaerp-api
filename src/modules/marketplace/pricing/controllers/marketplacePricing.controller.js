@@ -25,3 +25,20 @@ export const getMyProductPricing = asyncHandler(async (req, res) => {
       new ApiResponse(200, "Product pricing fetched successfully", pricing),
     );
 });
+
+export const getAvailablePricingCatalog = asyncHandler(async (req, res) => {
+  const result = await marketplacePricingService.getAvailablePricingCatalog(
+    req.user,
+    req.query,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Platform pricing catalog fetched successfully",
+        result,
+      ),
+    );
+});

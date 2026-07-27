@@ -10,6 +10,7 @@ import {
   getAllStores,
   getStoreById,
   setOnlineStatus,
+  setPlatformOwned,
   closeStore,
   getStoreStats,
 } from "../controllers/platformMarketplaceStore.controller.js";
@@ -17,6 +18,7 @@ import {
 import {
   storeIdParamSchema,
   setOnlineStatusSchema,
+  setPlatformOwnedSchema,
   listStoresQuerySchema,
 } from "../validations/platformMarketplaceStore.validation.js";
 
@@ -52,6 +54,15 @@ router.patch(
   validate(storeIdParamSchema, "params"),
   validate(setOnlineStatusSchema),
   setOnlineStatus,
+);
+
+// Mark / unmark a store as Pahuch-owned — SUPER_ADMIN only
+router.patch(
+  "/:storeId/platform-owned",
+  allowPlatformRoles(PLATFORM_ROLES.SUPER_ADMIN),
+  validate(storeIdParamSchema, "params"),
+  validate(setPlatformOwnedSchema),
+  setPlatformOwned,
 );
 
 // Force-close a store — SUPER_ADMIN, ADMIN only

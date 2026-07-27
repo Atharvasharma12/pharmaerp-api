@@ -115,41 +115,25 @@ const marketplaceStoreSchema = new mongoose.Schema(
       default: MARKETPLACE_STORE_ONBOARDING_STATUS.NOT_STARTED,
     },
 
-    deliveryRadiusKm: {
-      type: Number,
-      min: [1, "Delivery radius must be at least 1 KM"],
-      max: [100, "Delivery radius cannot exceed 100 KM"],
-      default: 5,
-    },
-
-    minimumOrderAmount: {
-      type: Number,
-      min: [0, "Minimum order amount cannot be negative"],
-      default: 0,
-    },
-
-    estimatedPreparationTimeMinutes: {
-      type: Number,
-      min: [1, "Preparation time must be at least 1 minute"],
-      max: [120, "Preparation time cannot exceed 120 minutes"],
-      default: 15,
-    },
-
-    autoAcceptOrders: {
+    // ── Platform-Owned Flag ───────────────────────────────────────────────────
+    // When true, this is a Pahuch-operated store. Same ERP workflow applies but
+    // platform admin can grant additional ranking, features, and visibility.
+    // Only settable by platform admin — never by the store owner.
+    isPlatformOwned: {
       type: Boolean,
       default: false,
+      index: true,
     },
 
-    autoRejectTimeoutSeconds: {
-      type: Number,
-      min: [10, "Auto reject timeout must be at least 10 seconds"],
-      max: [600, "Auto reject timeout cannot exceed 600 seconds"],
-      default: 60,
+    platformOwnedSetAt: {
+      type: Date,
+      default: null,
     },
 
-    acceptsScheduledOrders: {
-      type: Boolean,
-      default: false,
+    platformOwnedSetBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PlatformUser",
+      default: null,
     },
 
     workingHours: {
@@ -269,7 +253,11 @@ marketplaceStoreSchema.index(
 
 marketplaceStoreSchema.index({ workspaceId: 1, isDeleted: 1 });
 marketplaceStoreSchema.index({ workspaceId: 1, companyId: 1, isDeleted: 1 });
-marketplaceStoreSchema.index({ workspaceId: 1, verificationStatus: 1, isDeleted: 1 });
+marketplaceStoreSchema.index({
+  workspaceId: 1,
+  verificationStatus: 1,
+  isDeleted: 1,
+});
 marketplaceStoreSchema.index({ workspaceId: 1, onlineStatus: 1, isDeleted: 1 });
 marketplaceStoreSchema.index({ workspaceId: 1, status: 1, isDeleted: 1 });
 

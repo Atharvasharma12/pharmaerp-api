@@ -1,3 +1,5 @@
+// C:/Users/Intel/Desktop/erp/erp-backend/src/modules/marketplace/products/controllers/marketplaceProduct.controller.js
+
 import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 
@@ -5,6 +7,7 @@ import marketplaceProductService from "../services/marketplaceProduct.service.js
 
 export const enableProduct = asyncHandler(async (req, res) => {
   const product = await marketplaceProductService.enableProduct(
+    req.workspaceId,
     req.body,
     req.user,
   );
@@ -12,12 +15,17 @@ export const enableProduct = asyncHandler(async (req, res) => {
   return res
     .status(201)
     .json(
-      new ApiResponse(201, "Product enabled for marketplace successfully", product),
+      new ApiResponse(
+        201,
+        "Product enabled for marketplace successfully",
+        product,
+      ),
     );
 });
 
 export const getEnabledProducts = asyncHandler(async (req, res) => {
   const products = await marketplaceProductService.getEnabledProducts(
+    req.workspaceId,
     req.user,
     req.query,
   );
@@ -25,13 +33,18 @@ export const getEnabledProducts = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(
-      new ApiResponse(200, "Marketplace products fetched successfully", products),
+      new ApiResponse(
+        200,
+        "Marketplace products fetched successfully",
+        products,
+      ),
     );
 });
 
 export const getEnabledProductById = asyncHandler(async (req, res) => {
   const product = await marketplaceProductService.getEnabledProductById(
     req.params.productId,
+    req.workspaceId,
     req.user,
   );
 
@@ -45,6 +58,7 @@ export const getEnabledProductById = asyncHandler(async (req, res) => {
 export const updateProduct = asyncHandler(async (req, res) => {
   const product = await marketplaceProductService.updateProduct(
     req.params.productId,
+    req.workspaceId,
     req.body,
     req.user,
   );
@@ -59,10 +73,13 @@ export const updateProduct = asyncHandler(async (req, res) => {
 export const disableProduct = asyncHandler(async (req, res) => {
   await marketplaceProductService.disableProduct(
     req.params.productId,
+    req.workspaceId,
     req.user,
   );
 
   return res
     .status(200)
-    .json(new ApiResponse(200, "Product disabled from marketplace successfully"));
+    .json(
+      new ApiResponse(200, "Product disabled from marketplace successfully"),
+    );
 });

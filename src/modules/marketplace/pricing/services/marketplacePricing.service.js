@@ -125,7 +125,69 @@ const getMyProductPricing = async (globalProductId, user) => {
   return toPartnerSafeObject(pricing, marketplaceProduct);
 };
 
+// Browse the full platform pricing catalog — for partners to see ALL available
+// products and their prices BEFORE enabling them in their store.
+// customerPrice IS exposed here so partners can make informed enabling decisions.
+const getAvailablePricingCatalog = async (user, query = {}) => {
+  const filters = {
+    search: query.search || "",
+    productType: query.productType || "",
+  };
+
+  const options = {
+    page: query.page || 1,
+    limit: query.limit || 20,
+  };
+
+  const { results, total, page, limit } =
+    await platformPricingRepository.getPricingCatalog(filters, options);
+
+  // Optionally mark which products the partner has already enabled
+  // (best effort — don't error if store doesn't exist yet)
+  let enabledGlobalProductIds = new Set();
+
+  try {
+    let store = null;
+    if (query.marketplaceStoreId) {
+      store = await marketplaceStoreRepository.findStoreById(query.marketplaceStoreId);
+    } else {
+      store = await marketplaceStoreRepository.findStoreByBranchId(user.branchId);
+    }
+
+    if (store) {
+      const enabledProducts =
+        await marketplaceProductRepository.getProductsByStore(store._id, {
+          status: "ACTIVE",
+        });
+
+      enabledProducts.forEach((p) => {
+        enabledGlobalProductIds.add(p.globalProductId.toString());
+      });
+    }
+  } catch (_) {
+    // Non-fatal — partner may not have a store yet; just skip the enabled marking
+  }
+
+  const catalogItems = results.map((item) => ({
+    ...item,
+    isEnabled: enabledGlobalProductIds.has(
+      item.globalProductId?._id?.toString(),
+    ),
+  }));
+
+  return {
+    catalog: catalogItems,
+    pagination: {
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit),
+    },
+  };
+};
+
 export default {
   getMyStorePricing,
   getMyProductPricing,
+  getAvailablePricingCatalog,
 };
