@@ -36,6 +36,52 @@ const workspaceInvitationSchema = new mongoose.Schema(
       index: true,
     },
 
+    accessAllCompanies: {
+      type: Boolean,
+      default: false,
+    },
+
+    accessAllBranches: {
+      type: Boolean,
+      default: false,
+    },
+
+    companyIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Company",
+      },
+    ],
+
+    branchAccess: [
+      {
+        branchId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Branch",
+          required: true,
+        },
+        roleId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Role",
+          default: null,
+        },
+        canOperateMarketplaceStore: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+
+    resendCount: {
+      type: Number,
+      default: 0,
+    },
+
+    lastResentAt: {
+      type: Date,
+      default: null,
+    },
+
     tokenHash: {
       type: String,
       required: true,

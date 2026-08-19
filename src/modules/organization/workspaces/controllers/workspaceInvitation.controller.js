@@ -71,6 +71,59 @@ export const cancelWorkspaceInvitation = asyncHandler(async (req, res) => {
     );
 });
 
+export const resendWorkspaceInvitation = asyncHandler(async (req, res) => {
+  const invitation = await workspaceInvitationService.resendInvitation(
+    req.params.workspaceId,
+    req.user._id,
+    req.params.invitationId,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Workspace invitation resent successfully",
+        invitation,
+      ),
+    );
+});
+
+export const updateWorkspaceInvitation = asyncHandler(async (req, res) => {
+  const invitation = await workspaceInvitationService.updateInvitation(
+    req.params.workspaceId,
+    req.user._id,
+    req.params.invitationId,
+    req.body,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Workspace invitation updated successfully",
+        invitation,
+      ),
+    );
+});
+
+export const getPublicInvitationDetails = asyncHandler(async (req, res) => {
+  const details = await workspaceInvitationService.getPublicInvitationDetails(
+    req.params.token,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Invitation details fetched successfully",
+        details,
+      ),
+    );
+});
+
 export const acceptWorkspaceInvitation = asyncHandler(async (req, res) => {
   const result = await workspaceInvitationService.acceptInvitation(
     req.params.token,
@@ -83,6 +136,23 @@ export const acceptWorkspaceInvitation = asyncHandler(async (req, res) => {
       new ApiResponse(
         200,
         "Workspace invitation accepted successfully",
+        result,
+      ),
+    );
+});
+
+export const acceptWorkspaceInvitationSignup = asyncHandler(async (req, res) => {
+  const result = await workspaceInvitationService.acceptInvitationWithSignup(
+    req.params.token,
+    req.body,
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Account created and invitation accepted successfully",
         result,
       ),
     );

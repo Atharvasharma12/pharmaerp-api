@@ -188,7 +188,11 @@ const hasBranchAccess = async (workspaceId, userId, branchId) => {
   const access = await MemberAccess.findOne({
     workspaceId,
     userId,
-    $or: [{ accessAllBranches: true }, { branchIds: branchId }],
+    $or: [
+      { accessAllBranches: true },
+      { branchIds: branchId },
+      { "branchAccess.branchId": branchId },
+    ],
   }).select("_id");
 
   return Boolean(access);

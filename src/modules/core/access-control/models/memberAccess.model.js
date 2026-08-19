@@ -2,6 +2,26 @@
 
 import mongoose from "mongoose";
 
+const branchRoleAccessSchema = new mongoose.Schema(
+  {
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      required: true,
+    },
+    roleId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Role",
+      default: null,
+    },
+    canOperateMarketplaceStore: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  { _id: false },
+);
+
 const memberAccessSchema = new mongoose.Schema(
   {
     workspaceId: {
@@ -51,6 +71,11 @@ const memberAccessSchema = new mongoose.Schema(
         ref: "Branch",
       },
     ],
+
+    branchAccess: {
+      type: [branchRoleAccessSchema],
+      default: [],
+    },
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

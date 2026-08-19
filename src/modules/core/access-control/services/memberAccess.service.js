@@ -105,7 +105,16 @@ const createDefaultAccessForMember = async ({
   accessAllBranches = true,
   companyIds = [],
   branchIds = [],
+  branchAccess = [],
 }) => {
+  const normalizedBranchIds = normalizeIds(branchIds);
+  const normalizedBranchAccess = Array.isArray(branchAccess) ? branchAccess : [];
+
+  // Extract branch IDs from branchAccess if branchIds is empty
+  const allBranchIds = normalizedBranchIds.length > 0 
+    ? normalizedBranchIds 
+    : normalizedBranchAccess.map(ba => ba.branchId).filter(Boolean);
+
   return memberAccessRepository.upsertMemberAccess({
     workspaceId,
     workspaceMemberId,
@@ -115,7 +124,8 @@ const createDefaultAccessForMember = async ({
     accessAllBranches,
 
     companyIds: normalizeIds(companyIds),
-    branchIds: normalizeIds(branchIds),
+    branchIds: allBranchIds,
+    branchAccess: normalizedBranchAccess,
 
     createdBy,
     updatedBy: createdBy,
@@ -137,7 +147,7 @@ const getMemberAccess = async (workspaceId, userId, memberUserId) => {
   const access = await memberAccessRepository.findMemberAccessByMemberId(
     member._id,
     {
-      populate: "companyIds branchIds",
+      populate: "companyIds branchIds branchAccess.branchId branchAccess.roleId",
     },
   );
 
@@ -154,7 +164,7 @@ const getWorkspaceMemberAccessList = async (workspaceId, userId) => {
   const accessList = await memberAccessRepository.getWorkspaceMemberAccessList(
     workspaceId,
     {
-      populate: "workspaceMemberId userId companyIds branchIds",
+      populate: "workspaceMemberId userId companyIds branchIds branchAccess.branchId branchAccess.roleId",
     },
   );
 
@@ -190,8 +200,12 @@ const updateMemberAccess = async (
   const accessAllBranches = payload.accessAllBranches ?? false;
 
   const companyIds = accessAllCompanies ? [] : normalizeIds(payload.companyIds);
+  const branchAccess = Array.isArray(payload.branchAccess) ? payload.branchAccess : [];
 
-  const branchIds = accessAllBranches ? [] : normalizeIds(payload.branchIds);
+  let branchIds = accessAllBranches ? [] : normalizeIds(payload.branchIds);
+  if (!accessAllBranches && branchIds.length === 0 && branchAccess.length > 0) {
+    branchIds = branchAccess.map(item => item.branchId).filter(Boolean);
+  }
 
   await validateCompanies(workspaceId, companyIds);
   await validateBranches(workspaceId, branchIds);
@@ -206,6 +220,7 @@ const updateMemberAccess = async (
 
     companyIds,
     branchIds,
+    branchAccess,
 
     updatedBy: userId,
     createdBy: userId,

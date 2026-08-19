@@ -112,6 +112,31 @@ const permissionMiddleware = (permissions, options = {}) => {
       if (requiredPermissions.length) {
         let role = member.roleId;
 
+        // --- PBAC: Dynamic Branch-Specific Role Resolution ---
+        const activeBranchId =
+          req.branchId || req.branch?._id || getScopedId(req, "branchId");
+
+        if (activeBranchId) {
+          const accessRecord =
+            await memberAccessRepository.findMemberAccessByUserAndWorkspace(
+              req.workspaceId,
+              req.user._id,
+              { populate: "branchAccess.roleId" },
+            );
+
+          if (accessRecord && Array.isArray(accessRecord.branchAccess)) {
+            const branchMatch = accessRecord.branchAccess.find(
+              (ba) =>
+                ba.branchId?.toString() === activeBranchId.toString() &&
+                ba.roleId,
+            );
+
+            if (branchMatch && branchMatch.roleId) {
+              role = branchMatch.roleId;
+            }
+          }
+        }
+
         if (!role) {
           throw new ApiError(403, "Role is not assigned to this member");
         }
