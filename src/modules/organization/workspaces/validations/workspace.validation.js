@@ -40,3 +40,39 @@ export const updateWorkspaceMemberStatusSchema = Joi.object({
     )
     .required(),
 });
+
+const branchRoleAccessValidationSchema = Joi.object({
+  branchId: Joi.string().hex().length(24).required(),
+  roleId: Joi.string().hex().length(24).optional().allow(null, ""),
+  canOperateMarketplaceStore: Joi.boolean().default(false),
+});
+
+export const directCreateWorkspaceMemberSchema = Joi.object({
+  fullName: Joi.string().trim().min(2).max(120).required(),
+  phone: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .optional()
+    .allow(null, "")
+    .messages({
+      "string.pattern.base": "Please provide a valid 10-digit Indian mobile number",
+    }),
+  email: Joi.string()
+    .trim()
+    .lowercase()
+    .email()
+    .optional()
+    .allow(null, ""),
+  password: Joi.string().min(6).max(128).required(),
+  roleId: Joi.string().hex().length(24).optional().allow(null, ""),
+  companyIds: Joi.array().items(Joi.string().hex().length(24)).default([]),
+  branchAccess: Joi.array()
+    .items(branchRoleAccessValidationSchema)
+    .default([]),
+  accessAllCompanies: Joi.boolean().default(false),
+  accessAllBranches: Joi.boolean().default(false),
+}).or("email", "phone");
+
+export const resetMemberPasswordSchema = Joi.object({
+  password: Joi.string().min(6).max(128).required(),
+});

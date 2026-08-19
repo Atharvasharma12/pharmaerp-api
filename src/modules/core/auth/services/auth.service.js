@@ -45,8 +45,14 @@ const register = async (payload) => {
   };
 };
 
-const login = async ({ email, password }) => {
-  const user = await authRepository.findUserByEmail(email, {
+const login = async ({ email, phone, identifier, password }) => {
+  const loginInput = identifier || email || phone;
+
+  if (!loginInput) {
+    throw new ApiError(400, "Email or phone number is required");
+  }
+
+  const user = await authRepository.findUserByIdentifier(loginInput, {
     select: "+password",
   });
 

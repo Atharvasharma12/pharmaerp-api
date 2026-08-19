@@ -21,10 +21,11 @@ export const registerSchema = Joi.object({
 });
 
 export const loginSchema = Joi.object({
-  email: Joi.string().trim().lowercase().email().required(),
-
+  email: Joi.string().trim().optional(),
+  identifier: Joi.string().trim().optional(),
+  phone: Joi.string().trim().optional(),
   password: Joi.string().required(),
-});
+}).or("email", "identifier", "phone");
 
 export const forgotPasswordSchema = Joi.object({
   email: Joi.string().trim().lowercase().email().required(),

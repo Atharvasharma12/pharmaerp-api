@@ -6,6 +6,7 @@ import workspaceRepository from "../repositories/workspace.repository.js";
 import workspaceInvitationService from "./workspaceInvitation.service.js";
 import roleService from "../../../core/access-control/services/role.service.js";
 import memberAccessService from "../../../core/access-control/services/memberAccess.service.js";
+import authRepository from "../../../core/auth/repositories/auth.repository.js";
 
 import {
   WORKSPACE_STATUS,
@@ -289,8 +290,208 @@ const removeWorkspaceMember = async (workspaceId, userId, memberUserId) => {
   return removedMember.toSafeObject();
 };
 
+const directCreateMember = async (workspaceId, adminUserId, payload) => {
+  const adminMember = await workspaceRepository.findWorkspaceMember(
+    workspaceId,
+    adminUserId,
+  );
+
+  if (!adminMember || adminMember.status !== WORKSPACE_MEMBER_STATUS.ACTIVE) {
+    throw new ApiError(403, "You do not have access to this workspace");
+  }
+
+  const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
+  if (!workspace || workspace.status === WORKSPACE_STATUS.DELETED) {
+    throw new ApiError(404, "Workspace not found");
+  }
+
+  const {
+    fullName,
+    email,
+    phone,
+    password,
+    roleId,
+    companyIds = [],
+    branchAccess = [],
+    accessAllCompanies = false,
+    accessAllBranches = false,
+  } = payload;
+
+  const cleanPhone = phone ? String(phone).trim() : null;
+  const cleanEmail = email ? String(email).trim().toLowerCase() : null;
+
+  if (!cleanEmail && !cleanPhone) {
+    throw new ApiError(400, "Either email or mobile number is required");
+  }
+
+  // 1. Check for duplicate phone number
+  if (cleanPhone) {
+    const existingUserByPhone = await authRepository.findUserByPhone(cleanPhone);
+    if (existingUserByPhone) {
+      if (existingUserByPhone._id.toString() === adminUserId.toString()) {
+        throw new ApiError(
+          400,
+          "You cannot add yourself as a new staff member. Please enter the staff member's mobile number.",
+        );
+      }
+
+      const existingMember = await workspaceRepository.findWorkspaceMember(
+        workspaceId,
+        existingUserByPhone._id,
+      );
+
+      if (existingMember && existingMember.status === WORKSPACE_MEMBER_STATUS.ACTIVE) {
+        throw new ApiError(
+          400,
+          `A user with mobile number +91 ${cleanPhone} (${existingUserByPhone.fullName}) is already an active member of this workspace`,
+        );
+      }
+
+      throw new ApiError(
+        400,
+        `Mobile number +91 ${cleanPhone} is already registered in the system to ${existingUserByPhone.fullName}. Please enter a unique mobile number or use email invitation.`,
+      );
+    }
+  }
+
+  // 2. Check for duplicate email if provided
+  if (cleanEmail) {
+    const existingUserByEmail = await authRepository.findUserByEmail(cleanEmail);
+    if (existingUserByEmail) {
+      if (existingUserByEmail._id.toString() === adminUserId.toString()) {
+        throw new ApiError(
+          400,
+          "You cannot add yourself as a new staff member. Please enter the staff member's email.",
+        );
+      }
+
+      const existingMember = await workspaceRepository.findWorkspaceMember(
+        workspaceId,
+        existingUserByEmail._id,
+      );
+
+      if (existingMember && existingMember.status === WORKSPACE_MEMBER_STATUS.ACTIVE) {
+        throw new ApiError(
+          400,
+          `A user with email ${cleanEmail} (${existingUserByEmail.fullName}) is already an active member of this workspace`,
+        );
+      }
+
+      throw new ApiError(
+        400,
+        `Email ${cleanEmail} is already registered to ${existingUserByEmail.fullName}. Please use a different email or send an invitation link.`,
+      );
+    }
+  }
+
+  // 3. Guarantee a unique email for mobile-only staff accounts
+  const staffEmail =
+    cleanEmail ||
+    `staff.${cleanPhone}.${workspace._id.toString().slice(-6)}@pharmacy.local`;
+
+  // 4. Create new User document
+  const user = await authRepository.createUser({
+    fullName,
+    email: staffEmail,
+    phone: cleanPhone || undefined,
+    password,
+    emailVerified: true,
+    phoneVerified: Boolean(cleanPhone),
+    isActive: true,
+  });
+
+  // 5. Resolve workspace role
+  let resolvedRole = null;
+  if (roleId) {
+    resolvedRole = await roleService.findRoleById(roleId, workspaceId);
+  }
+  if (!resolvedRole) {
+    resolvedRole = await roleService.getStaffRoleForWorkspace(workspaceId);
+  }
+
+  // 6. Create WorkspaceMember
+  const member = await workspaceRepository.createWorkspaceMember({
+    workspaceId,
+    userId: user._id,
+    roleId: resolvedRole?._id,
+    createdBy: adminUserId,
+    status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+    isOwner: false,
+    isPrimary: false,
+  });
+
+  // 7. Create PBAC permissions
+  const derivedBranchIds = Array.isArray(branchAccess)
+    ? branchAccess.map((b) => b.branchId)
+    : [];
+
+  await memberAccessService.createDefaultAccessForMember({
+    workspaceId,
+    workspaceMemberId: member._id,
+    userId: user._id,
+    createdBy: adminUserId,
+    accessAllCompanies: Boolean(accessAllCompanies),
+    accessAllBranches: Boolean(accessAllBranches),
+    companyIds,
+    branchIds: derivedBranchIds,
+    branchAccess: branchAccess || [],
+  });
+
+  // Return populated member object so Redux immediately displays user details
+  const populatedMember = {
+    ...member.toSafeObject(),
+    userId: user.toSafeObject(),
+    roleId: resolvedRole?.toSafeObject ? resolvedRole.toSafeObject() : resolvedRole,
+  };
+
+  return {
+    member: populatedMember,
+    user: user.toSafeObject(),
+    credentials: {
+      fullName,
+      email: cleanEmail || staffEmail,
+      phone: cleanPhone,
+      password,
+      roleName: resolvedRole?.name || "Staff",
+    },
+  };
+};
+
+const resetMemberPassword = async (
+  workspaceId,
+  adminUserId,
+  memberUserId,
+  newPassword,
+) => {
+  const adminMember = await workspaceRepository.findWorkspaceMember(
+    workspaceId,
+    adminUserId,
+  );
+
+  if (!adminMember || adminMember.status !== WORKSPACE_MEMBER_STATUS.ACTIVE) {
+    throw new ApiError(403, "You do not have access to this workspace");
+  }
+
+  if (!adminMember.isOwner) {
+    throw new ApiError(403, "Only workspace owner or admin can reset staff passwords");
+  }
+
+  const targetUser = await authRepository.findUserById(memberUserId);
+  if (!targetUser) {
+    throw new ApiError(404, "User not found");
+  }
+
+  targetUser.password = newPassword;
+  await authRepository.saveUser(targetUser);
+
+  return {
+    success: true,
+    message: "Password updated successfully",
+  };
+};
+
 // Named export so onboarding service can import it directly
-export { createWorkspace };
+export { createWorkspace, directCreateMember, resetMemberPassword };
 
 export default {
   createWorkspace,
@@ -302,4 +503,6 @@ export default {
   addWorkspaceMember,
   updateWorkspaceMemberStatus,
   removeWorkspaceMember,
+  directCreateMember,
+  resetMemberPassword,
 };

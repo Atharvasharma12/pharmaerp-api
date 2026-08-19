@@ -98,3 +98,34 @@ export const removeWorkspaceMember = asyncHandler(async (req, res) => {
       new ApiResponse(200, "Workspace member removed successfully", member),
     );
 });
+
+export const directCreateWorkspaceMember = asyncHandler(async (req, res) => {
+  const result = await workspaceService.directCreateMember(
+    req.params.workspaceId,
+    req.user._id,
+    req.body,
+  );
+
+  return res
+    .status(201)
+    .json(
+      new ApiResponse(
+        201,
+        "Staff member created and activated successfully",
+        result,
+      ),
+    );
+});
+
+export const resetMemberPassword = asyncHandler(async (req, res) => {
+  const result = await workspaceService.resetMemberPassword(
+    req.params.workspaceId,
+    req.user._id,
+    req.params.memberUserId,
+    req.body.password,
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Member password reset successfully", result));
+});

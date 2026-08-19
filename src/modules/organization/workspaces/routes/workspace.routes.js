@@ -12,6 +12,8 @@ import {
   getWorkspaceMembers,
   updateWorkspaceMemberStatus,
   removeWorkspaceMember,
+  directCreateWorkspaceMember,
+  resetMemberPassword,
 } from "../controllers/workspace.controller.js";
 
 import {
@@ -30,6 +32,8 @@ import {
   createWorkspaceSchema,
   updateWorkspaceSchema,
   updateWorkspaceMemberStatusSchema,
+  directCreateWorkspaceMemberSchema,
+  resetMemberPasswordSchema,
 } from "../validations/workspace.validation.js";
 
 import {
@@ -99,6 +103,18 @@ router.patch("/:workspaceId", validate(updateWorkspaceSchema), updateWorkspace);
 router.delete("/:workspaceId", deleteWorkspace);
 
 router.get("/:workspaceId/members", getWorkspaceMembers);
+
+router.post(
+  "/:workspaceId/members/direct-create",
+  validate(directCreateWorkspaceMemberSchema),
+  directCreateWorkspaceMember,
+);
+
+router.post(
+  "/:workspaceId/members/:memberUserId/reset-password",
+  validate(resetMemberPasswordSchema),
+  resetMemberPassword,
+);
 
 router.patch(
   "/:workspaceId/members/:memberUserId/status",

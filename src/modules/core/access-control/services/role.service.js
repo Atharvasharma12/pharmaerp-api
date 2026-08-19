@@ -106,6 +106,30 @@ const getRoleByCodeForWorkspace = async (workspaceId, code) => {
   return roleRepository.findRoleByCode(workspaceId, code);
 };
 
+const findRoleById = async (roleId, workspaceId) => {
+  if (!roleId || !workspaceId) return null;
+  return roleRepository.findRoleByIdAndWorkspace(roleId, workspaceId);
+};
+
+const getStaffRoleForWorkspace = async (workspaceId) => {
+  let role = await roleRepository.findRoleByCode(
+    workspaceId,
+    SYSTEM_ROLES.STAFF,
+  );
+  if (!role) {
+    role = await roleRepository.findRoleByCode(
+      workspaceId,
+      SYSTEM_ROLES.PHARMACIST,
+    );
+  }
+  if (!role) {
+    const roles = await roleRepository.getWorkspaceRoles(workspaceId);
+    role =
+      roles.find((r) => r.code !== SYSTEM_ROLES.OWNER) || roles[0] || null;
+  }
+  return role;
+};
+
 const createRole = async (workspaceId, userId, payload) => {
   await ensureOwnerAccess(workspaceId, userId);
 
@@ -272,6 +296,8 @@ export default {
   createDefaultRolesForWorkspace,
   getOwnerRoleForWorkspace,
   getRoleByCodeForWorkspace,
+  findRoleById,
+  getStaffRoleForWorkspace,
 
   createRole,
   getWorkspaceRoles,
