@@ -65,6 +65,8 @@ router.patch(
 // Member Access
 router.get("/member-access", getWorkspaceMemberAccessList);
 
+router.get("/member-access/me", getMemberAccess);
+
 router.get("/member-access/:memberUserId", getMemberAccess);
 
 router.patch(

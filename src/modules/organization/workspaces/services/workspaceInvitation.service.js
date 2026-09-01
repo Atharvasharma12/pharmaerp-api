@@ -8,6 +8,8 @@ import workspaceRepository from "../repositories/workspace.repository.js";
 import workspaceInvitationRepository from "../repositories/workspaceInvitation.repository.js";
 import subscriptionRepository from "../../../subscription/subscriptions/repositories/subscription.repository.js";
 import authRepository from "../../../core/auth/repositories/auth.repository.js";
+import companyRepository from "../../companies/repositories/company.repository.js";
+import branchRepository from "../../branches/repositories/branch.repository.js";
 
 import roleService from "../../../core/access-control/services/role.service.js";
 import memberAccessService from "../../../core/access-control/services/memberAccess.service.js";
@@ -42,6 +44,17 @@ const inviteMember = async (workspaceId, invitedBy, payload) => {
 
   if (!currentMember.isOwner) {
     throw new ApiError(403, "Only workspace owner can invite members");
+  }
+
+  // Enforce prerequisite: At least 1 company and 1 branch must exist
+  const totalCompanies = await companyRepository.countWorkspaceCompanies(workspaceId);
+  if (totalCompanies === 0) {
+    throw new ApiError(400, "Please create at least one operating company before inviting team members");
+  }
+
+  const totalBranches = await branchRepository.countWorkspaceBranches(workspaceId);
+  if (totalBranches === 0) {
+    throw new ApiError(400, "Please create at least one dispensary branch before inviting team members");
   }
 
   const email = String(payload.email).trim().toLowerCase();

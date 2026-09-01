@@ -8,6 +8,7 @@ export const SYSTEM_ROLES = {
   CASHIER: "cashier",
   ACCOUNTANT: "accountant",
   INVENTORY_MANAGER: "inventory_manager",
+  SALESMAN: "salesman",
   STAFF: "staff",
 };
 
@@ -19,6 +20,7 @@ export const SYSTEM_ROLE_LABELS = {
   [SYSTEM_ROLES.CASHIER]: "Cashier",
   [SYSTEM_ROLES.ACCOUNTANT]: "Accountant",
   [SYSTEM_ROLES.INVENTORY_MANAGER]: "Inventory Manager",
+  [SYSTEM_ROLES.SALESMAN]: "Salesman",
   [SYSTEM_ROLES.STAFF]: "Staff",
 };
 
@@ -27,23 +29,28 @@ export const SYSTEM_ROLE_DESCRIPTIONS = {
     "Full workspace access including billing, subscription, users, companies, branches and settings",
 
   [SYSTEM_ROLES.ADMIN]:
-    "Administrative access to workspace operations and team management",
+    "Administrative access to workspace operations, settings, and team management",
 
   [SYSTEM_ROLES.MANAGER]:
-    "Operational access for managing branches, inventory, purchases and sales",
+    "Operational access for managing branches, inventory, purchases, and sales",
 
   [SYSTEM_ROLES.PHARMACIST]:
-    "Access to medicines, inventory, sales and pharmacy operations",
+    "Access to medicines, catalog, inventory batches, sales, and pharmacy operations",
 
   [SYSTEM_ROLES.CASHIER]:
-    "Access to POS billing, customers and sales transactions",
+    "Access to POS billing, invoices, customers, and sales transactions",
 
-  [SYSTEM_ROLES.ACCOUNTANT]: "Access to billing, invoices, finance and reports",
+  [SYSTEM_ROLES.ACCOUNTANT]:
+    "Access to chart of accounts, journal vouchers, general ledger, treasury, and financial reports",
 
   [SYSTEM_ROLES.INVENTORY_MANAGER]:
-    "Access to products, stock, batches and inventory operations",
+    "Access to products, master data, stock batches, purchases, and suppliers",
 
-  [SYSTEM_ROLES.STAFF]: "Basic operational access with limited permissions",
+  [SYSTEM_ROLES.SALESMAN]:
+    "Access to POS billing, sales orders, invoices, customers, and marketplace stores",
+
+  [SYSTEM_ROLES.STAFF]:
+    "Basic operational access with limited permissions",
 };
 
 export const SYSTEM_ROLE_CODES = {
@@ -54,6 +61,7 @@ export const SYSTEM_ROLE_CODES = {
   CASHIER: "CASHIER",
   ACCOUNTANT: "ACCOUNTANT",
   INVENTORY_MANAGER: "INVENTORY_MANAGER",
+  SALESMAN: "SALESMAN",
   STAFF: "STAFF",
 };
 
@@ -70,5 +78,6 @@ export const DEFAULT_SYSTEM_ROLES = [
   SYSTEM_ROLES.CASHIER,
   SYSTEM_ROLES.ACCOUNTANT,
   SYSTEM_ROLES.INVENTORY_MANAGER,
+  SYSTEM_ROLES.SALESMAN,
   SYSTEM_ROLES.STAFF,
 ];

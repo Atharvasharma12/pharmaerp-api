@@ -159,24 +159,50 @@ const createRole = async (workspaceId, userId, payload) => {
 const getWorkspaceRoles = async (workspaceId, userId) => {
   await ensureWorkspaceAccess(workspaceId, userId);
 
-  const roles = await roleRepository.getWorkspaceRoles(workspaceId);
+  const [roles, members] = await Promise.all([
+    roleRepository.getWorkspaceRoles(workspaceId),
+    workspaceRepository.getWorkspaceMembers(workspaceId).catch(() => []),
+  ]);
 
-  return roles.map((role) => role.toSafeObject());
+  return roles.map((role) => {
+    const roleSafe = role.toSafeObject();
+    const strRoleId = String(role._id);
+    const isOwnerRole = role.code === SYSTEM_ROLES.OWNER;
+    const assignedMembers = (members || []).filter((m) => {
+      if (isOwnerRole && m.isOwner) return true;
+      const mRoleId = String(m.roleId?._id || m.roleId || "");
+      return mRoleId === strRoleId;
+    });
+
+    roleSafe.membersCount = assignedMembers.length;
+    return roleSafe;
+  });
 };
 
 const getRoleById = async (roleId, workspaceId, userId) => {
   await ensureWorkspaceAccess(workspaceId, userId);
 
-  const role = await roleRepository.findRoleByIdAndWorkspace(
-    roleId,
-    workspaceId,
-  );
+  const [role, members] = await Promise.all([
+    roleRepository.findRoleByIdAndWorkspace(roleId, workspaceId),
+    workspaceRepository.getWorkspaceMembers(workspaceId).catch(() => []),
+  ]);
 
   if (!role) {
     throw new ApiError(404, "Role not found");
   }
 
-  return role.toSafeObject();
+  const roleSafe = role.toSafeObject();
+  const strRoleId = String(role._id);
+  const isOwnerRole = role.code === SYSTEM_ROLES.OWNER;
+  const assignedMembers = (members || []).filter((m) => {
+    if (isOwnerRole && m.isOwner) return true;
+    const mRoleId = String(m.roleId?._id || m.roleId || "");
+    return mRoleId === strRoleId;
+  });
+
+  roleSafe.membersCount = assignedMembers.length;
+  roleSafe.assignedMembers = assignedMembers;
+  return roleSafe;
 };
 
 const updateRole = async (roleId, workspaceId, userId, payload) => {

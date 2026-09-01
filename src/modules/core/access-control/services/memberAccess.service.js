@@ -14,6 +14,7 @@ import {
 
 import { COMPANY_STATUS } from "../../../organization/companies/constants/company.constant.js";
 import { BRANCH_STATUS } from "../../../organization/branches/constants/branch.constant.js";
+import { ALL_PERMISSIONS } from "../constants/permission.constant.js";
 
 const normalizeIds = (ids = []) => {
   if (!ids) return [];
@@ -138,13 +139,14 @@ const getMemberAccess = async (workspaceId, userId, memberUserId) => {
   const member = await workspaceRepository.findWorkspaceMember(
     workspaceId,
     memberUserId,
+    { populate: "roleId" },
   );
 
   if (!member) {
     throw new ApiError(404, "Workspace member not found");
   }
 
-  const access = await memberAccessRepository.findMemberAccessByMemberId(
+  let access = await memberAccessRepository.findMemberAccessByMemberId(
     member._id,
     {
       populate: "companyIds branchIds branchAccess.branchId branchAccess.roleId",
@@ -152,10 +154,54 @@ const getMemberAccess = async (workspaceId, userId, memberUserId) => {
   );
 
   if (!access) {
-    throw new ApiError(404, "Member access not found");
+    access = await memberAccessRepository.findMemberAccessByUserAndWorkspace(
+      workspaceId,
+      member.userId?._id || member.userId,
+      {
+        populate: "companyIds branchIds branchAccess.branchId branchAccess.roleId",
+      },
+    );
   }
 
-  return access.toSafeObject();
+  const isOwner = Boolean(member.isOwner);
+  const role = member.roleId
+    ? member.roleId.toSafeObject
+      ? member.roleId.toSafeObject()
+      : member.roleId
+    : null;
+
+  const permissions = isOwner
+    ? ALL_PERMISSIONS
+    : role?.permissions || [];
+
+  if (!access) {
+    return {
+      workspaceId,
+      workspaceMemberId: member._id,
+      userId: member.userId?._id || member.userId,
+      accessAllCompanies: true,
+      accessAllBranches: true,
+      companyIds: [],
+      branchIds: [],
+      branchAccess: [],
+      companies: [],
+      branches: [],
+      role,
+      permissions,
+      isOwner,
+    };
+  }
+
+  const safeAccess = access.toSafeObject ? access.toSafeObject() : access;
+
+  return {
+    ...safeAccess,
+    companies: safeAccess.companyIds || [],
+    branches: safeAccess.branchIds || [],
+    role,
+    permissions,
+    isOwner,
+  };
 };
 
 const getWorkspaceMemberAccessList = async (workspaceId, userId) => {

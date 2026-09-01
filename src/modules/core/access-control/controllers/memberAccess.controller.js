@@ -6,10 +6,15 @@ import ApiResponse from "../../../../utils/ApiResponse.js";
 import memberAccessService from "../services/memberAccess.service.js";
 
 export const getMemberAccess = asyncHandler(async (req, res) => {
+  const memberUserId =
+    req.params.memberUserId === "me" || !req.params.memberUserId
+      ? req.user._id
+      : req.params.memberUserId;
+
   const access = await memberAccessService.getMemberAccess(
     req.workspaceId,
     req.user._id,
-    req.params.memberUserId,
+    memberUserId,
   );
 
   return res

@@ -6,6 +6,9 @@ import workspaceRepository from "../repositories/workspace.repository.js";
 import workspaceInvitationService from "./workspaceInvitation.service.js";
 import roleService from "../../../core/access-control/services/role.service.js";
 import memberAccessService from "../../../core/access-control/services/memberAccess.service.js";
+import memberAccessRepository from "../../../core/access-control/repositories/memberAccess.repository.js";
+import companyRepository from "../../companies/repositories/company.repository.js";
+import branchRepository from "../../branches/repositories/branch.repository.js";
 import authRepository from "../../../core/auth/repositories/auth.repository.js";
 
 import {
@@ -189,12 +192,53 @@ const getWorkspaceMembers = async (workspaceId, userId) => {
     throw new ApiError(403, "You do not have access to this workspace");
   }
 
-  // Updated to pass a space-separated string to populate both fields
-  const members = await workspaceRepository.getWorkspaceMembers(workspaceId, {
-    populate: "roleId userId",
+  const [members, accessList, totalCompanies, totalBranches] = await Promise.all([
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      populate: "roleId userId",
+    }),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId),
+    companyRepository.countWorkspaceCompanies(workspaceId),
+    branchRepository.countWorkspaceBranches(workspaceId),
+  ]);
+
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
   });
 
-  return members.map((workspaceMember) => workspaceMember.toSafeObject());
+  return members.map((workspaceMember) => {
+    const safeObj = workspaceMember.toSafeObject();
+    const isOwner = Boolean(workspaceMember.isOwner);
+    const memberIdStr = workspaceMember._id?.toString();
+    const userIdStr = (workspaceMember.userId?._id || workspaceMember.userId)?.toString();
+    const access = (memberIdStr && accessMap.get(memberIdStr)) || (userIdStr && accessMap.get(userIdStr)) || null;
+
+    const accessAllCompanies = isOwner ? true : (access ? Boolean(access.accessAllCompanies) : true);
+    const accessAllBranches = isOwner ? true : (access ? Boolean(access.accessAllBranches) : true);
+    const companyIds = isOwner ? [] : (access?.companyIds || []);
+    const branchIds = isOwner ? [] : (access?.branchIds || []);
+
+    const companyCount = (isOwner || accessAllCompanies) ? totalCompanies : (companyIds?.length || 0);
+    const branchCount = (isOwner || accessAllBranches) ? totalBranches : (branchIds?.length || 0);
+
+    return {
+      ...safeObj,
+      access: access ? (access.toSafeObject ? access.toSafeObject() : access) : null,
+      accessAllCompanies,
+      accessAllBranches,
+      companyIds,
+      branchIds,
+      companyCount,
+      branchCount,
+      totalWorkspaceCompanies: totalCompanies,
+      totalWorkspaceBranches: totalBranches,
+    };
+  });
 };
 
 const addWorkspaceMember = async (workspaceId, userId, payload) => {
@@ -303,6 +347,17 @@ const directCreateMember = async (workspaceId, adminUserId, payload) => {
   const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
   if (!workspace || workspace.status === WORKSPACE_STATUS.DELETED) {
     throw new ApiError(404, "Workspace not found");
+  }
+
+  // Enforce prerequisite: At least 1 company and 1 branch must exist
+  const totalCompanies = await companyRepository.countWorkspaceCompanies(workspaceId);
+  if (totalCompanies === 0) {
+    throw new ApiError(400, "Please create at least one operating company before adding team members");
+  }
+
+  const totalBranches = await branchRepository.countWorkspaceBranches(workspaceId);
+  if (totalBranches === 0) {
+    throw new ApiError(400, "Please create at least one dispensary branch before adding team members");
   }
 
   const {
