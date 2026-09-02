@@ -14,6 +14,7 @@ import {
   removeWorkspaceMember,
   directCreateWorkspaceMember,
   resetMemberPassword,
+  getWorkspaceSetupStatus,
 } from "../controllers/workspace.controller.js";
 
 import {
@@ -95,6 +96,9 @@ router.post(
   validate(acceptWorkspaceInvitationSchema),
   acceptWorkspaceInvitation,
 );
+
+// Setup Center
+router.get("/:workspaceId/setup-status", getWorkspaceSetupStatus);
 
 router.get("/:workspaceId", getWorkspaceById);
 

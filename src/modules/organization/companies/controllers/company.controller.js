@@ -2,12 +2,19 @@ import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 
 import companyService from "../services/company.service.js";
+import Workspace from "../../workspaces/models/workspace.model.js";
 
 export const createCompany = asyncHandler(async (req, res) => {
   const company = await companyService.createCompany(
     req.workspaceId,
     req.user._id,
     req.body,
+  );
+
+  // Flip setup flag on first company only — no-op if already true
+  await Workspace.findOneAndUpdate(
+    { _id: req.workspaceId, "setupStatus.company": false },
+    { $set: { "setupStatus.company": true } },
   );
 
   return res

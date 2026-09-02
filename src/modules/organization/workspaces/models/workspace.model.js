@@ -92,6 +92,21 @@ const workspaceSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
+
+    // Setup Center — flags written lazily by each create controller
+    // (products/suppliers included now so adding them as steps later
+    //  requires zero model changes)
+    setupStatus: {
+      company: { type: Boolean, default: false },
+      branch: { type: Boolean, default: false },
+      products: { type: Boolean, default: false },
+      suppliers: { type: Boolean, default: false },
+    },
+
+    setupCompletedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

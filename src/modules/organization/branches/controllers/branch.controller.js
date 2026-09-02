@@ -2,6 +2,7 @@ import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 
 import branchService from "../services/branch.service.js";
+import Workspace from "../../workspaces/models/workspace.model.js";
 
 export const createBranch = asyncHandler(async (req, res) => {
   const branch = await branchService.createBranch(
@@ -9,6 +10,12 @@ export const createBranch = asyncHandler(async (req, res) => {
     req.companyId,
     req.user._id,
     req.body,
+  );
+
+  // Flip setup flag on first branch only — no-op if already true
+  await Workspace.findOneAndUpdate(
+    { _id: req.workspaceId, "setupStatus.branch": false },
+    { $set: { "setupStatus.branch": true } },
   );
 
   return res
