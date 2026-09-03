@@ -136,15 +136,64 @@ const getMyActiveContext = async (userId) => {
     throw new ApiError(404, "User not found");
   }
 
-  return (
-    user.activeContext || {
-      workspaceId: null,
-      companyId: null,
-      branchId: null,
-      updatedAt: null,
+  const activeContext = user.activeContext || {
+    workspaceId: null,
+    companyId: null,
+    branchId: null,
+    updatedAt: null,
+  };
+
+  // Self-healing check: verify that current company and branch access are still valid
+  if (activeContext.workspaceId) {
+    let contextModified = false;
+    let validCompanyId = activeContext.companyId;
+    let validBranchId = activeContext.branchId;
+
+    if (validCompanyId) {
+      const hasCompany = await memberAccessService.hasCompanyAccess(
+        activeContext.workspaceId,
+        userId,
+        validCompanyId,
+      );
+      if (!hasCompany) {
+        validCompanyId = null;
+        validBranchId = null;
+        contextModified = true;
+      }
     }
-  );
+
+    if (validBranchId) {
+      const hasBranch = await memberAccessService.hasBranchAccess(
+        activeContext.workspaceId,
+        userId,
+        validBranchId,
+      );
+      if (!hasBranch) {
+        validBranchId = null;
+        contextModified = true;
+      }
+    }
+
+    if (contextModified) {
+      const updated = await userRepository.updateActiveContext(userId, {
+        workspaceId: activeContext.workspaceId,
+        companyId: validCompanyId,
+        branchId: validBranchId,
+      });
+      return (
+        updated?.activeContext || {
+          workspaceId: activeContext.workspaceId,
+          companyId: validCompanyId,
+          branchId: validBranchId,
+          updatedAt: new Date(),
+        }
+      );
+    }
+  }
+
+  return activeContext;
 };
+
 
 const validateWorkspaceContext = async (userId, workspaceId) => {
   const workspace = await workspaceRepository.findWorkspaceById(workspaceId);

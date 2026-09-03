@@ -1,11 +1,11 @@
-// src/modules/core/access-control/services/memberAccess.service.js
-
 import ApiError from "../../../../utils/ApiError.js";
 
 import memberAccessRepository from "../repositories/memberAccess.repository.js";
 import workspaceRepository from "../../../organization/workspaces/repositories/workspace.repository.js";
 import companyRepository from "../../../organization/companies/repositories/company.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
+import userRepository from "../../users/repositories/user.repository.js";
+
 
 import {
   WORKSPACE_STATUS,
@@ -242,19 +242,25 @@ const updateMemberAccess = async (
     throw new ApiError(400, "Workspace member is not active");
   }
 
-  const accessAllCompanies = payload.accessAllCompanies ?? false;
-  const accessAllBranches = payload.accessAllBranches ?? false;
+  const accessAllCompanies = Boolean(payload.accessAllCompanies);
+  const rawCompanyIds = accessAllCompanies ? [] : normalizeIds(payload.companyIds);
 
-  const companyIds = accessAllCompanies ? [] : normalizeIds(payload.companyIds);
-  const branchAccess = Array.isArray(payload.branchAccess) ? payload.branchAccess : [];
+  // If a member has 0 companies (accessAllCompanies is false and companyIds is empty),
+  // they cannot have access to any branches.
+  const hasCompanyAccessScope = accessAllCompanies || rawCompanyIds.length > 0;
+  const accessAllBranches = hasCompanyAccessScope ? Boolean(payload.accessAllBranches) : false;
 
-  let branchIds = accessAllBranches ? [] : normalizeIds(payload.branchIds);
-  if (!accessAllBranches && branchIds.length === 0 && branchAccess.length > 0) {
-    branchIds = branchAccess.map(item => item.branchId).filter(Boolean);
+  const companyIds = rawCompanyIds;
+  const branchAccess = hasCompanyAccessScope && Array.isArray(payload.branchAccess) ? payload.branchAccess : [];
+
+  let branchIds = hasCompanyAccessScope && !accessAllBranches ? normalizeIds(payload.branchIds) : [];
+  if (hasCompanyAccessScope && !accessAllBranches && branchIds.length === 0 && branchAccess.length > 0) {
+    branchIds = branchAccess.map((item) => item.branchId).filter(Boolean);
   }
 
   await validateCompanies(workspaceId, companyIds);
   await validateBranches(workspaceId, branchIds);
+
 
   const access = await memberAccessRepository.upsertMemberAccess({
     workspaceId,
@@ -272,7 +278,59 @@ const updateMemberAccess = async (
     createdBy: userId,
   });
 
+  // Auto-clear member's active company and branch context if access was removed
+  try {
+    const targetUserId = member.userId?._id || member.userId;
+    if (targetUserId) {
+      const user = await userRepository.findUserById(targetUserId);
+      if (
+        user?.activeContext?.workspaceId &&
+        user.activeContext.workspaceId.toString() === workspaceId.toString()
+      ) {
+        let contextNeedsUpdate = false;
+        let activeCompanyId = user.activeContext.companyId;
+        let activeBranchId = user.activeContext.branchId;
+
+        if (activeCompanyId) {
+          const stillHasCompany = await memberAccessRepository.hasCompanyAccess(
+            workspaceId,
+            targetUserId,
+            activeCompanyId,
+          );
+          if (!stillHasCompany) {
+            activeCompanyId = null;
+            activeBranchId = null;
+            contextNeedsUpdate = true;
+          }
+        }
+
+        if (activeBranchId) {
+          const stillHasBranch = await memberAccessRepository.hasBranchAccess(
+            workspaceId,
+            targetUserId,
+            activeBranchId,
+          );
+          if (!stillHasBranch) {
+            activeBranchId = null;
+            contextNeedsUpdate = true;
+          }
+        }
+
+        if (contextNeedsUpdate) {
+          await userRepository.updateActiveContext(targetUserId, {
+            workspaceId: user.activeContext.workspaceId,
+            companyId: activeCompanyId,
+            branchId: activeBranchId,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Failed to auto-clean revoked active context for member:", err);
+  }
+
   return access.toSafeObject();
+
 };
 
 const hasCompanyAccess = async (workspaceId, userId, companyId) => {

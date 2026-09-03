@@ -3,6 +3,8 @@ import ApiError from "../../../../utils/ApiError.js";
 import branchRepository from "../repositories/branch.repository.js";
 import companyRepository from "../../companies/repositories/company.repository.js";
 import workspaceRepository from "../../workspaces/repositories/workspace.repository.js";
+import memberAccessRepository from "../../../core/access-control/repositories/memberAccess.repository.js";
+
 
 import { BRANCH_STATUS } from "../constants/branch.constant.js";
 
@@ -115,38 +117,405 @@ const createBranch = async (workspaceId, companyId, userId, payload) => {
 };
 
 const getCompanyBranches = async (companyId, workspaceId, userId) => {
-  await ensureWorkspaceAccess(workspaceId, userId);
+  const { member } = await ensureWorkspaceAccess(workspaceId, userId);
 
   await ensureCompanyAccess(companyId, workspaceId);
 
-  const branches = await branchRepository.getCompanyBranches(companyId);
+  const [branches, members, accessList] = await Promise.all([
+    branchRepository.getCompanyBranches(companyId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
 
-  return branches.map((branch) => branch.toSafeObject());
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  const branchMemberCountMap = new Map();
+  branches.forEach((branch) => {
+    const branchIdStr = branch._id.toString();
+    const compIdStr = (branch.companyId?._id || branch.companyId || branch.company)?.toString();
+    let count = 0;
+
+    (members || []).forEach((m) => {
+      const isMemberOwner = Boolean(m.isOwner);
+      const memberIdStr = m._id?.toString();
+      const userIdStr = (m.userId?._id || m.userId)?.toString();
+      const acc =
+        (memberIdStr && accessMap.get(memberIdStr)) ||
+        (userIdStr && accessMap.get(userIdStr)) ||
+        null;
+
+      if (isMemberOwner) {
+        count += 1;
+        return;
+      }
+
+      if (!acc) {
+        count += 1;
+        return;
+      }
+
+      // Check company access first
+      if (!acc.accessAllCompanies) {
+        const allowedCompanyIds = (acc.companyIds || []).map((id) => (id?._id || id).toString());
+        if (compIdStr && !allowedCompanyIds.includes(compIdStr)) {
+          return;
+        }
+      }
+
+      // Check branch access
+      if (acc.accessAllBranches) {
+        count += 1;
+        return;
+      }
+
+      const allowedBranchIds = [
+        ...(acc.branchIds || []).map((id) => (id?._id || id).toString()),
+        ...(acc.branchAccess || []).map((ba) => (ba.branchId?._id || ba.branchId).toString()),
+      ];
+
+      if (allowedBranchIds.includes(branchIdStr)) {
+        count += 1;
+      }
+    });
+
+    branchMemberCountMap.set(branchIdStr, count);
+  });
+
+  // Filter branches visible to current user
+  let filtered = branches;
+  if (!member.isOwner) {
+    const userAccess =
+      (await memberAccessRepository.findMemberAccessByMemberId(member._id)) ||
+      (await memberAccessRepository.findMemberAccessByUserAndWorkspace(workspaceId, userId));
+
+    if (userAccess) {
+      if (!userAccess.accessAllCompanies) {
+        const allowedCompanyIds = new Set(
+          (userAccess.companyIds || []).map((id) => (id?._id || id).toString())
+        );
+        if (!allowedCompanyIds.has(companyId.toString())) {
+          return [];
+        }
+      }
+
+      if (!userAccess.accessAllBranches) {
+        const allowedBranchIds = new Set([
+          ...(userAccess.branchIds || []).map((id) => (id?._id || id).toString()),
+          ...(userAccess.branchAccess || []).map((ba) => (ba.branchId?._id || ba.branchId).toString()),
+        ]);
+        filtered = branches.filter((b) => allowedBranchIds.has(b._id.toString()));
+      }
+    }
+  }
+
+  return filtered.map((branch) => {
+    const safeObj = branch.toSafeObject();
+    const count = branchMemberCountMap.get(branch._id.toString()) || 0;
+    safeObj.memberCount = count;
+    safeObj.membersCount = count;
+    safeObj.staffCount = count;
+    return safeObj;
+  });
 };
 
 const getWorkspaceBranches = async (workspaceId, userId) => {
-  await ensureWorkspaceAccess(workspaceId, userId);
+  const { member } = await ensureWorkspaceAccess(workspaceId, userId);
 
-  const branches = await branchRepository.getWorkspaceBranches(workspaceId);
+  const [branches, members, accessList] = await Promise.all([
+    branchRepository.getWorkspaceBranches(workspaceId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
 
-  return branches.map((branch) => branch.toSafeObject());
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  const branchMemberCountMap = new Map();
+  branches.forEach((branch) => {
+    const branchIdStr = branch._id.toString();
+    const compIdStr = (branch.companyId?._id || branch.companyId || branch.company)?.toString();
+    let count = 0;
+
+    (members || []).forEach((m) => {
+      const isMemberOwner = Boolean(m.isOwner);
+      const memberIdStr = m._id?.toString();
+      const userIdStr = (m.userId?._id || m.userId)?.toString();
+      const acc =
+        (memberIdStr && accessMap.get(memberIdStr)) ||
+        (userIdStr && accessMap.get(userIdStr)) ||
+        null;
+
+      if (isMemberOwner) {
+        count += 1;
+        return;
+      }
+
+      if (!acc) {
+        count += 1;
+        return;
+      }
+
+      // Check company access first
+      if (!acc.accessAllCompanies) {
+        const allowedCompanyIds = (acc.companyIds || []).map((id) => (id?._id || id).toString());
+        if (compIdStr && !allowedCompanyIds.includes(compIdStr)) {
+          return;
+        }
+      }
+
+      // Check branch access
+      if (acc.accessAllBranches) {
+        count += 1;
+        return;
+      }
+
+      const allowedBranchIds = [
+        ...(acc.branchIds || []).map((id) => (id?._id || id).toString()),
+        ...(acc.branchAccess || []).map((ba) => (ba.branchId?._id || ba.branchId).toString()),
+      ];
+
+      if (allowedBranchIds.includes(branchIdStr)) {
+        count += 1;
+      }
+    });
+
+    branchMemberCountMap.set(branchIdStr, count);
+  });
+
+  let filtered = branches;
+  if (!member.isOwner) {
+    const userAccess =
+      (await memberAccessRepository.findMemberAccessByMemberId(member._id)) ||
+      (await memberAccessRepository.findMemberAccessByUserAndWorkspace(workspaceId, userId));
+
+    if (userAccess) {
+      if (!userAccess.accessAllCompanies) {
+        const allowedCompanyIds = new Set(
+          (userAccess.companyIds || []).map((id) => (id?._id || id).toString())
+        );
+        filtered = filtered.filter((b) => {
+          const compId = (b.companyId?._id || b.companyId || b.company)?.toString();
+          return compId && allowedCompanyIds.has(compId);
+        });
+      }
+
+      if (!userAccess.accessAllBranches) {
+        const allowedBranchIds = new Set([
+          ...(userAccess.branchIds || []).map((id) => (id?._id || id).toString()),
+          ...(userAccess.branchAccess || []).map((ba) => (ba.branchId?._id || ba.branchId).toString()),
+        ]);
+        filtered = filtered.filter((b) => allowedBranchIds.has(b._id.toString()));
+      }
+    }
+  }
+
+  return filtered.map((branch) => {
+    const safeObj = branch.toSafeObject();
+    const count = branchMemberCountMap.get(branch._id.toString()) || 0;
+    safeObj.memberCount = count;
+    safeObj.membersCount = count;
+    safeObj.staffCount = count;
+    return safeObj;
+  });
 };
 
 const getBranchById = async (branchId, companyId, workspaceId, userId) => {
   await ensureWorkspaceAccess(workspaceId, userId);
 
-  await ensureCompanyAccess(companyId, workspaceId);
+  if (companyId) {
+    await ensureCompanyAccess(companyId, workspaceId);
+  }
 
-  const branch = await branchRepository.findBranchByIdAndCompany(
-    branchId,
-    companyId,
-  );
+  const [branch, members, accessList] = await Promise.all([
+    branchRepository.findBranchById(branchId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
 
-  if (!branch || branch.workspaceId.toString() !== workspaceId.toString()) {
+  if (!branch || branch.workspaceId.toString() !== workspaceId.toString() || branch.status === BRANCH_STATUS.DELETED) {
     throw new ApiError(404, "Branch not found");
   }
 
-  return branch.toSafeObject();
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  const branchIdStr = branch._id.toString();
+  const compIdStr = (branch.companyId?._id || branch.companyId || branch.company)?.toString();
+  let count = 0;
+
+  (members || []).forEach((m) => {
+    const isMemberOwner = Boolean(m.isOwner);
+    const memberIdStr = m._id?.toString();
+    const userIdStr = (m.userId?._id || m.userId)?.toString();
+    const acc =
+      (memberIdStr && accessMap.get(memberIdStr)) ||
+      (userIdStr && accessMap.get(userIdStr)) ||
+      null;
+
+    if (isMemberOwner || !acc) {
+      count += 1;
+      return;
+    }
+
+    if (!acc.accessAllCompanies) {
+      const allowedCompanyIds = (acc.companyIds || []).map((id) => (id?._id || id).toString());
+      if (compIdStr && !allowedCompanyIds.includes(compIdStr)) {
+        return;
+      }
+    }
+
+    if (acc.accessAllBranches) {
+      count += 1;
+      return;
+    }
+
+    const allowedBranchIds = [
+      ...(acc.branchIds || []).map((id) => (id?._id || id).toString()),
+      ...(acc.branchAccess || []).map((ba) => (ba.branchId?._id || ba.branchId).toString()),
+    ];
+
+    if (allowedBranchIds.includes(branchIdStr)) {
+      count += 1;
+    }
+  });
+
+  const safeObj = branch.toSafeObject();
+  safeObj.memberCount = count;
+  safeObj.membersCount = count;
+  safeObj.staffCount = count;
+  return safeObj;
+};
+
+const getBranchMembers = async (branchId, workspaceId, userId) => {
+  await ensureWorkspaceAccess(workspaceId, userId);
+
+  const [branch, members, accessList] = await Promise.all([
+    branchRepository.findBranchById(branchId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
+
+  if (!branch || branch.workspaceId.toString() !== workspaceId.toString() || branch.status === BRANCH_STATUS.DELETED) {
+    throw new ApiError(404, "Branch not found");
+  }
+
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  const branchIdStr = branch._id.toString();
+  const compIdStr = (branch.companyId?._id || branch.companyId || branch.company)?.toString();
+  const assignedEmployees = [];
+
+  (members || []).forEach((m) => {
+    const isMemberOwner = Boolean(m.isOwner);
+    const memberIdStr = m._id?.toString();
+    const userIdStr = (m.userId?._id || m.userId)?.toString();
+    const acc =
+      (memberIdStr && accessMap.get(memberIdStr)) ||
+      (userIdStr && accessMap.get(userIdStr)) ||
+      null;
+
+    let hasAccess = false;
+    if (isMemberOwner || !acc) {
+      hasAccess = true;
+    } else {
+      let companyAllowed = true;
+      if (!acc.accessAllCompanies) {
+        const allowedCompanyIds = (acc.companyIds || []).map((id) => (id?._id || id).toString());
+        companyAllowed = compIdStr ? allowedCompanyIds.includes(compIdStr) : true;
+      }
+
+      if (companyAllowed) {
+        if (acc.accessAllBranches) {
+          hasAccess = true;
+        } else {
+          const allowedBranchIds = [
+            ...(acc.branchIds || []).map((id) => (id?._id || id).toString()),
+            ...(acc.branchAccess || []).map((ba) => (ba.branchId?._id || ba.branchId).toString()),
+          ];
+          hasAccess = allowedBranchIds.includes(branchIdStr);
+        }
+      }
+    }
+
+    if (hasAccess) {
+      const userObj = m.userId && typeof m.userId === "object" ? m.userId : null;
+      const roleObj = m.roleId && typeof m.roleId === "object" ? m.roleId : null;
+
+      assignedEmployees.push({
+        _id: m._id,
+        id: m._id,
+        workspaceMemberId: m._id,
+        user: userObj
+          ? {
+              _id: userObj._id,
+              name: userObj.name || userObj.fullName,
+              email: userObj.email,
+              phone: userObj.phone || userObj.mobile,
+              avatar: userObj.avatar,
+            }
+          : null,
+        displayName: userObj?.name || userObj?.fullName || "Workspace Member",
+        displayEmail: userObj?.email || "-",
+        displayPhone: userObj?.phone || userObj?.mobile || "-",
+        role: roleObj
+          ? {
+              _id: roleObj._id,
+              name: roleObj.name,
+              code: roleObj.code,
+            }
+          : null,
+        roleName: isMemberOwner ? "Owner" : (roleObj?.name || "Staff Member"),
+        status: m.status || "active",
+        isOwner: isMemberOwner,
+        accessAllBranches: Boolean(isMemberOwner || acc?.accessAllBranches),
+        createdAt: m.createdAt,
+      });
+    }
+  });
+
+  return assignedEmployees;
 };
 
 const updateBranch = async (
@@ -270,6 +639,7 @@ export default {
   getCompanyBranches,
   getWorkspaceBranches,
   getBranchById,
+  getBranchMembers,
   updateBranch,
   deleteBranch,
 };

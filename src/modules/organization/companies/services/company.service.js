@@ -3,7 +3,9 @@ import ApiError from "../../../../utils/ApiError.js";
 
 import companyRepository from "../repositories/company.repository.js";
 import workspaceRepository from "../../workspaces/repositories/workspace.repository.js";
+import memberAccessRepository from "../../../core/access-control/repositories/memberAccess.repository.js";
 import coaSeederService from "../../../finance/chart-of-accounts/services/coaSeeder.service.js";
+
 
 import { COMPANY_STATUS } from "../constants/company.constant.js";
 
@@ -121,26 +123,225 @@ const createCompany = async (workspaceId, userId, payload) => {
 };
 
 const getWorkspaceCompanies = async (workspaceId, userId) => {
-  await ensureWorkspaceAccess(workspaceId, userId);
+  const { member } = await ensureWorkspaceAccess(workspaceId, userId);
 
-  const companies = await companyRepository.getWorkspaceCompanies(workspaceId);
+  const [companies, members, accessList] = await Promise.all([
+    companyRepository.getWorkspaceCompanies(workspaceId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
 
-  return companies.map((company) => company.toSafeObject());
+  // Build lookup map for member access
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  // Calculate member count per company
+  const companyMemberCountMap = new Map();
+  companies.forEach((company) => {
+    const compIdStr = company._id.toString();
+    let count = 0;
+
+    (members || []).forEach((m) => {
+      const isMemberOwner = Boolean(m.isOwner);
+      const memberIdStr = m._id?.toString();
+      const userIdStr = (m.userId?._id || m.userId)?.toString();
+      const acc =
+        (memberIdStr && accessMap.get(memberIdStr)) ||
+        (userIdStr && accessMap.get(userIdStr)) ||
+        null;
+
+      const accessAll = isMemberOwner ? true : (acc ? Boolean(acc.accessAllCompanies) : true);
+      const allowedCompIds = isMemberOwner
+        ? null
+        : (acc?.companyIds || []).map((id) => (id?._id || id).toString());
+
+      if (accessAll || (allowedCompIds && allowedCompIds.includes(compIdStr))) {
+        count += 1;
+      }
+    });
+
+    companyMemberCountMap.set(compIdStr, count);
+  });
+
+  // If member is not owner, filter permitted companies
+  let visibleCompanies = companies;
+  if (!member.isOwner) {
+    const access =
+      (await memberAccessRepository.findMemberAccessByMemberId(member._id)) ||
+      (await memberAccessRepository.findMemberAccessByUserAndWorkspace(workspaceId, userId));
+
+    if (access && !access.accessAllCompanies) {
+      const allowedCompanyIds = new Set(
+        (access.companyIds || []).map((id) => (id?._id || id).toString())
+      );
+      visibleCompanies = companies.filter((company) =>
+        allowedCompanyIds.has(company._id.toString())
+      );
+    }
+  }
+
+  return visibleCompanies.map((company) => {
+    const safeObj = company.toSafeObject();
+    const count = companyMemberCountMap.get(company._id.toString()) || 0;
+    safeObj.memberCount = count;
+    safeObj.membersCount = count;
+    safeObj.highlights = {
+      ...(safeObj.highlights || {}),
+      totalMembers: count,
+      activeMembers: count,
+    };
+    return safeObj;
+  });
 };
 
 const getCompanyById = async (companyId, workspaceId, userId) => {
   await ensureWorkspaceAccess(workspaceId, userId);
 
-  const company = await companyRepository.findCompanyByIdAndWorkspace(
-    companyId,
-    workspaceId,
-  );
+  const [company, members, accessList] = await Promise.all([
+    companyRepository.findCompanyByIdAndWorkspace(companyId, workspaceId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
 
   if (!company || company.status === COMPANY_STATUS.DELETED) {
     throw new ApiError(404, "Company not found");
   }
 
-  return company.toSafeObject();
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  const compIdStr = company._id.toString();
+  let count = 0;
+  (members || []).forEach((m) => {
+    const isMemberOwner = Boolean(m.isOwner);
+    const memberIdStr = m._id?.toString();
+    const userIdStr = (m.userId?._id || m.userId)?.toString();
+    const acc =
+      (memberIdStr && accessMap.get(memberIdStr)) ||
+      (userIdStr && accessMap.get(userIdStr)) ||
+      null;
+
+    const accessAll = isMemberOwner ? true : (acc ? Boolean(acc.accessAllCompanies) : true);
+    const allowedCompIds = isMemberOwner
+      ? null
+      : (acc?.companyIds || []).map((id) => (id?._id || id).toString());
+
+    if (accessAll || (allowedCompIds && allowedCompIds.includes(compIdStr))) {
+      count += 1;
+    }
+  });
+
+  const safeObj = company.toSafeObject();
+  safeObj.memberCount = count;
+  safeObj.membersCount = count;
+  safeObj.highlights = {
+    ...(safeObj.highlights || {}),
+    totalMembers: count,
+    activeMembers: count,
+  };
+  return safeObj;
+};
+
+const getCompanyMembers = async (companyId, workspaceId, userId) => {
+  await ensureWorkspaceAccess(workspaceId, userId);
+
+  const [company, members, accessList] = await Promise.all([
+    companyRepository.findCompanyByIdAndWorkspace(companyId, workspaceId),
+    workspaceRepository.getWorkspaceMembers(workspaceId, {
+      status: WORKSPACE_MEMBER_STATUS.ACTIVE,
+      populate: "roleId userId",
+    }).catch(() => []),
+    memberAccessRepository.getWorkspaceMemberAccessList(workspaceId).catch(() => []),
+  ]);
+
+  if (!company || company.status === COMPANY_STATUS.DELETED) {
+    throw new ApiError(404, "Company not found");
+  }
+
+  const accessMap = new Map();
+  (accessList || []).forEach((acc) => {
+    if (acc.workspaceMemberId) {
+      accessMap.set(acc.workspaceMemberId.toString(), acc);
+    }
+    if (acc.userId) {
+      accessMap.set(acc.userId.toString(), acc);
+    }
+  });
+
+  const compIdStr = company._id.toString();
+  const assignedEmployees = [];
+
+  (members || []).forEach((m) => {
+    const isMemberOwner = Boolean(m.isOwner);
+    const memberIdStr = m._id?.toString();
+    const userIdStr = (m.userId?._id || m.userId)?.toString();
+    const acc =
+      (memberIdStr && accessMap.get(memberIdStr)) ||
+      (userIdStr && accessMap.get(userIdStr)) ||
+      null;
+
+    const accessAll = isMemberOwner ? true : (acc ? Boolean(acc.accessAllCompanies) : true);
+    const allowedCompIds = isMemberOwner
+      ? null
+      : (acc?.companyIds || []).map((id) => (id?._id || id).toString());
+
+    if (accessAll || (allowedCompIds && allowedCompIds.includes(compIdStr))) {
+      const userObj = m.userId && typeof m.userId === "object" ? m.userId : null;
+      const roleObj = m.roleId && typeof m.roleId === "object" ? m.roleId : null;
+
+      assignedEmployees.push({
+        _id: m._id,
+        id: m._id,
+        workspaceMemberId: m._id,
+        user: userObj
+          ? {
+              _id: userObj._id,
+              name: userObj.name || userObj.fullName,
+              email: userObj.email,
+              phone: userObj.phone || userObj.mobile,
+              avatar: userObj.avatar,
+            }
+          : null,
+        displayName: userObj?.name || userObj?.fullName || "Workspace Member",
+        displayEmail: userObj?.email || "-",
+        displayPhone: userObj?.phone || userObj?.mobile || "-",
+        role: roleObj
+          ? {
+              _id: roleObj._id,
+              name: roleObj.name,
+              code: roleObj.code,
+            }
+          : null,
+        roleName: isMemberOwner ? "Owner" : (roleObj?.name || "Staff Member"),
+        status: m.status || "active",
+        isOwner: isMemberOwner,
+        accessAllCompanies: accessAll,
+        createdAt: m.createdAt,
+      });
+    }
+  });
+
+  return assignedEmployees;
 };
 
 const updateCompany = async (companyId, workspaceId, userId, payload) => {
@@ -239,6 +440,7 @@ export default {
   createCompany,
   getWorkspaceCompanies,
   getCompanyById,
+  getCompanyMembers,
   updateCompany,
   deleteCompany,
 };

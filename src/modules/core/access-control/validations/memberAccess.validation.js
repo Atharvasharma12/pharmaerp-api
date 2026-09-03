@@ -9,6 +9,12 @@ const objectId = Joi.string()
     "string.pattern.base": "Invalid id",
   });
 
+const branchAccessItemSchema = Joi.object({
+  branchId: objectId.required(),
+  roleId: objectId.allow(null).optional(),
+  canOperateMarketplaceStore: Joi.boolean().optional().default(false),
+});
+
 export const updateMemberAccessSchema = Joi.object({
   accessAllCompanies: Joi.boolean().optional(),
 
@@ -17,18 +23,7 @@ export const updateMemberAccessSchema = Joi.object({
   companyIds: Joi.array().items(objectId).unique().default([]).optional(),
 
   branchIds: Joi.array().items(objectId).unique().default([]).optional(),
-}).custom((value, helpers) => {
-  if (value.accessAllCompanies === false && !value.companyIds?.length) {
-    return helpers.message(
-      "companyIds is required when accessAllCompanies is false",
-    );
-  }
 
-  if (value.accessAllBranches === false && !value.branchIds?.length) {
-    return helpers.message(
-      "branchIds is required when accessAllBranches is false",
-    );
-  }
-
-  return value;
+  branchAccess: Joi.array().items(branchAccessItemSchema).optional().default([]),
 });
+

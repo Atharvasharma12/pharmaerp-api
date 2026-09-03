@@ -11,6 +11,7 @@ import {
   getCompanyBranches,
   getWorkspaceBranches,
   getBranchById,
+  getBranchMembers,
   updateBranch,
   deleteBranch,
 } from "../controllers/branch.controller.js";
@@ -33,6 +34,9 @@ router.use(workspaceContextMiddleware);
 */
 
 router.get("/workspace/all", getWorkspaceBranches);
+
+router.get("/:branchId/members", getBranchMembers);
+router.get("/:branchId/employees", getBranchMembers);
 
 /*
 |--------------------------------------------------------------------------

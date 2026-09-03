@@ -58,6 +58,18 @@ export const updateCompany = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Company updated successfully", company));
 });
 
+export const getCompanyMembers = asyncHandler(async (req, res) => {
+  const members = await companyService.getCompanyMembers(
+    req.params.companyId,
+    req.workspaceId,
+    req.user._id,
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Company members fetched successfully", members));
+});
+
 export const deleteCompany = asyncHandler(async (req, res) => {
   await companyService.deleteCompany(
     req.params.companyId,
@@ -69,3 +81,5 @@ export const deleteCompany = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Company deleted successfully"));
 });
+
+

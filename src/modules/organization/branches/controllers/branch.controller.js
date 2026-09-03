@@ -75,6 +75,18 @@ export const updateBranch = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Branch updated successfully", branch));
 });
 
+export const getBranchMembers = asyncHandler(async (req, res) => {
+  const members = await branchService.getBranchMembers(
+    req.params.branchId,
+    req.workspaceId,
+    req.user._id,
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Branch members fetched successfully", members));
+});
+
 export const deleteBranch = asyncHandler(async (req, res) => {
   await branchService.deleteBranch(
     req.params.branchId,

@@ -9,6 +9,7 @@ import {
   createCompany,
   getWorkspaceCompanies,
   getCompanyById,
+  getCompanyMembers,
   updateCompany,
   deleteCompany,
 } from "../controllers/company.controller.js";
@@ -27,6 +28,9 @@ router.use(workspaceContextMiddleware);
 router.post("/", validate(createCompanySchema), createCompany);
 
 router.get("/", getWorkspaceCompanies);
+
+router.get("/:companyId/members", getCompanyMembers);
+router.get("/:companyId/employees", getCompanyMembers);
 
 router.get("/:companyId", getCompanyById);
 
