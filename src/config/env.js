@@ -15,10 +15,10 @@ const env = {
   FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
 
   // database
-  DB_URI: process.env.DB_URI || "",
+  DB_URI: process.env.DB_URI || "mongodb+srv://pahuch:pahuch@pahuch.rfqf2.mongodb.net/pahuch?retryWrites=true&w=majority&appName=Pahuch",
 
   // erp auth
-  JWT_SECRET: process.env.JWT_SECRET || "erp-secret",
+  JWT_SECRET: process.env.JWT_SECRET || "HGASDVSBCHJASDGHJNCYERWEFJHBCNCYKVGHVKBJKJWTEF7643YRGFHBF7U2YGRHB",
 
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || "7d",
 
@@ -28,7 +28,7 @@ const env = {
   PLATFORM_JWT_EXPIRES_IN: process.env.PLATFORM_JWT_EXPIRES_IN || "7d",
 
   // cors
-  CORS_ORIGIN: process.env.CORS_ORIGIN || "*",
+  CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5173",
 
   // email (Brevo API Configuration)
   BREVO_API_KEY:
