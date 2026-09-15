@@ -13,6 +13,9 @@ import {
   getWorkspaceProductByCode,
   updateWorkspaceProduct,
   deleteWorkspaceProduct,
+  detectInventoryProducts,
+  importWorkspaceProducts,
+  getProductFacilityBatchesByQueryV2,
 } from "../controllers/workspaceProduct.controller.js";
 
 import {
@@ -24,11 +27,35 @@ import {
   searchBeforeCreateQuerySchema,
 } from "../validations/workspaceProduct.validation.js";
 
+import uploadFile from "../../../../middlewares/upload.middleware.js";
+
 const router = Router();
 
 // All workspace product routes require authentication + active workspace membership
 router.use(authMiddleware);
 router.use(workspaceContextMiddleware);
+
+// ---------------------
+// POST /catalog/products/detect
+// Detect inventory file, parse rows, and match brand mappings
+// ---------------------
+router.post(
+  "/detect",
+  permissionMiddleware("catalog:product:create"),
+  uploadFile.single("file"),
+  detectInventoryProducts,
+);
+
+// ---------------------
+// POST /catalog/products/import
+// Bulk import workspace products, stock, and batch entries via file upload or JSON payload
+// ---------------------
+router.post(
+  "/import",
+  permissionMiddleware("catalog:product:create"),
+  uploadFile.single("file"),
+  importWorkspaceProducts,
+);
 
 // ---------------------
 // GET /catalog/products
@@ -97,6 +124,14 @@ router.delete(
   permissionMiddleware("catalog:product:delete"),
   validate(workspaceProductIdParamSchema, "params"),
   deleteWorkspaceProduct,
+);
+
+// ---------------------
+// POST /catalog/products/workspace-product/batches/query
+// ---------------------
+router.post(
+  "/workspace-product/batches/query",
+  getProductFacilityBatchesByQueryV2,
 );
 
 export default router;

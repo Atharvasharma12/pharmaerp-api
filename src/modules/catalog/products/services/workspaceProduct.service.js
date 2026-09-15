@@ -32,6 +32,10 @@
 import ApiError from "../../../../utils/ApiError.js";
 
 import workspaceProductRepository from "../repositories/workspaceProduct.repository.js";
+import branchService from "../../../organization/branches/services/branch.service.js";
+import workspaceRepository from "../../../organization/workspaces/repositories/workspace.repository.js";
+
+
 import productSearchModule from "../../product-search/productSearch.module.js";
 
 import {
@@ -328,6 +332,446 @@ const deleteWorkspaceProduct = async (productId, workspaceId, user) => {
   return { success: true };
 };
 
+import Batch from "../models/batch.model.js";
+import ProductFacility from "../models/productFacility.model.js";
+
+import * as XLSX from "xlsx";
+
+const HEADER_ALIASES_BACKEND = {
+  name: ["name", "productname", "product", "itemname", "item", "title", "particulars", "description", "medicinename", "brandname"],
+  productType: ["producttype", "type", "classification", "categorytype"],
+  pack: ["pack", "package", "packaging", "packagingdetail", "packing", "unit"],
+  mrp: ["mrp", "maximumretailprice"],
+  ptr: ["ptr", "costprice", "purcprice", "purchaseprice", "cost"],
+  rateA: ["ratea", "rate", "sellingprice", "price", "rate1", "salerate"],
+  rateB: ["rateb"],
+  rateC: ["ratec"],
+  batchNo: ["batchno", "batch", "batchnumber", "lotno", "lotnumber", "lot"],
+  expiryDate: ["expiry", "expirydate", "expdate", "exp"],
+  batchQty: ["qty", "quantity", "batchqty", "stock", "stockqty", "balance", "currentstock", "openingstock"],
+  rack: ["rack", "rackno", "location", "shelf", "bin"],
+  marketer: ["marketer", "brand", "company", "manufacturer", "mfg"],
+  itemCode: ["itemcode", "code"],
+  batchScheme: ["batchscheme", "deal"],
+  freeFromPurchase: ["freefrompurchase", "free"],
+  notes: ["notes", "remark", "remarks", "invno"],
+};
+
+const cleanHeaderKey = (h) => String(h || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const parseSpreadsheetBuffer = (buffer) => {
+  const workbook = XLSX.read(buffer, { type: "buffer" });
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+  const matrix = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+
+  if (!matrix || matrix.length === 0) return [];
+
+  const ALL_ALIASES = Object.values(HEADER_ALIASES_BACKEND).flat();
+  let bestIdx = 0;
+  let maxMatches = 0;
+
+  for (let r = 0; r < Math.min(matrix.length, 25); r++) {
+    const rowCells = matrix[r];
+    if (!Array.isArray(rowCells)) continue;
+
+    let matchCount = 0;
+    rowCells.forEach((cell) => {
+      const clean = cleanHeaderKey(cell);
+      if (clean && ALL_ALIASES.some((alias) => clean === alias || clean.includes(alias))) {
+        matchCount++;
+      }
+    });
+
+    if (matchCount > maxMatches) {
+      maxMatches = matchCount;
+      bestIdx = r;
+    }
+  }
+
+  const header1 = matrix[bestIdx] || [];
+  const header2 = matrix[bestIdx + 1] || [];
+  let lastMainHeader = "";
+  const maxCols = Math.max(header1.length, header2.length);
+  const rawHeaders = [];
+
+  for (let i = 0; i < maxCols; i++) {
+    if (header1[i] && String(header1[i]).trim()) {
+      lastMainHeader = String(header1[i]).trim();
+    }
+    const h1 = lastMainHeader;
+    const h2 = String(header2[i] || "").trim();
+    rawHeaders[i] = h2 ? `${h1} ${h2}` : h1;
+  }
+
+  const normalizedHeaders = rawHeaders.map((header) => {
+    const clean = cleanHeaderKey(header);
+    for (const [canonicalKey, aliases] of Object.entries(HEADER_ALIASES_BACKEND)) {
+      if (aliases.includes(clean)) return canonicalKey;
+    }
+    return String(header || "").trim();
+  });
+
+  const isSecondRowSubHeader = header2.some((cell) => {
+    const clean = cleanHeaderKey(cell);
+    return clean === "deal" || clean === "free";
+  });
+
+  const startRow = isSecondRowSubHeader ? bestIdx + 2 : bestIdx + 1;
+  const items = [];
+
+  for (let r = startRow; r < matrix.length; r++) {
+    const rowCells = matrix[r];
+    if (!Array.isArray(rowCells) || rowCells.every((c) => String(c || "").trim() === "")) continue;
+
+    const rowObj = {};
+    normalizedHeaders.forEach((canonicalKey, cIdx) => {
+      const val = rowCells[cIdx] !== undefined ? String(rowCells[cIdx]).trim() : "";
+      if (canonicalKey) rowObj[canonicalKey] = val;
+      if (rawHeaders[cIdx]) rowObj[rawHeaders[cIdx]] = val;
+    });
+
+    const getVal = (field) => {
+      if (rowObj[field]) return rowObj[field];
+      const aliases = HEADER_ALIASES_BACKEND[field] || [field];
+      for (const k of Object.keys(rowObj)) {
+        const cleanK = cleanHeaderKey(k);
+        if (aliases.some((alias) => cleanK === alias || cleanK.includes(alias))) {
+          if (rowObj[k]) return rowObj[k];
+        }
+      }
+      return "";
+    };
+
+    const name = getVal("name");
+    const batchNo = getVal("batchNo");
+
+    const safeNumber = (val) => {
+      const num = Number(val);
+      return Number.isFinite(num) ? num : 0;
+    };
+
+    const mrp = safeNumber(getVal("mrp"));
+    const ptr = safeNumber(getVal("ptr"));
+
+    // Legacy IIFE rateB calculation:
+    const rateB = (() => {
+      const rawRateB = safeNumber(getVal("rateB"));
+      if (rawRateB > 0) return rawRateB;
+
+      if (mrp > 0) {
+        const gstPercent = 5;
+        const retailMarginPercent = 20;
+        return Number(((mrp / (1 + gstPercent / 100)) * (1 - retailMarginPercent / 100)).toFixed(2));
+      }
+      return ptr;
+    })();
+
+    // Legacy IIFE rateA calculation:
+    const rateA = (() => {
+      let rB = rateB;
+      if (rB <= 0 && mrp > 0) {
+        rB = Number(((mrp / 1.05) * 0.80).toFixed(2));
+      }
+
+      if (rB > 0) {
+        return Number((rB * 0.90).toFixed(2));
+      }
+      return ptr;
+    })();
+
+    // Legacy IIFE rateC calculation:
+    const rateC = (() => {
+      const rawRateC = safeNumber(getVal("rateC"));
+      if (rawRateC > 0) return rawRateC;
+      return Number((mrp * 0.84).toFixed(2));
+    })();
+
+    if (name || batchNo) {
+      items.push({
+        name,
+        productType: getVal("productType") || "medicine",
+        pack: getVal("pack"),
+        mrp,
+        ptr,
+        rateA,
+        rateB,
+        rateC,
+        batchNo,
+        expiryDate: getVal("expiryDate"),
+        batchQty: Math.abs(safeNumber(getVal("batchQty"))),
+        rack: getVal("rack"),
+        marketer: getVal("company") || getVal("marketer"),
+        itemCode: getVal("itemCode"),
+        batchScheme: safeNumber(getVal("batchScheme")),
+        freeFromPurchase: safeNumber(getVal("freeFromPurchase")),
+        notes: getVal("notes"),
+      });
+    }
+  }
+
+  return items;
+};
+
+// ---------------------
+// Bulk Import Products & Stock
+// ---------------------
+
+const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, options = {}) => {
+  const userId = getUserId(user);
+  const { branchId = null, file = null, autoCalcRateA = true, autoCalcRateB = true, autoCalcRateC = true, tempImportId = null, brandMappings = [] } = options;
+  // Ensure we have a branch context – prefer explicit branchId, then user's branch, then activeContext.branchId, then fallback to workspace's first branch
+  console.log('Import branch resolution: provided branchId =', branchId);
+  console.log('User branchId =', user?.branchId);
+  console.log('Active context branchId =', user?.activeContext?.branchId);
+  let fallbackBranchId = null;
+  // Determine if we need to fetch a fallback branch (no branch supplied anywhere)
+  if (!branchId && !user?.branchId && !user?.activeContext?.branchId) {
+    try {
+      // Resolve fallback branch: fetch workspace to get companyId then list its branches
+      const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
+      const companyId = workspace?.companyId;
+      const branches = await branchService.getCompanyBranches(companyId, workspaceId, userId);
+      if (branches && branches.length) fallbackBranchId = branches[0]._id;
+    } catch (e) {
+      console.warn('Unable to fetch default branches for import:', e.message);
+    }
+  }
+  const effectiveBranchId = branchId || user?.branchId || fallbackBranchId;
+  console.log('Effective branchId for import =', effectiveBranchId);
+  // Added debug logging for import process
+
+  let items = itemsInput;
+  if (file && file.buffer) {
+    items = parseSpreadsheetBuffer(file.buffer);
+  }
+  let createdCount = 0;
+  let updatedCount = 0;
+  let skippedCount = 0;
+  const failedRows = [];
+  const importedProducts = [];
+
+  const toNumber = (val) => {
+    const num = Number(val);
+    return Number.isFinite(num) ? num : 0;
+  };
+
+  const safeFixed = (val) => Number(Number(val || 0).toFixed(2));
+
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index];
+    const rowNum = index + 1;
+
+    try {
+      if (!item.name || !String(item.name).trim()) {
+        failedRows.push({ row: rowNum, error: "Product name is required" });
+        skippedCount++;
+        continue;
+      }
+
+      const productName = String(item.name).trim();
+      const marketer = String(item.marketer || item.brand || item.company || "").trim();
+      const productType = (item.productType || "medicine").toLowerCase();
+      const itemCode = String(item.itemCode || item.code || "").trim();
+
+      const mrp = toNumber(item.mrp);
+      const importedPtr = toNumber(item.ptr);
+      const importedRateA = toNumber(item.rateA);
+      const importedRateB = toNumber(item.rateB);
+      const importedRateC = toNumber(item.rateC);
+
+      const batchScheme = toNumber(item.batchScheme || item.deal);
+      const freeFromPurchase = toNumber(item.freeFromPurchase || item.free);
+      const totalScheme = batchScheme + freeFromPurchase;
+      const schemeDiscountPercent =
+        totalScheme > 0 ? safeFixed((freeFromPurchase / totalScheme) * 100) : 0;
+
+      // Rate pricing calculations matching legacy rules
+      const gstPercent = 5;
+      const retailerMarginPercent = 20;
+      const stockistMarginPercent = 10;
+
+      let ptr = importedPtr;
+      if (autoCalcRateB && mrp > 0) {
+        ptr = safeFixed((mrp / (1 + gstPercent / 100)) * (1 - retailerMarginPercent / 100));
+      }
+
+      const pts = safeFixed(ptr * (1 - stockistMarginPercent / 100));
+
+      let rateB = importedRateB > 0 ? importedRateB : ptr;
+      let rateA = autoCalcRateA ? (importedRateA > 0 ? importedRateA : safeFixed(rateB * 0.90)) : importedRateA;
+      let rateC = autoCalcRateC ? (importedRateC > 0 ? importedRateC : (mrp > 0 ? safeFixed(mrp * 0.84) : 0)) : importedRateC;
+
+      // Check if product already exists in workspace
+      let product = await workspaceProductRepository.findWorkspaceProductByName(
+        productName,
+        workspaceId,
+      );
+
+      if (product) {
+        updatedCount++;
+      } else {
+        // Create new WorkspaceProduct
+        const productPayload = {
+          workspaceId,
+          name: productName,
+          productType,
+          pack: item.pack || "",
+          mrp,
+          ptr,
+          pts,
+          rateA,
+          rateB,
+          rateC,
+          marketer,
+          itemCode,
+          rack: item.rack || "",
+          notes: item.notes || "Imported via Inventory Import",
+          createdBy: userId,
+        };
+
+        if (item.category) productPayload.category = item.category;
+        if (item.uom) productPayload.uom = item.uom;
+        if (item.manufacturer) productPayload.manufacturer = item.manufacturer;
+        if (item.HsnMaster) productPayload.HsnMaster = item.HsnMaster;
+
+        product = await workspaceProductRepository.createWorkspaceProduct(productPayload);
+        createdCount++;
+      }
+
+      // If branchId or facility is provided, handle ProductFacility
+      const targetBranchId = branchId || item.branchId || item.branch_id || item.facility_id || user?.activeContext?.branchId || fallbackBranchId || null;
+      console.log(`Import row ${rowNum}: resolved targetBranchId = ${targetBranchId}`);
+      if (targetBranchId) {
+        let pf = await ProductFacility.findOne({
+          workspaceId,
+          facility_id: targetBranchId,
+          product_id: product._id,
+        });
+
+        const initialQty = toNumber(item.qty || item.stockQty || item.batchQty || 0);
+
+        if (!pf) {
+          pf = new ProductFacility({
+            workspaceId,
+            facility_id: targetBranchId,
+            product_id: product._id,
+            total_qty_available: initialQty,
+            qoh: initialQty,
+            atp: initialQty,
+            itemCode: itemCode || undefined,
+          });
+          console.log(`Created new ProductFacility for product ${product._id} at branch ${targetBranchId}`);
+        } else if (initialQty > 0) {
+          pf.total_qty_available += initialQty;
+          pf.qoh += initialQty;
+          pf.atp += initialQty;
+          if (itemCode) pf.itemCode = itemCode;
+          console.log(`Updated existing ProductFacility ${pf._id} with qty ${initialQty}`);
+        }
+
+        await pf.save();
+        console.log(`ProductFacility saved with id ${pf._id}`);
+      }
+
+      // If batch details are provided, handle Batch creation
+      if (item.batchNo && String(item.batchNo).trim()) {
+        const batchNo = String(item.batchNo).trim();
+        const expiryDate = item.expiryDate || "";
+        const batchQty = toNumber(item.batchQty || item.qty || 0);
+
+        let batch = await Batch.findOne({
+          workspaceId,
+          product: product._id,
+          batchNo,
+          expiryDate,
+        });
+
+        if (!batch) {
+          batch = new Batch({
+            workspaceId,
+            branch_id: targetBranchId,
+            product: product._id,
+            batchNo,
+            expiryDate,
+            batchQty,
+            mrp,
+            ptr,
+            pts,
+            rate: rateB,
+            rateA,
+            rateB,
+            rateC,
+            freeQty: freeFromPurchase,
+            schemeDiscountPercent,
+          });
+          console.log(`Created new Batch ${batchNo} for product ${product._id} at branch ${targetBranchId}`);
+        } else if (batchQty > 0) {
+          batch.batchQty += batchQty;
+          console.log(`Updated Batch ${batch._id} with additional qty ${batchQty}`);
+        }
+
+        await batch.save();
+        console.log(`Batch saved with id ${batch._id}`);
+      }
+
+      importedProducts.push(product.toSafeObject ? product.toSafeObject() : product);
+    } catch (err) {
+      failedRows.push({ row: rowNum, name: item.name, error: err.message });
+      skippedCount++;
+    }
+  }
+
+  return {
+    totalProcessed: items.length,
+    createdCount,
+    updatedCount,
+    skippedCount,
+    failedRows,
+    importedProductsCount: importedProducts.length,
+  };
+};
+
+import mongoose from "mongoose";
+import WorkspaceProduct from "../models/workspaceProduct.model.js";
+
+const tempImportsStore = new Map();
+
+const detectInventoryProducts = async (workspaceId, buffer) => {
+  const products = parseSpreadsheetBuffer(buffer);
+
+  // Get unique brand/marketer names from file
+  const uniqueMarketers = [...new Set(products.map((p) => p.marketer).filter(Boolean))];
+
+  // Get existing marketer names from Workspace Products in DB
+  const dbProducts = await WorkspaceProduct.find(
+    { workspaceId },
+    { marketer: 1 }
+  ).lean();
+
+  const dbMarketers = [...new Set(dbProducts.map((p) => p.marketer).filter(Boolean))];
+
+  const brandMappings = uniqueMarketers.map((m) => {
+    const matched = dbMarketers.find(
+      (db) => db?.toLowerCase() === m?.toLowerCase()
+    );
+    return {
+      original: m,
+      matched: matched || m,
+    };
+  });
+
+  const tempImportId = crypto.randomUUID();
+  tempImportsStore.set(tempImportId, { products, brandMappings, createdAt: Date.now() });
+
+  return {
+    tempImportId,
+    brandMappings,
+    productPreview: products.slice(0, 25),
+    totalProducts: products.length,
+  };
+};
+
 export default {
   searchBeforeCreate,
   createWorkspaceProduct,
@@ -336,4 +780,6 @@ export default {
   getWorkspaceProductByCode,
   updateWorkspaceProduct,
   deleteWorkspaceProduct,
+  detectInventoryProducts,
+  importWorkspaceProducts,
 };
