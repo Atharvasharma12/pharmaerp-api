@@ -85,7 +85,20 @@ const getWorkspaceProducts = async (
   }
 
   if (filters.search) {
-    query.name = { $regex: new RegExp(filters.search.trim(), "i") };
+    const rawSearch = filters.search.trim();
+    const cleanSearch = rawSearch.replace(/[^a-zA-Z0-9]/g, "");
+
+    if (cleanSearch) {
+      // Build regex pattern that allows optional non-alphanumeric characters between each character
+      // e.g. "VB7" -> "V[^a-zA-Z0-9]*B[^a-zA-Z0-9]*7" to match "VB-7", "VB 7", "VB7"
+      const flexiblePattern = cleanSearch.split("").join("[^a-zA-Z0-9]*");
+      query.$or = [
+        { name: { $regex: new RegExp(rawSearch, "i") } },
+        { name: { $regex: new RegExp(flexiblePattern, "i") } },
+      ];
+    } else {
+      query.name = { $regex: new RegExp(rawSearch, "i") };
+    }
   }
 
   const page = Math.max(1, parseInt(options.page) || 1);

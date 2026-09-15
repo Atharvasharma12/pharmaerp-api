@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import customerRepository from "../repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
@@ -218,9 +219,79 @@ const getCustomerOutstanding = async (customerId, companyId, workspaceId) => {
   };
 };
 
-const getCustomerSales = async (customerId, companyId, workspaceId) => {
-  await getCustomerById(customerId, companyId, workspaceId);
-  return [];
+const getCustomerSales = async (customerId, companyId, workspaceId, branchId = null) => {
+  const customer = await customerRepository.findCustomerByIdCompanyAndWorkspace(
+    customerId,
+    companyId,
+    workspaceId,
+  );
+
+  if (!customer) {
+    throw new ApiError(404, "Customer not found");
+  }
+
+  const allSales = customer.salesHistory || [];
+  if (branchId) {
+    return allSales.filter(
+      (s) => !s.branchId || String(s.branchId) === String(branchId)
+    );
+  }
+  return allSales;
+};
+
+const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null) => {
+  const customer = await customerRepository.findCustomerById(customerId, companyId, workspaceId);
+
+  if (!customer) {
+    throw new ApiError(404, "Customer not found");
+  }
+
+  if (!Array.isArray(customer.salesHistory)) {
+    customer.salesHistory = [];
+  }
+
+  const userId = user?._id || user?.id || null;
+  const userName = user?.name || user?.displayName || user?.fullName || (user?.email ? user.email.split("@")[0] : "System User");
+  const userEmail = user?.email || null;
+
+  let resolvedBranchId = saleData.branchId || customer.branchId || null;
+
+  if (!resolvedBranchId && companyId) {
+    try {
+      const activeBranches = await branchRepository.findActiveBranchesByCompany(companyId);
+      if (Array.isArray(activeBranches) && activeBranches.length > 0) {
+        resolvedBranchId = activeBranches[0]._id;
+      }
+    } catch (bErr) {
+      // Fallback
+    }
+  }
+
+  const newSale = {
+    _id: new mongoose.Types.ObjectId(),
+    workspaceId: workspaceId || customer.workspaceId,
+    companyId: companyId || customer.companyId,
+    branchId: resolvedBranchId,
+    invoiceNo: saleData.invoiceNo || `RET-INV-${Date.now()}`,
+    date: saleData.date || new Date(),
+    billingMode: saleData.billingMode || "B2C",
+    subtotal: saleData.subtotal || 0,
+    discount: saleData.discount || 0,
+    tax: saleData.tax || 0,
+    grandTotal: saleData.grandTotal || 0,
+    paymentMethod: saleData.paymentMethod || "Cash",
+    items: saleData.items || [],
+    status: "Paid",
+    createdBy: userId,
+    createdByName: userName,
+    createdByEmail: userEmail,
+    createdAt: new Date(),
+  };
+
+  customer.salesHistory.unshift(newSale);
+  await customer.save();
+
+  return newSale;
 };
 
 const getCustomerPayments = async (customerId, companyId, workspaceId) => {
@@ -237,5 +308,6 @@ export default {
   getCustomerLedger,
   getCustomerOutstanding,
   getCustomerSales,
+  recordCustomerSale,
   getCustomerPayments,
 };
