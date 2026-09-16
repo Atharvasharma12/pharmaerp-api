@@ -334,6 +334,7 @@ const deleteWorkspaceProduct = async (productId, workspaceId, user) => {
 
 import Batch from "../models/batch.model.js";
 import ProductFacility from "../models/productFacility.model.js";
+import HsnMaster from "../../../platform/global-catalog/hsn-master/models/hsnMaster.model.js";
 
 import * as XLSX from "xlsx";
 
@@ -521,9 +522,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
   const userId = getUserId(user);
   const { branchId = null, file = null, autoCalcRateA = true, autoCalcRateB = true, autoCalcRateC = true, tempImportId = null, brandMappings = [] } = options;
   // Ensure we have a branch context – prefer explicit branchId, then user's branch, then activeContext.branchId, then fallback to workspace's first branch
-  console.log('Import branch resolution: provided branchId =', branchId);
-  console.log('User branchId =', user?.branchId);
-  console.log('Active context branchId =', user?.activeContext?.branchId);
+
   let fallbackBranchId = null;
   // Determine if we need to fetch a fallback branch (no branch supplied anywhere)
   if (!branchId && !user?.branchId && !user?.activeContext?.branchId) {
@@ -534,11 +533,9 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       const branches = await branchService.getCompanyBranches(companyId, workspaceId, userId);
       if (branches && branches.length) fallbackBranchId = branches[0]._id;
     } catch (e) {
-      console.warn('Unable to fetch default branches for import:', e.message);
     }
   }
   const effectiveBranchId = branchId || user?.branchId || fallbackBranchId;
-  console.log('Effective branchId for import =', effectiveBranchId);
   // Added debug logging for import process
 
   let items = itemsInput;
@@ -568,7 +565,6 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
         skippedCount++;
         continue;
       }
-
       const productName = String(item.name).trim();
       const marketer = String(item.marketer || item.brand || item.company || "").trim();
       const productType = (item.productType || "medicine").toLowerCase();
@@ -772,6 +768,600 @@ const detectInventoryProducts = async (workspaceId, buffer) => {
   };
 };
 
+/**
+ * Bulk Import GST & HSN Mapping (Optimized for Large Files)
+ */
+const importWorkspaceProductsGst = async (
+  workspaceId,
+  itemsInput = [],
+  user,
+  options = {}
+) => {
+  const { file = null } = options;
+
+  // ---------------------------------------------------------
+  // 1. Read input
+  // ---------------------------------------------------------
+
+  let rawItems = [];
+
+  if (file?.buffer) {
+    const workbook = XLSX.read(file.buffer, {
+      type: "buffer",
+      cellDates: false,
+      cellNF: false,
+      cellText: false,
+    });
+
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+
+    rawItems = XLSX.utils.sheet_to_json(sheet, {
+      defval: "",
+      raw: true,
+    });
+  } else if (Array.isArray(itemsInput) && itemsInput.length) {
+    rawItems = itemsInput;
+  } else if (typeof itemsInput === "string" && itemsInput.trim()) {
+    try {
+      rawItems = JSON.parse(itemsInput);
+    } catch (e) {
+      rawItems = [];
+    }
+  }
+
+  if (!rawItems.length) {
+    throw new ApiError(
+      400,
+      "No items found in the import file or payload"
+    );
+  }
+
+  // ---------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------
+
+  const normalizeKey = (key) =>
+    String(key)
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+  const cleanItemCode = (value) =>
+    String(value)
+      .trim()
+      .replace(/^[^a-zA-Z0-9]+/, "")
+      .trim();
+
+  const parseNumber = (value) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+
+    const num = Number(String(value).replace(/[^0-9.-]/g, ""));
+
+    return Number.isFinite(num) ? num : null;
+  };
+
+  const VALID_GST_RATES = [0, 5, 12, 18, 28];
+
+  const snapToValidGstRate = (rate) => {
+    if (rate === null || rate === undefined || Number.isNaN(rate)) {
+      return null;
+    }
+
+    let closest = VALID_GST_RATES[0];
+    let minDiff = Math.abs(rate - closest);
+
+    for (let i = 1; i < VALID_GST_RATES.length; i++) {
+      const diff = Math.abs(rate - VALID_GST_RATES[i]);
+
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = VALID_GST_RATES[i];
+      }
+    }
+
+    return closest;
+  };
+
+  const FIELD_ALIASES = {
+    itemCode: [
+      "ItemCode",
+      "itemCode",
+      "Item Code",
+      "item_code",
+      "Code",
+      "code",
+      "SKU",
+      "sku",
+      "Item",
+      "item",
+      "Item No",
+      "ItemNo",
+      "item_no",
+      "Product Code",
+      "ProductCode",
+      "product_code",
+    ],
+
+    hsn: [
+      "HSNCode",
+      "HSN Code",
+      "HSN",
+      "hsn",
+      "hsnCode",
+      "hsn_code",
+      "hsn_sac",
+      "HSN/SAC",
+      "HSNSAC",
+      "HSN No",
+      "hsn_no",
+    ],
+
+    sgst: ["SGST", "sgst", "sgst%", "sgst_rate"],
+    cgst: ["CGST", "cgst", "cgst%", "cgst_rate"],
+    igst: ["IGST", "igst", "igst%", "igst_rate"],
+
+    gst: [
+      "GST",
+      "IGST",
+      "GST%",
+      "GstPercentage",
+      "GST Percentage",
+      "LocalTax",
+      "taxRate",
+      "hsnTaxpercent",
+      "Tax",
+      "tax",
+      "Tax%",
+      "GST_Rate",
+      "GSTRate",
+      "Gst Rate",
+      "Gst",
+    ],
+  };
+
+  // Pre-normalize aliases once
+  const NORMALIZED_ALIASES = Object.fromEntries(
+    Object.entries(FIELD_ALIASES).map(([field, aliases]) => [
+      field,
+      aliases.map(normalizeKey),
+    ])
+  );
+
+  /**
+   * Get all relevant fields from one row.
+   */
+  const parseRow = (item) => {
+    if (!item || typeof item !== "object") {
+      return null;
+    }
+
+    const normalizedRow = {};
+
+    for (const [key, value] of Object.entries(item)) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        String(value).trim() !== ""
+      ) {
+        normalizedRow[normalizeKey(key)] = String(value).trim();
+      }
+    }
+
+    const get = (field) => {
+      const aliases = NORMALIZED_ALIASES[field];
+
+      for (const alias of aliases) {
+        if (
+          normalizedRow[alias] !== undefined &&
+          normalizedRow[alias] !== ""
+        ) {
+          return normalizedRow[alias];
+        }
+      }
+
+      return null;
+    };
+
+    const itemCodeRaw = get("itemCode");
+
+    if (!itemCodeRaw) {
+      return {
+        itemCodeRaw: null,
+        cleanedItemCode: null,
+        hsnNum: null,
+        gstTaxPercent: null,
+      };
+    }
+
+    const cleanedItemCode = cleanItemCode(itemCodeRaw);
+
+    const hsnRaw = get("hsn");
+
+    const hsnNum = hsnRaw
+      ? parseNumber(hsnRaw)
+      : null;
+
+    const sgstVal = get("sgst");
+    const cgstVal = get("cgst");
+    const igstVal = get("igst");
+    const gstVal = get("gst");
+
+    let gstTaxPercent = null;
+
+    const sgst = parseNumber(sgstVal);
+    const cgst = parseNumber(cgstVal);
+    const igst = parseNumber(igstVal);
+    const gst = parseNumber(gstVal);
+
+    if (sgst !== null && cgst !== null) {
+      gstTaxPercent = sgst + cgst;
+    } else if (igst !== null) {
+      gstTaxPercent = igst;
+    } else if (gst !== null) {
+      gstTaxPercent = gst;
+    }
+
+    return {
+      itemCodeRaw,
+      cleanedItemCode,
+      hsnNum,
+      gstTaxPercent,
+    };
+  };
+
+  // ---------------------------------------------------------
+  // 2. Parse rows ONCE
+  // ---------------------------------------------------------
+
+  const parsedRows = [];
+
+  const itemCodes = new Set();
+  const hsnCodes = new Set();
+
+  let skippedRowsCount = 0;
+
+  for (let i = 0; i < rawItems.length; i++) {
+    const parsed = parseRow(rawItems[i]);
+
+    if (!parsed?.itemCodeRaw) {
+      skippedRowsCount++;
+      continue;
+    }
+
+    const {
+      itemCodeRaw,
+      cleanedItemCode,
+      hsnNum,
+      gstTaxPercent,
+    } = parsed;
+
+    if (
+      (hsnNum === null || Number.isNaN(hsnNum)) &&
+      (gstTaxPercent === null || Number.isNaN(gstTaxPercent))
+    ) {
+      skippedRowsCount++;
+      continue;
+    }
+
+    const strRaw = String(itemCodeRaw).trim();
+    itemCodes.add(strRaw);
+    if (cleanedItemCode) itemCodes.add(cleanedItemCode);
+    const unpaddedRaw = strRaw.replace(/^0+/, "");
+    if (unpaddedRaw) itemCodes.add(unpaddedRaw);
+    if (cleanedItemCode) {
+      const unpaddedClean = cleanedItemCode.replace(/^0+/, "");
+      if (unpaddedClean) itemCodes.add(unpaddedClean);
+    }
+
+    if (hsnNum !== null && !Number.isNaN(hsnNum)) {
+      hsnCodes.add(hsnNum);
+    }
+
+    parsedRows.push({
+      rowNum: i + 2,
+      itemCodeRaw,
+      cleanedItemCode,
+      hsnNum,
+      gstTaxPercent,
+    });
+  }
+
+  if (!parsedRows.length) {
+    return {
+      totalRows: rawItems.length,
+      matchedRowsCount: 0,
+      updatedProductsCount: 0,
+      skippedRowsCount,
+      errors: [],
+    };
+  }
+
+  // ---------------------------------------------------------
+  // 3. Fetch ProductFacility and WorkspaceProduct records
+  // ---------------------------------------------------------
+
+  const [pfDocs, wpDocs, hsnDocs] = await Promise.all([
+    ProductFacility.find({
+      workspaceId,
+    })
+      .select("product_id itemCode")
+      .lean(),
+
+    WorkspaceProduct.find({
+      workspaceId,
+      isDeleted: false,
+    })
+      .select("_id workspaceProductCode")
+      .lean(),
+
+    hsnCodes.size
+      ? HsnMaster.find({
+        code: { $in: [...hsnCodes] },
+      })
+        .select("_id code")
+        .lean()
+      : [],
+  ]);
+
+  // ---------------------------------------------------------
+  // 4. Build ProductFacility & WorkspaceProduct maps
+  // ---------------------------------------------------------
+
+  const pfItemCodeMap = new Map();
+  const wpCodeMap = new Map();
+
+  const addToProductMap = (code, productId) => {
+    if (!code || !productId) return;
+
+    const rawKey = String(code).trim();
+    if (!rawKey) return;
+
+    const addKey = (key) => {
+      if (!key) return;
+      let ids = pfItemCodeMap.get(key);
+      if (!ids) {
+        ids = new Set();
+        pfItemCodeMap.set(key, ids);
+      }
+      ids.add(String(productId));
+    };
+
+    addKey(rawKey);
+    const cleanKey = cleanItemCode(rawKey);
+    if (cleanKey) addKey(cleanKey);
+
+    const unpaddedRaw = rawKey.replace(/^0+/, "");
+    if (unpaddedRaw) addKey(unpaddedRaw);
+
+    if (cleanKey) {
+      const unpaddedClean = cleanKey.replace(/^0+/, "");
+      if (unpaddedClean) addKey(unpaddedClean);
+    }
+  };
+
+  for (const pf of pfDocs) {
+    addToProductMap(pf.itemCode, pf.product_id);
+  }
+
+  for (const wp of wpDocs) {
+    if (wp.workspaceProductCode) {
+      wpCodeMap.set(String(wp.workspaceProductCode).trim(), String(wp._id));
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 6. Build HSN map
+  // ---------------------------------------------------------
+
+  const hsnMap = new Map();
+
+  for (const hsn of hsnDocs) {
+    if (hsn.code !== undefined && hsn.code !== null) {
+      hsnMap.set(Number(hsn.code), hsn._id);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 7. Find missing HSNs
+  // ---------------------------------------------------------
+
+  const missingHsnToCreate = new Map();
+
+  for (const row of parsedRows) {
+    const { hsnNum, gstTaxPercent } = row;
+
+    if (
+      hsnNum !== null &&
+      !Number.isNaN(hsnNum) &&
+      !hsnMap.has(hsnNum)
+    ) {
+      if (!missingHsnToCreate.has(hsnNum)) {
+        missingHsnToCreate.set(hsnNum, gstTaxPercent);
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 8. Create missing HSNs using upsert
+  // ---------------------------------------------------------
+
+  if (missingHsnToCreate.size > 0) {
+    const hsnBulkOps = [];
+
+    for (const [code, gstRate] of missingHsnToCreate) {
+      hsnBulkOps.push({
+        updateOne: {
+          filter: { code },
+          update: {
+            $setOnInsert: {
+              code,
+              gstRate:
+                gstRate !== null && !Number.isNaN(gstRate)
+                  ? snapToValidGstRate(gstRate)
+                  : null,
+              description: `HSN ${code}`,
+            },
+          },
+          upsert: true,
+        },
+      });
+    }
+
+    await HsnMaster.bulkWrite(hsnBulkOps, {
+      ordered: false,
+    });
+
+    const freshHsns = await HsnMaster.find({
+      code: {
+        $in: [...missingHsnToCreate.keys()],
+      },
+    })
+      .select("_id code")
+      .lean();
+
+    for (const hsn of freshHsns) {
+      hsnMap.set(Number(hsn.code), hsn._id);
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 9. Prepare product updates
+  // ---------------------------------------------------------
+
+  const productUpdatesMap = new Map();
+
+  let matchedRowsCount = 0;
+
+  const errors = [];
+
+  for (const row of parsedRows) {
+    const {
+      rowNum,
+      itemCodeRaw,
+      cleanedItemCode,
+      hsnNum,
+      gstTaxPercent,
+    } = row;
+
+    const matchedProductIds = new Set();
+
+    if (itemCodeRaw) {
+      const strRaw = String(itemCodeRaw).trim();
+      const unpaddedRaw = strRaw.replace(/^0+/, "");
+      const cleanKey = cleanedItemCode || cleanItemCode(strRaw);
+      const unpaddedClean = cleanKey ? cleanKey.replace(/^0+/, "") : "";
+
+      const pfMatches =
+        pfItemCodeMap.get(strRaw) ||
+        (cleanKey ? pfItemCodeMap.get(cleanKey) : null) ||
+        (unpaddedRaw ? pfItemCodeMap.get(unpaddedRaw) : null) ||
+        (unpaddedClean ? pfItemCodeMap.get(unpaddedClean) : null);
+
+      if (pfMatches) {
+        for (const productId of pfMatches) {
+          matchedProductIds.add(productId);
+        }
+      }
+
+      if (matchedProductIds.size === 0 && wpCodeMap.has(strRaw)) {
+        matchedProductIds.add(wpCodeMap.get(strRaw));
+      }
+    }
+
+    if (matchedProductIds.size === 0) {
+      skippedRowsCount++;
+
+      if (errors.length < 50) {
+        errors.push({
+          row: rowNum,
+          itemCode: itemCodeRaw,
+          reason: "No matching product found by itemCode",
+        });
+      }
+
+      continue;
+    }
+
+    matchedRowsCount++;
+
+    // -------------------------------------------------------
+    // Accumulate updates
+    // -------------------------------------------------------
+
+    for (const productId of matchedProductIds) {
+      let update = productUpdatesMap.get(productId);
+
+      if (!update) {
+        update = {};
+        productUpdatesMap.set(productId, update);
+      }
+
+      if (
+        hsnNum !== null &&
+        !Number.isNaN(hsnNum)
+      ) {
+        update.hsn = hsnNum;
+
+        const hsnMasterId = hsnMap.get(hsnNum);
+
+        if (hsnMasterId) {
+          update.HsnMaster = hsnMasterId;
+        }
+      }
+
+      if (
+        gstTaxPercent !== null &&
+        !Number.isNaN(gstTaxPercent)
+      ) {
+        update.hsnTaxpercent = gstTaxPercent;
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // 10. Bulk update WorkspaceProducts
+  // ---------------------------------------------------------
+
+  const bulkOps = [];
+
+  for (const [productId, updateObj] of productUpdatesMap) {
+    if (!Object.keys(updateObj).length) {
+      continue;
+    }
+
+    bulkOps.push({
+      updateOne: {
+        filter: {
+          _id: productId,
+          workspaceId,
+        },
+        update: {
+          $set: updateObj,
+        },
+      },
+    });
+  }
+
+  if (bulkOps.length > 0) {
+    await WorkspaceProduct.bulkWrite(bulkOps, {
+      ordered: false,
+    });
+  }
+
+  // ---------------------------------------------------------
+  // 11. Response
+  // ---------------------------------------------------------
+
+  return {
+    totalRows: rawItems.length,
+    matchedRowsCount,
+    updatedProductsCount: bulkOps.length,
+    skippedRowsCount,
+    errors,
+  };
+};
+
 export default {
   searchBeforeCreate,
   createWorkspaceProduct,
@@ -782,4 +1372,6 @@ export default {
   deleteWorkspaceProduct,
   detectInventoryProducts,
   importWorkspaceProducts,
+  importWorkspaceProductsGst,
 };
+

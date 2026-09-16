@@ -163,6 +163,30 @@ export const importWorkspaceProducts = asyncHandler(async (req, res) => {
     );
 });
 
+export const importWorkspaceProductsGst = asyncHandler(async (req, res) => {
+  const file = req.file;
+  const { items } = req.body || {};
+
+  if (!file && (!Array.isArray(items) || items.length === 0)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, "Please upload a file or pass items array"));
+  }
+
+  const result = await workspaceProductService.importWorkspaceProductsGst(
+    req.workspaceId,
+    items,
+    req.user,
+    { file },
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "GST & HSN updated successfully", result),
+    );
+});
+
 export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) => {
   let { page = 1, limit = 10, filters = {} } = req.body;
   page = Number(page);

@@ -15,6 +15,7 @@ import {
   deleteWorkspaceProduct,
   detectInventoryProducts,
   importWorkspaceProducts,
+  importWorkspaceProductsGst,
   getProductFacilityBatchesByQueryV2,
 } from "../controllers/workspaceProduct.controller.js";
 
@@ -55,6 +56,17 @@ router.post(
   permissionMiddleware("catalog:product:create"),
   uploadFile.single("file"),
   importWorkspaceProducts,
+);
+
+// ---------------------
+// POST /catalog/products/import-gst
+// Bulk import GST and HSN mapping via file upload or JSON payload
+// ---------------------
+router.post(
+  "/import-gst",
+  permissionMiddleware("catalog:product:create"),
+  uploadFile.single("file"),
+  importWorkspaceProductsGst,
 );
 
 // ---------------------

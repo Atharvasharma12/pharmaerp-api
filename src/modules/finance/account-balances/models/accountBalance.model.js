@@ -22,7 +22,6 @@ const accountBalanceSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
       required: [true, "Account is required"],
-      index: true,
     },
 
     debitTotal: {
