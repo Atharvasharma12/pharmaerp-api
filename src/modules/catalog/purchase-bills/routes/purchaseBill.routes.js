@@ -10,6 +10,7 @@ import {
   updatePurchaseBill,
   getPurchaseBills,
   getPurchaseBillById,
+  ingestPurchaseBill,
 } from "../controllers/purchaseBill.controller.js";
 
 import {
@@ -49,6 +50,13 @@ router.get(
   "/:billId",
   validate(purchaseBillIdParamSchema, "params"),
   getPurchaseBillById
+);
+
+// Ingest stock from purchase bill
+router.post(
+  "/:billId/ingest",
+  validate(purchaseBillIdParamSchema, "params"),
+  ingestPurchaseBill
 );
 
 export default router;

@@ -31,6 +31,29 @@
 
 import ApiError from "../../../../utils/ApiError.js";
 
+const formatExpiry = (val) => {
+  if (!val) return "";
+  let str = String(val).trim();
+  if (/^\d{2}\/\d{2}$/.test(str)) return str;
+  const parsed = new Date(str);
+  if (!isNaN(parsed.getTime())) {
+    const mm = String(parsed.getMonth() + 1).padStart(2, "0");
+    const yy = String(parsed.getFullYear()).slice(-2);
+    return `${mm}/${yy}`;
+  }
+  const parts = str.split(/[\/\-]/);
+  if (parts.length === 3) {
+    const mm = parts[1].padStart(2, "0");
+    const yy = parts[2].length === 4 ? parts[2].slice(-2) : parts[2];
+    return `${mm}/${yy}`;
+  } else if (parts.length === 2) {
+    const mm = parts[0].padStart(2, "0");
+    const yy = parts[1].length === 4 ? parts[1].slice(-2) : parts[1];
+    return `${mm}/${yy}`;
+  }
+  return str;
+};
+
 import workspaceProductRepository from "../repositories/workspaceProduct.repository.js";
 import branchService from "../../../organization/branches/services/branch.service.js";
 import workspaceRepository from "../../../organization/workspaces/repositories/workspace.repository.js";
@@ -599,10 +622,24 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       let rateC = autoCalcRateC ? (importedRateC > 0 ? importedRateC : (mrp > 0 ? safeFixed(mrp * 0.84) : 0)) : importedRateC;
 
       // Check if product already exists in workspace
-      let product = await workspaceProductRepository.findWorkspaceProductByName(
-        productName,
-        workspaceId,
-      );
+      let product = null;
+
+      if (itemCode) {
+        const existingPf = await ProductFacility.findOne({ workspaceId, itemCode });
+        if (existingPf && existingPf.product_id) {
+          product = await workspaceProductRepository.findWorkspaceProductById(
+            existingPf.product_id,
+            workspaceId
+          );
+        }
+      }
+
+      if (!product) {
+        product = await workspaceProductRepository.findWorkspaceProductByName(
+          productName,
+          workspaceId,
+        );
+      }
 
       if (product) {
         updatedCount++;
@@ -673,7 +710,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       // If batch details are provided, handle Batch creation
       if (item.batchNo && String(item.batchNo).trim()) {
         const batchNo = String(item.batchNo).trim();
-        const expiryDate = item.expiryDate || "";
+        const expiryDate = formatExpiry(item.expiryDate);
         const batchQty = toNumber(item.batchQty || item.qty || 0);
 
         let batch = await Batch.findOne({

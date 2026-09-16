@@ -3,6 +3,7 @@ import ApiResponse from "../../../../utils/ApiResponse.js";
 
 import workspaceProductService from "../services/workspaceProduct.service.js";
 import Batch from "../models/batch.model.js";
+import WorkspaceProduct from "../models/workspaceProduct.model.js";
 import mongoose from "mongoose";
 
 /**
@@ -188,12 +189,16 @@ export const importWorkspaceProductsGst = asyncHandler(async (req, res) => {
 });
 
 export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) => {
-  let { page = 1, limit = 10, filters = {} } = req.body;
+  let { page = 1, limit = 10, filters = {}, search = "" } = req.body;
   page = Number(page);
   limit = Number(limit);
 
-  const { product, facility, expiryDate, expired, lowStock } = filters;
+  const { product, facility, expiryDate, expired, lowStock, inStockOnly } = filters;
   const matchStage = { workspaceId: req.workspaceId };
+
+  if (inStockOnly) {
+    matchStage.batchQty = { $gt: 0 };
+  }
 
   if (product) {
     if (!mongoose.Types.ObjectId.isValid(product)) {
@@ -201,12 +206,19 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     }
     matchStage.product = new mongoose.Types.ObjectId(product);
   }
-
   if (facility && facility !== "all_facility") {
     if (!mongoose.Types.ObjectId.isValid(facility)) {
       return res.status(400).json(new ApiResponse(400, "Invalid facility ID"));
     }
     matchStage.branch_id = new mongoose.Types.ObjectId(facility);
+  }
+
+  if (search && !product) {
+    const matchedProducts = await WorkspaceProduct.find({
+      workspaceId: req.workspaceId,
+      name: { $regex: search, $options: "i" }
+    }).select("_id");
+    matchStage.product = { $in: matchedProducts.map(p => p._id) };
   }
 
   const total = await Batch.countDocuments(matchStage);

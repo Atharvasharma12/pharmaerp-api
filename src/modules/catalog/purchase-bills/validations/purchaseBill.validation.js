@@ -52,6 +52,8 @@ export const createPurchaseBillSchema = Joi.object({
   taxableAfterExtraDisc: Joi.number().min(0).required(),
   totalGst: Joi.number().min(0).required(),
   grandTotal: Joi.number().min(0).required(),
+  amountPaid: Joi.number().min(0).default(0),
+  amountDue: Joi.number().min(0).default(0),
 
   gstSlabs: Joi.array().items(gstSlabSchema).default([]),
 });

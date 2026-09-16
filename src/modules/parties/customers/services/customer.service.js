@@ -3,6 +3,8 @@ import ApiError from "../../../../utils/ApiError.js";
 import customerRepository from "../repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
+import Batch from "../../../catalog/products/models/batch.model.js";
+import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -287,6 +289,46 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     createdByEmail: userEmail,
     createdAt: new Date(),
   };
+
+  // Deduct inventory from Batch and ProductFacility
+  if (Array.isArray(newSale.items) && newSale.items.length > 0) {
+    for (const item of newSale.items) {
+      const qtyToDeduct = Number(item.qty) || 0;
+      if (qtyToDeduct <= 0) continue;
+
+      const productId = item.productId || item.workspaceProductId || item.id;
+      const batchId = item.batchId || (item.batch && item.batch._id) || item.batch;
+
+      if (batchId) {
+        try {
+          const batchDoc = await Batch.findById(batchId);
+          if (batchDoc) {
+            batchDoc.batchQty = Math.max(0, (batchDoc.batchQty || 0) - qtyToDeduct);
+            await batchDoc.save();
+          }
+        } catch (err) {
+          console.error("Error deducting batch stock for sale:", err);
+        }
+      }
+
+      if (productId && resolvedBranchId) {
+        try {
+          const facilityDoc = await ProductFacility.findOne({
+            product_id: productId,
+            facility_id: resolvedBranchId
+          });
+          if (facilityDoc) {
+            facilityDoc.total_qty_available = Math.max(0, (facilityDoc.total_qty_available || 0) - qtyToDeduct);
+            facilityDoc.qoh = Math.max(0, (facilityDoc.qoh || 0) - qtyToDeduct);
+            facilityDoc.atp = Math.max(0, (facilityDoc.atp || 0) - qtyToDeduct);
+            await facilityDoc.save();
+          }
+        } catch (err) {
+          console.error("Error deducting product facility stock for sale:", err);
+        }
+      }
+    }
+  }
 
   customer.salesHistory.unshift(newSale);
   await customer.save();

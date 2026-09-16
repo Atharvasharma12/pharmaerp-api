@@ -83,6 +83,8 @@ const purchaseBillSchema = new mongoose.Schema(
     taxableAfterExtraDisc: { type: Number, default: 0 },
     totalGst: { type: Number, default: 0 },
     grandTotal: { type: Number, default: 0 },
+    amountPaid: { type: Number, default: 0 },
+    amountDue: { type: Number, default: 0 },
 
     gstSlabs: [gstSlabSchema],
 

@@ -64,3 +64,18 @@ export const getPurchaseBillById = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Purchase bill fetched successfully", bill));
 });
+
+export const ingestPurchaseBill = asyncHandler(async (req, res) => {
+  let branchId = req.headers["x-branch-id"] || req.body.branchId || null;
+
+  const bill = await purchaseBillService.ingestPurchaseBill(
+    req.params.billId,
+    req.workspaceId,
+    req.companyId,
+    branchId
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Stock ingested successfully", bill));
+});
