@@ -159,9 +159,7 @@ export const getCustomersQuerySchema = Joi.object({
   status: Joi.string()
     .valid(...Object.values(CUSTOMER_STATUS))
     .optional(),
-  customerType: Joi.string()
-    .valid(...Object.values(CUSTOMER_TYPE))
-    .optional(),
+  customerType: Joi.string().trim().optional(),
   page: Joi.number().integer().min(1).default(1).optional(),
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),
 });
