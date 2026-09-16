@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import customerRepository from "../repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
+import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
 import Batch from "../../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
@@ -332,6 +333,35 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
   customer.salesHistory.unshift(newSale);
   await customer.save();
+
+  // Auto-create GSTR-1 Entry for GST Ledger
+  try {
+    const totalGst = Number(newSale.tax || saleData.tax || 0);
+    const halfGst = totalGst / 2;
+    const taxableAmt = Number(
+      saleData.taxableAmount !== undefined
+        ? saleData.taxableAmount
+        : (newSale.subtotal || 0) - (newSale.discount || 0)
+    );
+
+    await gstLedgerRepository.createGstLedgerEntry({
+      workspaceId: newSale.workspaceId,
+      companyId: newSale.companyId,
+      partyId: customer._id,
+      voucherId: newSale._id,
+      voucherNumber: newSale.invoiceNo,
+      voucherDate: newSale.date ? new Date(newSale.date) : new Date(),
+      gstType: "GSTR-1",
+      taxableAmount: taxableAmt,
+      cgst: halfGst,
+      sgst: halfGst,
+      igst: 0,
+      totalAmount: Number(newSale.grandTotal || 0),
+      narration: `Sale Bill ${newSale.invoiceNo} (${newSale.billingMode}) - Customer: ${customer.name || "Customer"}`,
+    });
+  } catch (gstErr) {
+    console.error("Failed to auto-create GSTR-1 entry for sale bill:", gstErr);
+  }
 
   return newSale;
 };

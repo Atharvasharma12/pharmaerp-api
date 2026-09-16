@@ -1,5 +1,6 @@
 import ApiError from "../../../../utils/ApiError.js";
 import purchaseBillRepository from "../repositories/purchaseBill.repository.js";
+import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
 import Batch from "../../products/models/batch.model.js";
 import ProductFacility from "../../products/models/productFacility.model.js";
 
@@ -78,10 +79,30 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
     grandTotal: grandTotal || 0,
     amountPaid: amountPaid || 0,
     amountDue: amountDue !== undefined ? amountDue : ((grandTotal || 0) - (amountPaid || 0)),
-    gstSlabs: gstSlabs || [],
     status: "CONFIRMED",
     createdBy: userId,
   });
+
+  try {
+    const halfGst = (totalGst || 0) / 2;
+    await gstLedgerRepository.createGstLedgerEntry({
+      workspaceId,
+      companyId,
+      partyId: supplierId,
+      voucherId: bill._id,
+      voucherNumber: generatedBillNo,
+      voucherDate: invoiceDate ? new Date(invoiceDate) : new Date(),
+      gstType: "GSTR-2",
+      taxableAmount: taxableSubtotal || taxableAfterExtraDisc || 0,
+      cgst: halfGst,
+      sgst: halfGst,
+      igst: 0,
+      totalAmount: grandTotal || 0,
+      narration: `Purchase Bill #${generatedBillNo}`,
+    });
+  } catch (err) {
+    console.error("Failed to auto-create GSTR-2 entry for purchase bill:", err);
+  }
 
   return bill;
 };

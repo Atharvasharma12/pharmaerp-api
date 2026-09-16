@@ -7,6 +7,7 @@ import financialPeriodModule from "./financial-periods/financialPeriod.module.js
 import openingBalancesModule from "./opening-balances/openingBalances.module.js";
 import treasuryModule from "./treasury/treasury.module.js";
 import reportsModule from "./reports/reports.module.js";
+import gstLedgerModule from "./gst-ledger/gstLedger.module.js";
 
 const router = Router();
 
@@ -33,6 +34,9 @@ router.use(treasuryModule.path, treasuryModule.router);
 
 // Mount reports routes
 router.use(reportsModule.path, reportsModule.router);
+
+// Mount GST ledger routes
+router.use(gstLedgerModule.path, gstLedgerModule.router);
 
 export default router;
 
