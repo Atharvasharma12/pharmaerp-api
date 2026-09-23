@@ -57,10 +57,14 @@ export const createWorkspaceProduct = asyncHandler(async (req, res) => {
 export const getWorkspaceProducts = asyncHandler(async (req, res) => {
   const { status, productType, search, page, limit } = req.query;
   const branchId = req.headers["x-branch-id"];
+  
+  const referer = req.headers.referer || "";
+  const isSalesRoute = referer.includes("/sales");
+  const branchFilterId = isSalesRoute ? branchId : null;
 
   const result = await workspaceProductService.getWorkspaceProducts(
     req.workspaceId,
-    { status, productType, search, branchId },
+    { status, productType, search, branchId: branchFilterId },
     { page, limit },
   );
 
