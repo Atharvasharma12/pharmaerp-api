@@ -79,3 +79,16 @@ export const ingestPurchaseBill = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Stock ingested successfully", bill));
 });
+
+export const getPurchaseHistory = asyncHandler(async (req, res) => {
+  const history = await purchaseBillService.getPurchaseHistory(
+    req.params.productId,
+    req.workspaceId,
+    req.companyId,
+    req.query
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Product purchase history fetched successfully", history));
+});

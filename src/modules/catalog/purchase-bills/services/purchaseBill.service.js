@@ -317,12 +317,22 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId) => {
   return updatedBill;
 };
 
+const getPurchaseHistory = async (productId, workspaceId, companyId, query = {}) => {
+  return await purchaseBillRepository.getPurchaseHistory(
+    productId,
+    workspaceId,
+    companyId,
+    query
+  );
+};
+
 const purchaseBillService = {
   createPurchaseBill,
   updatePurchaseBill,
   getPurchaseBills,
   getPurchaseBillById,
   ingestPurchaseBill,
+  getPurchaseHistory,
 };
 
 export default purchaseBillService;
