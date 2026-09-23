@@ -3,6 +3,7 @@ import ApiError from "../../../../utils/ApiError.js";
 import customerRepository from "../repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
+import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
 import Batch from "../../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
@@ -222,150 +223,6 @@ const getCustomerOutstanding = async (customerId, companyId, workspaceId) => {
   };
 };
 
-const getCustomerSales = async (customerId, companyId, workspaceId, branchId = null) => {
-  const customer = await customerRepository.findCustomerByIdCompanyAndWorkspace(
-    customerId,
-    companyId,
-    workspaceId,
-  );
-
-  if (!customer) {
-    throw new ApiError(404, "Customer not found");
-  }
-
-  const allSales = customer.salesHistory || [];
-  if (branchId) {
-    return allSales.filter(
-      (s) => !s.branchId || String(s.branchId) === String(branchId)
-    );
-  }
-  return allSales;
-};
-
-const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null) => {
-  const customer = await customerRepository.findCustomerById(customerId, companyId, workspaceId);
-
-  if (!customer) {
-    throw new ApiError(404, "Customer not found");
-  }
-
-  if (!Array.isArray(customer.salesHistory)) {
-    customer.salesHistory = [];
-  }
-
-  const userId = user?._id || user?.id || null;
-  const userName = user?.name || user?.displayName || user?.fullName || (user?.email ? user.email.split("@")[0] : "System User");
-  const userEmail = user?.email || null;
-
-  let resolvedBranchId = saleData.branchId || customer.branchId || null;
-
-  if (!resolvedBranchId && companyId) {
-    try {
-      const activeBranches = await branchRepository.findActiveBranchesByCompany(companyId);
-      if (Array.isArray(activeBranches) && activeBranches.length > 0) {
-        resolvedBranchId = activeBranches[0]._id;
-      }
-    } catch (bErr) {
-      // Fallback
-    }
-  }
-
-  const newSale = {
-    _id: new mongoose.Types.ObjectId(),
-    workspaceId: workspaceId || customer.workspaceId,
-    companyId: companyId || customer.companyId,
-    branchId: resolvedBranchId,
-    invoiceNo: saleData.invoiceNo || `RET-INV-${Date.now()}`,
-    date: saleData.date || new Date(),
-    billingMode: saleData.billingMode || "B2C",
-    subtotal: saleData.subtotal || 0,
-    discount: saleData.discount || 0,
-    tax: saleData.tax || 0,
-    grandTotal: saleData.grandTotal || 0,
-    paymentMethod: saleData.paymentMethod || "Cash",
-    items: saleData.items || [],
-    status: "Paid",
-    createdBy: userId,
-    createdByName: userName,
-    createdByEmail: userEmail,
-    createdAt: new Date(),
-  };
-
-  // Deduct inventory from Batch and ProductFacility
-  if (Array.isArray(newSale.items) && newSale.items.length > 0) {
-    for (const item of newSale.items) {
-      const qtyToDeduct = Number(item.qty) || 0;
-      if (qtyToDeduct <= 0) continue;
-
-      const productId = item.productId || item.workspaceProductId || item.id;
-      const batchId = item.batchId || (item.batch && item.batch._id) || item.batch;
-
-      if (batchId) {
-        try {
-          const batchDoc = await Batch.findById(batchId);
-          if (batchDoc) {
-            batchDoc.batchQty = Math.max(0, (batchDoc.batchQty || 0) - qtyToDeduct);
-            await batchDoc.save();
-          }
-        } catch (err) {
-          console.error("Error deducting batch stock for sale:", err);
-        }
-      }
-
-      if (productId && resolvedBranchId) {
-        try {
-          const facilityDoc = await ProductFacility.findOne({
-            product_id: productId,
-            facility_id: resolvedBranchId
-          });
-          if (facilityDoc) {
-            facilityDoc.total_qty_available = Math.max(0, (facilityDoc.total_qty_available || 0) - qtyToDeduct);
-            facilityDoc.qoh = Math.max(0, (facilityDoc.qoh || 0) - qtyToDeduct);
-            facilityDoc.atp = Math.max(0, (facilityDoc.atp || 0) - qtyToDeduct);
-            await facilityDoc.save();
-          }
-        } catch (err) {
-          console.error("Error deducting product facility stock for sale:", err);
-        }
-      }
-    }
-  }
-
-  customer.salesHistory.unshift(newSale);
-  await customer.save();
-
-  // Auto-create GSTR-1 Entry for GST Ledger
-  try {
-    const totalGst = Number(newSale.tax || saleData.tax || 0);
-    const halfGst = totalGst / 2;
-    const taxableAmt = Number(
-      saleData.taxableAmount !== undefined
-        ? saleData.taxableAmount
-        : (newSale.subtotal || 0) - (newSale.discount || 0)
-    );
-
-    await gstLedgerRepository.createGstLedgerEntry({
-      workspaceId: newSale.workspaceId,
-      companyId: newSale.companyId,
-      partyId: customer._id,
-      voucherId: newSale._id,
-      voucherNumber: newSale.invoiceNo,
-      voucherDate: newSale.date ? new Date(newSale.date) : new Date(),
-      gstType: "GSTR-1",
-      taxableAmount: taxableAmt,
-      cgst: halfGst,
-      sgst: halfGst,
-      igst: 0,
-      totalAmount: Number(newSale.grandTotal || 0),
-      narration: `Sale Bill ${newSale.invoiceNo} (${newSale.billingMode}) - Customer: ${customer.name || "Customer"}`,
-    });
-  } catch (gstErr) {
-    console.error("Failed to auto-create GSTR-1 entry for sale bill:", gstErr);
-  }
-
-  return newSale;
-};
-
 const getCustomerPayments = async (customerId, companyId, workspaceId) => {
   await getCustomerById(customerId, companyId, workspaceId);
   return [];
@@ -379,7 +236,5 @@ export default {
   deleteCustomer,
   getCustomerLedger,
   getCustomerOutstanding,
-  getCustomerSales,
-  recordCustomerSale,
   getCustomerPayments,
 };

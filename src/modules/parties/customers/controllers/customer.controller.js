@@ -90,45 +90,7 @@ export const getCustomerOutstanding = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Customer outstanding fetched successfully", outstanding));
 });
 
-export const getCustomerSales = asyncHandler(async (req, res) => {
-  const branchId =
-    req.headers["x-branch-id"] ||
-    req.branchId ||
-    req.query.branchId ||
-    null;
 
-  const sales = await customerService.getCustomerSales(
-    req.params.customerId,
-    req.companyId,
-    req.workspaceId,
-    branchId
-  );
-
-  return res
-    .status(200)
-    .json(new ApiResponse(200, "Customer sales fetched successfully", sales));
-});
-
-export const recordCustomerSale = asyncHandler(async (req, res) => {
-  const branchId =
-    req.headers["x-branch-id"] ||
-    req.branchId ||
-    req.body.branchId ||
-    req.query.branchId ||
-    null;
-
-  const result = await customerService.recordCustomerSale(
-    req.params.customerId,
-    { ...req.body, branchId },
-    req.companyId,
-    req.workspaceId,
-    req.user
-  );
-
-  return res
-    .status(201)
-    .json(new ApiResponse(201, "Customer sale invoice recorded successfully", result));
-});
 
 export const getCustomerPayments = asyncHandler(async (req, res) => {
   const payments = await customerService.getCustomerPayments(

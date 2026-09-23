@@ -558,8 +558,13 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
     } catch (e) {
     }
   }
-  const effectiveBranchId = branchId || user?.branchId || fallbackBranchId;
+  const effectiveBranchId = branchId || user?.branchId || user?.activeContext?.branchId || fallbackBranchId;
   // Added debug logging for import process
+  // Delete existing batches for the target branch before import
+  console.log("effective branch id", effectiveBranchId)
+  if (effectiveBranchId) {
+    await Batch.deleteMany({ branch_id: effectiveBranchId });
+  }
 
   let items = itemsInput;
   if (file && file.buffer) {
@@ -674,7 +679,6 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
 
       // If branchId or facility is provided, handle ProductFacility
       const targetBranchId = branchId || item.branchId || item.branch_id || item.facility_id || user?.activeContext?.branchId || fallbackBranchId || null;
-      console.log(`Import row ${rowNum}: resolved targetBranchId = ${targetBranchId}`);
       if (targetBranchId) {
         let pf = await ProductFacility.findOne({
           workspaceId,
@@ -694,17 +698,14 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
             atp: initialQty,
             itemCode: itemCode || undefined,
           });
-          console.log(`Created new ProductFacility for product ${product._id} at branch ${targetBranchId}`);
         } else if (initialQty > 0) {
           pf.total_qty_available += initialQty;
           pf.qoh += initialQty;
           pf.atp += initialQty;
           if (itemCode) pf.itemCode = itemCode;
-          console.log(`Updated existing ProductFacility ${pf._id} with qty ${initialQty}`);
         }
 
         await pf.save();
-        console.log(`ProductFacility saved with id ${pf._id}`);
       }
 
       // If batch details are provided, handle Batch creation
@@ -715,9 +716,9 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
 
         let batch = await Batch.findOne({
           workspaceId,
+          branch_id: targetBranchId,
           product: product._id,
           batchNo,
-          expiryDate,
         });
 
         if (!batch) {
@@ -738,14 +739,11 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
             freeQty: freeFromPurchase,
             schemeDiscountPercent,
           });
-          console.log(`Created new Batch ${batchNo} for product ${product._id} at branch ${targetBranchId}`);
         } else if (batchQty > 0) {
           batch.batchQty += batchQty;
-          console.log(`Updated Batch ${batch._id} with additional qty ${batchQty}`);
         }
 
         await batch.save();
-        console.log(`Batch saved with id ${batch._id}`);
       }
 
       importedProducts.push(product.toSafeObject ? product.toSafeObject() : product);

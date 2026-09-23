@@ -1,6 +1,7 @@
 import ApiError from "../../../../utils/ApiError.js";
 import purchaseBillRepository from "../repositories/purchaseBill.repository.js";
 import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
+import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
 import Batch from "../../products/models/batch.model.js";
 import ProductFacility from "../../products/models/productFacility.model.js";
 
@@ -59,6 +60,14 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
 
   const generatedBillNo = purchaseBillNo || `PB-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
+  // Determine financial period based on invoice date
+  let period = await financialPeriodRepository.findPeriodByDate(companyId, workspaceId, invoiceDate ? new Date(invoiceDate) : new Date());
+  if (!period) {
+    // Fallback: get the current open financial period
+    const periods = await financialPeriodRepository.getPeriods(workspaceId, companyId, { isCurrent: true, all: true });
+    period = periods.periods && periods.periods[0];
+  }
+  const financialPeriodId = period ? period._id : null;
   const bill = await purchaseBillRepository.createPurchaseBill({
     workspaceId,
     companyId,
@@ -66,6 +75,7 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
     supplierId,
     purchaseBillNo: generatedBillNo,
     invoiceDate: invoiceDate || "",
+    financialPeriodId,
     rateBasis: rateBasis || "PTS",
     items,
     extraDiscountPct: extraDiscountPct || 0,
@@ -147,6 +157,13 @@ const updatePurchaseBill = async (billId, workspaceId, companyId, userId, payloa
     throw new ApiError(400, "Supplier is required");
   }
 
+  // Determine financial period based on (updated) invoice date
+  let period = await financialPeriodRepository.findPeriodByDate(companyId, workspaceId, invoiceDate ? new Date(invoiceDate) : new Date());
+  if (!period) {
+    const periods = await financialPeriodRepository.getPeriods(workspaceId, companyId, { isCurrent: true, all: true });
+    period = periods.periods && periods.periods[0];
+  }
+  const financialPeriodId = period ? period._id : null;
   const updatedBill = await purchaseBillRepository.updatePurchaseBill(
     billId,
     workspaceId,
@@ -156,6 +173,7 @@ const updatePurchaseBill = async (billId, workspaceId, companyId, userId, payloa
       supplierId,
       purchaseBillNo: purchaseBillNo || existingBill.purchaseBillNo,
       invoiceDate: invoiceDate || "",
+      financialPeriodId,
       rateBasis: rateBasis || "PTS",
       items,
       extraDiscountPct: extraDiscountPct || 0,

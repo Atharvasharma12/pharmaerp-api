@@ -10,6 +10,7 @@ import catalogModule from "../modules/catalog/catalog.module.js";
 import partiesModule from "../modules/parties/parties.module.js";
 import financeModule from "../modules/finance/finance.module.js";
 import marketplaceModule from "../modules/marketplace/marketplace.module.js";
+import salesModule from "../modules/sales/sales.module.js";
 
 const router = Router();
 
@@ -28,6 +29,8 @@ router.use(API_PREFIX + partiesModule.path, partiesModule.router);
 router.use(API_PREFIX + financeModule.path, financeModule.router);
 
 router.use(API_PREFIX + marketplaceModule.path, marketplaceModule.router);
+
+router.use(API_PREFIX + salesModule.path, salesModule.router);
 
 export default router;
 

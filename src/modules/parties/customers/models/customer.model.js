@@ -195,11 +195,6 @@ const customerSchema = new mongoose.Schema(
       default: null,
     },
 
-    salesHistory: {
-      type: Array,
-      default: [],
-    },
-
     status: {
       type: String,
       enum: Object.values(CUSTOMER_STATUS),
