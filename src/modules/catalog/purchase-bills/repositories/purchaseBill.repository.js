@@ -103,6 +103,48 @@ const softDeletePurchaseBill = async (billId) => {
   );
 };
 
+const getPurchaseHistory = async (productId, workspaceId, companyId, pagination = {}) => {
+  const { page = 1, limit = 5 } = pagination;
+  const skip = (Number(page) - 1) * Number(limit);
+
+  const query = {
+    workspaceId,
+    companyId,
+    isDeleted: false,
+    "items.productId": new mongoose.Types.ObjectId(productId)
+  };
+
+  const [bills, total] = await Promise.all([
+    PurchaseBill.find(query)
+      .sort("-createdAt")
+      .skip(skip)
+      .limit(Number(limit))
+      .lean(),
+    PurchaseBill.countDocuments(query),
+  ]);
+
+  // Extract just the item history for that product from the bills
+  const history = bills.map((bill) => {
+    const item = bill.items.find(i => String(i.productId) === String(productId));
+    if (!item) return null;
+    return {
+      billId: bill._id,
+      purchaseBillNo: bill.purchaseBillNo,
+      invoiceDate: bill.invoiceDate,
+      supplierId: bill.supplierId,
+      ...item
+    };
+  }).filter(Boolean);
+
+  return {
+    data: history,
+    total,
+    page: Number(page),
+    limit: Number(limit),
+    totalPages: Math.ceil(total / Number(limit)),
+  };
+};
+
 const purchaseBillRepository = {
   createPurchaseBill,
   updatePurchaseBill,
@@ -110,6 +152,7 @@ const purchaseBillRepository = {
   findPurchaseBillByIdAndWorkspace,
   getPurchaseBills,
   softDeletePurchaseBill,
+  getPurchaseHistory,
 };
 
 export default purchaseBillRepository;

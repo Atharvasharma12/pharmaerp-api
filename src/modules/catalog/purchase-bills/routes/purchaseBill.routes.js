@@ -11,6 +11,7 @@ import {
   getPurchaseBills,
   getPurchaseBillById,
   ingestPurchaseBill,
+  getPurchaseHistory,
 } from "../controllers/purchaseBill.controller.js";
 
 import {
@@ -50,6 +51,13 @@ router.get(
   "/:billId",
   validate(purchaseBillIdParamSchema, "params"),
   getPurchaseBillById
+);
+
+// Get purchase history by product ID
+// We can use a custom validation or just let the repository handle the ObjectId check
+router.get(
+  "/purchase-history/:productId",
+  getPurchaseHistory
 );
 
 // Ingest stock from purchase bill
