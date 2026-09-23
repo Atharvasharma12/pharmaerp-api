@@ -77,7 +77,11 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
   }
 
   if (filters.customerType) {
-    query.customerType = filters.customerType;
+    if (filters.customerType.includes(",")) {
+      query.customerType = { $in: filters.customerType.split(",").map((t) => t.trim()) };
+    } else {
+      query.customerType = filters.customerType;
+    }
   }
 
   if (filters.customerCode) {

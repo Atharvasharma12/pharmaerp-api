@@ -124,6 +124,99 @@ const workspaceProductSchema = new mongoose.Schema(
       default: null,
     },
 
+    hsn: {
+      type: Number,
+      default: null,
+    },
+
+    hsnTaxpercent: {
+      type: Number,
+      default: null,
+    },
+
+    // ----------------------------------------------------
+    // Pricing & Margins (Legacy Alignment)
+    // ----------------------------------------------------
+    mrp: { type: Number, min: 0, default: null },
+    ptr: { type: Number, min: 0, default: null },
+    pts: { type: Number, min: 0, default: null },
+
+    rateAPercentage: { type: Number, default: 0 },
+    rateBPercentage: { type: Number, default: 0 },
+    rateCPercentage: { type: Number, default: 0 },
+    rateDPercentage: { type: Number, default: 0 },
+    rateEPercentage: { type: Number, default: 0 },
+
+    rateA: { type: Number, default: 0 },
+    rateB: { type: Number, default: 0 },
+    rateC: { type: Number, default: 0 },
+    rateD: { type: Number, default: 0 },
+    rateE: { type: Number, default: 0 },
+
+    finalRateA: { type: Number, default: null },
+    finalRateB: { type: Number, default: null },
+    finalRateC: { type: Number, default: null },
+
+    stockistMarginPercent: { type: Number, default: null },
+    retailerMarginPercent: { type: Number, default: null },
+    rateBExtraPct: { type: Number, default: null },
+    rateAExtraPct: { type: Number, default: null },
+
+    rack: { type: String, trim: true, default: "" },
+
+    // ----------------------------------------------------
+    // Legacy Product Details & Marketing
+    // ----------------------------------------------------
+    marketer: { type: String, trim: true, maxlength: 300, default: "" },
+    packagingDetail: { type: String, trim: true, default: "" },
+    qty: { type: String, trim: true, default: "" },
+    manufacturerAddress: { type: String, default: "" },
+    countryOfOrigin: { type: String, trim: true, default: "" },
+    manufacturerDetails: { type: String, default: "" },
+    marketerDetails: { type: String, default: "" },
+    imageUrl: { type: String, trim: true, default: "" },
+
+    // ----------------------------------------------------
+    // Category Details (Medicine & OTC)
+    // ----------------------------------------------------
+    medicineDetails: {
+      composition: { type: String, trim: true },
+      medicineType: { type: String, trim: true, lowercase: true },
+      introduction: { type: String },
+      description: { type: String },
+      howToUse: { type: String },
+      safetyAdvice: { type: String },
+      missedDose: { type: String },
+      prescriptionRequired: { type: String, trim: true },
+      factBox: { type: String },
+      primaryUse: { type: String },
+      storage: { type: String },
+      commonSideEffect: { type: String },
+      interactions: {
+        alcohol: { type: String, trim: true },
+        pregnancy: { type: String, trim: true },
+        lactation: { type: String, trim: true },
+        driving: { type: String, trim: true },
+        kidney: { type: String, trim: true },
+        liver: { type: String, trim: true },
+        general: { type: String },
+      },
+      howItWorks: { type: String },
+      qa: { type: String, trim: true },
+    },
+
+    otcDetails: {
+      category: { type: String, trim: true },
+      marketingCompany: { type: String, trim: true },
+      type: { type: String, trim: true, lowercase: true },
+      productHighlights: { type: String },
+      information: { type: String },
+      keyIngredients: { type: String },
+      keyBenefits: { type: String },
+      directionsForUse: { type: String },
+      safetyInformation: { type: String },
+    },
+
     notes: {
       type: String,
       trim: true,

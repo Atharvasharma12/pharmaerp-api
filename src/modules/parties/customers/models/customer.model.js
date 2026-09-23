@@ -291,10 +291,6 @@ customerSchema.index({
 });
 
 customerSchema.index({
-  ledgerAccountId: 1,
-});
-
-customerSchema.index({
   createdBy: 1,
   isDeleted: 1,
 });

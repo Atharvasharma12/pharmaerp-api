@@ -287,10 +287,6 @@ supplierSchema.index({
 });
 
 supplierSchema.index({
-  ledgerAccountId: 1,
-});
-
-supplierSchema.index({
   createdBy: 1,
   isDeleted: 1,
 });

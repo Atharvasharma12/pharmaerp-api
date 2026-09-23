@@ -80,7 +80,6 @@ const platformStoreVerificationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "MarketplaceStore",
       required: [true, "Marketplace store is required"],
-      index: true,
     },
 
     drugLicense: {

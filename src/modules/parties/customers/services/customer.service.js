@@ -1,7 +1,12 @@
+import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import customerRepository from "../repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
+import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
+import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
+import Batch from "../../../catalog/products/models/batch.model.js";
+import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -218,11 +223,6 @@ const getCustomerOutstanding = async (customerId, companyId, workspaceId) => {
   };
 };
 
-const getCustomerSales = async (customerId, companyId, workspaceId) => {
-  await getCustomerById(customerId, companyId, workspaceId);
-  return [];
-};
-
 const getCustomerPayments = async (customerId, companyId, workspaceId) => {
   await getCustomerById(customerId, companyId, workspaceId);
   return [];
@@ -236,6 +236,5 @@ export default {
   deleteCustomer,
   getCustomerLedger,
   getCustomerOutstanding,
-  getCustomerSales,
   getCustomerPayments,
 };

@@ -90,17 +90,7 @@ export const getCustomerOutstanding = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Customer outstanding fetched successfully", outstanding));
 });
 
-export const getCustomerSales = asyncHandler(async (req, res) => {
-  const sales = await customerService.getCustomerSales(
-    req.params.customerId,
-    req.companyId,
-    req.workspaceId
-  );
 
-  return res
-    .status(200)
-    .json(new ApiResponse(200, "Customer sales fetched successfully", sales));
-});
 
 export const getCustomerPayments = asyncHandler(async (req, res) => {
   const payments = await customerService.getCustomerPayments(

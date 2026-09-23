@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 import WorkspaceProduct from "../models/workspaceProduct.model.js";
+import Batch from "../models/batch.model.js";
 
 import { WORKSPACE_PRODUCT_STATUS } from "../constants/workspaceProduct.constant.js";
 
@@ -85,7 +86,31 @@ const getWorkspaceProducts = async (
   }
 
   if (filters.search) {
-    query.name = { $regex: new RegExp(filters.search.trim(), "i") };
+    const rawSearch = filters.search.trim();
+    const cleanSearch = rawSearch.replace(/[^a-zA-Z0-9]/g, "");
+
+    if (cleanSearch) {
+      // Build regex pattern that allows optional non-alphanumeric characters between each character
+      // e.g. "VB7" -> "V[^a-zA-Z0-9]*B[^a-zA-Z0-9]*7" to match "VB-7", "VB 7", "VB7"
+      const flexiblePattern = cleanSearch.split("").join("[^a-zA-Z0-9]*");
+      query.$or = [
+        { name: { $regex: new RegExp(rawSearch, "i") } },
+        { name: { $regex: new RegExp(flexiblePattern, "i") } },
+      ];
+    } else {
+      query.name = { $regex: new RegExp(rawSearch, "i") };
+    }
+  }
+
+  if (filters.branchId) {
+    if (mongoose.Types.ObjectId.isValid(filters.branchId)) {
+      const activeProducts = await Batch.distinct("product", {
+        workspaceId,
+        branch_id: filters.branchId,
+        isDeleted: false,
+      });
+      query._id = { $in: activeProducts };
+    }
   }
 
   const page = Math.max(1, parseInt(options.page) || 1);

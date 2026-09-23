@@ -78,7 +78,6 @@ const marketplaceStoreSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Branch",
       required: [true, "Branch is required"],
-      index: true,
     },
 
     storeCode: {

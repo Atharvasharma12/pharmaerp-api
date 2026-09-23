@@ -2,6 +2,9 @@ import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 
 import workspaceProductService from "../services/workspaceProduct.service.js";
+import Batch from "../models/batch.model.js";
+import WorkspaceProduct from "../models/workspaceProduct.model.js";
+import mongoose from "mongoose";
 
 /**
  * WorkspaceProduct Controller
@@ -53,10 +56,15 @@ export const createWorkspaceProduct = asyncHandler(async (req, res) => {
 
 export const getWorkspaceProducts = asyncHandler(async (req, res) => {
   const { status, productType, search, page, limit } = req.query;
+  const branchId = req.headers["x-branch-id"];
+  
+  const referer = req.headers.referer || "";
+  const isSalesRoute = referer.includes("/sales");
+  const branchFilterId = isSalesRoute ? branchId : null;
 
   const result = await workspaceProductService.getWorkspaceProducts(
     req.workspaceId,
-    { status, productType, search },
+    { status, productType, search, branchId: branchFilterId },
     { page, limit },
   );
 
@@ -118,4 +126,129 @@ export const deleteWorkspaceProduct = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, "Workspace product deleted successfully"));
+});
+
+export const detectInventoryProducts = asyncHandler(async (req, res) => {
+  if (!req.file || !req.file.buffer) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, "Please upload a file (.xls, .xlsx, .csv)"));
+  }
+
+  const result = await workspaceProductService.detectInventoryProducts(
+    req.workspaceId,
+    req.file.buffer
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Inventory detected successfully", result));
+});
+
+export const importWorkspaceProducts = asyncHandler(async (req, res) => {
+  const { items, branchId, tempImportId, brandMappings } = req.body || {};
+  const file = req.file;
+
+  if (!file && !tempImportId && (!Array.isArray(items) || items.length === 0)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, "Please upload a file, provide tempImportId, or pass items array"));
+  }
+
+  const result = await workspaceProductService.importWorkspaceProducts(
+    req.workspaceId,
+    items,
+    req.user,
+    { branchId, file, tempImportId, brandMappings },
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "Products imported successfully", result),
+    );
+});
+
+export const importWorkspaceProductsGst = asyncHandler(async (req, res) => {
+  const file = req.file;
+  const { items } = req.body || {};
+
+  if (!file && (!Array.isArray(items) || items.length === 0)) {
+    return res
+      .status(400)
+      .json(new ApiResponse(400, "Please upload a file or pass items array"));
+  }
+
+  const result = await workspaceProductService.importWorkspaceProductsGst(
+    req.workspaceId,
+    items,
+    req.user,
+    { file },
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "GST & HSN updated successfully", result),
+    );
+});
+
+export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) => {
+  let { page = 1, limit = 10, filters = {}, search = "" } = req.body;
+  page = Number(page);
+  limit = Number(limit);
+
+  const { product, facility, expiryDate, expired, lowStock, inStockOnly } = filters;
+  const matchStage = { workspaceId: req.workspaceId };
+
+  if (inStockOnly) {
+    matchStage.batchQty = { $gt: 0 };
+  }
+
+  if (product) {
+    if (!mongoose.Types.ObjectId.isValid(product)) {
+      return res.status(400).json(new ApiResponse(400, "Invalid product ID"));
+    }
+    matchStage.product = new mongoose.Types.ObjectId(product);
+  }
+  if (facility && facility !== "all_facility") {
+    if (!mongoose.Types.ObjectId.isValid(facility)) {
+      return res.status(400).json(new ApiResponse(400, "Invalid facility ID"));
+    }
+    matchStage.branch_id = new mongoose.Types.ObjectId(facility);
+  }
+
+  if (search && !product) {
+    const matchedProducts = await WorkspaceProduct.find({
+      workspaceId: req.workspaceId,
+      name: { $regex: search, $options: "i" }
+    }).select("_id");
+    matchStage.product = { $in: matchedProducts.map(p => p._id) };
+  }
+
+  const total = await Batch.countDocuments(matchStage);
+  const batches = await Batch.find(matchStage)
+    .populate("product")
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .lean();
+
+  const formattedBatches = batches.map((b) => {
+    let exp = b.expiryDate || "";
+    if (exp.toLowerCase() === "active" || exp.toLowerCase() === "inactive") {
+      exp = "";
+    }
+    return {
+      ...b,
+      name: b.product?.name || "N/A",
+      manufacturer: b.product?.manufacturer || b.product?.marketer || "N/A",
+      pack: b.product?.pack || "N/A",
+      qty: b.batchQty,
+      expiryDate: exp,
+    };
+  });
+
+  return res.status(200).json(
+    new ApiResponse(200, "Batches fetched successfully", { batches: formattedBatches, total })
+  );
 });

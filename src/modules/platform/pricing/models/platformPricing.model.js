@@ -8,7 +8,6 @@ const platformPricingSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "GlobalProduct",
       required: [true, "Global product is required"],
-      index: true,
     },
 
     // Maximum Retail Price

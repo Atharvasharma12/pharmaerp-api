@@ -86,10 +86,6 @@ ledgerSchema.index({
   createdAt: 1,
 });
 
-// Index to easily delete/lookup entries by voucher
-ledgerSchema.index({
-  voucherId: 1,
-});
 
 const Ledger =
   mongoose.models.Ledger || mongoose.model("Ledger", ledgerSchema);

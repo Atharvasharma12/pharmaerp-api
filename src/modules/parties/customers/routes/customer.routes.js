@@ -13,7 +13,6 @@ import {
   deleteCustomer,
   getCustomerLedger,
   getCustomerOutstanding,
-  getCustomerSales,
   getCustomerPayments,
 } from "../controllers/customer.controller.js";
 
@@ -68,11 +67,6 @@ router.get(
   getCustomerOutstanding,
 );
 
-router.get(
-  "/:customerId/sales",
-  validate(customerIdParamSchema, "params"),
-  getCustomerSales,
-);
 
 router.get(
   "/:customerId/payments",
