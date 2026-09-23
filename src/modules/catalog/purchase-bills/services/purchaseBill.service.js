@@ -4,6 +4,8 @@ import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLed
 import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
 import Batch from "../../products/models/batch.model.js";
 import ProductFacility from "../../products/models/productFacility.model.js";
+import Supplier from "../../../parties/suppliers/models/supplier.model.js";
+import Company from "../../../organization/companies/models/company.model.js";
 
 const formatExpiry = (val) => {
   if (!val) return "";
@@ -95,6 +97,12 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
 
   try {
     const halfGst = (totalGst || 0) / 2;
+    const company = await Company.findOne({ _id: companyId, workspaceId });
+    const supplier = await Supplier.findOne({ _id: supplierId, workspaceId });
+    const companyGstin = company?.gstin || "";
+    const supplierGstin = supplier?.gstNumber || "";
+    const isIgst = companyGstin && supplierGstin && companyGstin.substring(0, 2) !== supplierGstin.substring(0, 2);
+
     await gstLedgerRepository.createGstLedgerEntry({
       workspaceId,
       companyId,
@@ -104,9 +112,9 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
       voucherDate: invoiceDate ? new Date(invoiceDate) : new Date(),
       gstType: "GSTR-2",
       taxableAmount: taxableSubtotal || taxableAfterExtraDisc || 0,
-      cgst: halfGst,
-      sgst: halfGst,
-      igst: 0,
+      cgst: isIgst ? 0 : halfGst,
+      sgst: isIgst ? 0 : halfGst,
+      igst: isIgst ? (totalGst || 0) : 0,
       totalAmount: grandTotal || 0,
       narration: `Purchase Bill #${generatedBillNo}`,
     });

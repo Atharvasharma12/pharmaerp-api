@@ -6,6 +6,7 @@ import financialPeriodRepository from "../../../finance/financial-periods/reposi
 import Batch from "../../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
 import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
+import Company from "../../../organization/companies/models/company.model.js";
 
 const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null) => {
   const customer = await customerRepository.findCustomerById(customerId, companyId, workspaceId);
@@ -111,6 +112,11 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
         : (newSale.subtotal || 0) - (newSale.discount || 0)
     );
 
+    const company = await Company.findOne({ _id: newSale.companyId, workspaceId: newSale.workspaceId });
+    const companyGstin = company?.gstin || "";
+    const customerGstin = customer?.gstNumber || "";
+    const isIgst = companyGstin && customerGstin && companyGstin.substring(0, 2) !== customerGstin.substring(0, 2);
+
     await gstLedgerRepository.createGstLedgerEntry({
       workspaceId: newSale.workspaceId,
       companyId: newSale.companyId,
@@ -120,9 +126,9 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       voucherDate: newSale.date ? new Date(newSale.date) : new Date(),
       gstType: "GSTR-1",
       taxableAmount: taxableAmt,
-      cgst: halfGst,
-      sgst: halfGst,
-      igst: 0,
+      cgst: isIgst ? 0 : halfGst,
+      sgst: isIgst ? 0 : halfGst,
+      igst: isIgst ? totalGst : 0,
       totalAmount: Number(newSale.grandTotal || 0),
       narration: `Sale Bill ${newSale.invoiceNo} (${newSale.billingMode}) - Customer: ${customer.name || "Customer"}`,
     });
