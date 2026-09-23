@@ -67,13 +67,14 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       if (qtyToDeduct <= 0) continue;
 
       const productId = item.productId || item.workspaceProductId || item.id;
-      const batchId = item.batchId || (item.batch && item.batch._id) || item.batch;
+      const rawBatchId = item.batchId || (item.batch && item.batch._id) || item.batch;
 
-      if (batchId) {
+      if (rawBatchId) {
         try {
-          const batchDoc = await Batch.findById(batchId);
+          const batchDoc = await Batch.findById(rawBatchId);
           if (batchDoc) {
             batchDoc.batchQty = Math.max(0, (batchDoc.batchQty || 0) - qtyToDeduct);
+            console.log(batchDoc, qtyToDeduct)
             await batchDoc.save();
           }
         } catch (err) {

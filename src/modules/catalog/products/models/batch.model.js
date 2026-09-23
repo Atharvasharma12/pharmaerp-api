@@ -89,7 +89,7 @@ batchSchema.virtual("batchId").get(function () {
 });
 
 batchSchema.index(
-  { workspaceId: 1, product: 1, batchNo: 1, expiryDate: 1 },
+  { branch_id: 1, product: 1, batchNo: 1, expiryDate: 1 },
   { unique: true }
 );
 
