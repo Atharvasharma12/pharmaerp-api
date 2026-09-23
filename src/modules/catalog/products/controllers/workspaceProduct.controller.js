@@ -56,10 +56,11 @@ export const createWorkspaceProduct = asyncHandler(async (req, res) => {
 
 export const getWorkspaceProducts = asyncHandler(async (req, res) => {
   const { status, productType, search, page, limit } = req.query;
+  const branchId = req.headers["x-branch-id"];
 
   const result = await workspaceProductService.getWorkspaceProducts(
     req.workspaceId,
-    { status, productType, search },
+    { status, productType, search, branchId },
     { page, limit },
   );
 

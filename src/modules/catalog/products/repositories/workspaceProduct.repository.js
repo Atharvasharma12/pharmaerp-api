@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 
 import WorkspaceProduct from "../models/workspaceProduct.model.js";
+import Batch from "../models/batch.model.js";
 
 import { WORKSPACE_PRODUCT_STATUS } from "../constants/workspaceProduct.constant.js";
 
@@ -98,6 +99,17 @@ const getWorkspaceProducts = async (
       ];
     } else {
       query.name = { $regex: new RegExp(rawSearch, "i") };
+    }
+  }
+
+  if (filters.branchId) {
+    if (mongoose.Types.ObjectId.isValid(filters.branchId)) {
+      const activeProducts = await Batch.distinct("product", {
+        workspaceId,
+        branch_id: filters.branchId,
+        isDeleted: false,
+      });
+      query._id = { $in: activeProducts };
     }
   }
 
