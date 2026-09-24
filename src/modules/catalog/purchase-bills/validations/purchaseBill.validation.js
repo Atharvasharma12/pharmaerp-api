@@ -23,6 +23,13 @@ const itemSchema = Joi.object({
   gst: Joi.number().min(0).max(100).default(12),
   rate: Joi.number().min(0).default(0),
   amount: Joi.number().min(0).default(0),
+  rateA: Joi.number().min(0).default(0),
+  rateB: Joi.number().min(0).default(0),
+  rateC: Joi.number().min(0).default(0),
+  finalRateA: Joi.number().min(0).default(0),
+  finalRateB: Joi.number().min(0).default(0),
+  finalRateC: Joi.number().min(0).default(0),
+  saleScheme: Joi.number().min(0).default(0),
 });
 
 const gstSlabSchema = Joi.object({
