@@ -22,6 +22,13 @@ const purchaseBillItemSchema = new mongoose.Schema(
     gst: { type: Number, default: 12 },
     rate: { type: Number, default: 0 },
     amount: { type: Number, default: 0 },
+    rateA: { type: Number, default: 0 },
+    rateB: { type: Number, default: 0 },
+    rateC: { type: Number, default: 0 },
+    finalRateA: { type: Number, default: 0 },
+    finalRateB: { type: Number, default: 0 },
+    finalRateC: { type: Number, default: 0 },
+    saleScheme: { type: Number, default: 0 },
   },
   { _id: true }
 );

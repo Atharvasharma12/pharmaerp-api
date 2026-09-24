@@ -263,7 +263,13 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId) => {
       // Update rates from the latest purchase bill
       batch.mrp = item.mrp || batch.mrp;
       batch.rate = item.rate || batch.rate;
-      batch.schemeDiscountPercent = item.schPct || batch.schemeDiscountPercent;
+      batch.rateA = item.rateA || batch.rateA;
+      batch.rateB = item.rateB || batch.rateB;
+      batch.rateC = item.rateC || batch.rateC;
+      batch.finalRateA = item.finalRateA || batch.finalRateA;
+      batch.finalRateB = item.finalRateB || batch.finalRateB;
+      batch.finalRateC = item.finalRateC || batch.finalRateC;
+      batch.schemeDiscountPercent = item.saleScheme || batch.schemeDiscountPercent;
       await batch.save();
     } else {
       batch = await Batch.create({
@@ -275,7 +281,13 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId) => {
         batchQty: totalIngestQty,
         mrp: item.mrp || 0,
         rate: item.rate || 0,
-        schemeDiscountPercent: item.schPct || 0,
+        rateA: item.rateA || 0,
+        rateB: item.rateB || 0,
+        rateC: item.rateC || 0,
+        finalRateA: item.finalRateA || 0,
+        finalRateB: item.finalRateB || 0,
+        finalRateC: item.finalRateC || 0,
+        schemeDiscountPercent: item.saleScheme || 0,
         purchaseBillId: bill._id,
       });
     }
