@@ -77,36 +77,6 @@ const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, opt
       });
     }
 
-    // Auto-create GST Ledger Entry for GSTR-1 or GSTR-2
-    const isOutwardSale =
-      voucher.voucherType === VOUCHER_TYPE.SALE ||
-      voucher.voucherType === VOUCHER_TYPE.SALE_RETURN;
-    const isInwardPurchase =
-      voucher.voucherType === VOUCHER_TYPE.PURCHASE ||
-      voucher.voucherType === VOUCHER_TYPE.PURCHASE_RETURN;
-
-    if (isOutwardSale || isInwardPurchase) {
-      const gstType = isOutwardSale ? "GSTR-1" : "GSTR-2";
-      const totalAmt = Math.max(voucher.totalDebit || 0, voucher.totalCredit || 0);
-
-      await gstLedgerRepository.createGstLedgerEntry(
-        {
-          workspaceId,
-          companyId,
-          voucherId: voucher._id,
-          voucherNumber: voucher.voucherNumber,
-          voucherDate: postingDate,
-          gstType,
-          taxableAmount: totalAmt,
-          igst: 0,
-          cgst: 0,
-          sgst: 0,
-          totalAmount: totalAmt,
-          narration: voucher.narration || `${gstType} entry generated from voucher`,
-        },
-        { session }
-      );
-    }
 
     voucher.status = VOUCHER_STATUS.POSTED;
     voucher.postedAt = new Date();

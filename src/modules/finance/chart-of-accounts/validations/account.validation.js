@@ -55,6 +55,7 @@ export const getAccountsQuerySchema = Joi.object({
   accountCategory: Joi.string()
     .valid(...Object.values(ACCOUNT_CATEGORY))
     .optional(),
+  excludeCategories: Joi.string().optional(),
   status: Joi.string()
     .valid(...Object.values(ACCOUNT_STATUS))
     .optional(),
