@@ -35,12 +35,15 @@ const getInvoicesByCustomerId = async (customerId, companyId, workspaceId, filte
     query.branchId = new mongoose.Types.ObjectId(filters.branchId);
   }
 
-  const [invoices, total] = await Promise.all([
+  const [invoices, total, aggregate] = await Promise.all([
     SalesInvoice.find(query).sort({ date: -1 }).skip(skip).limit(limit).lean(),
     SalesInvoice.countDocuments(query),
+    SalesInvoice.aggregate([{ $match: query }, { $group: { _id: null, totalAmount: { $sum: "$grandTotal" } } }]),
   ]);
 
-  return { sales: invoices, total, page, limit };
+  const totalSalesAmount = aggregate[0]?.totalAmount || 0;
+
+  return { sales: invoices, total, page, limit, totalSalesAmount };
 };
 
 const getAllInvoices = async (companyId, workspaceId, filters = {}, pagination = {}) => {

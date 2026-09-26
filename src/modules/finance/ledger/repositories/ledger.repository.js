@@ -59,13 +59,13 @@ const getLedgerEntries = async (
   }
 
   const query = {
-    workspaceId,
-    companyId,
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
   };
 
   if (accountId) {
     if (mongoose.Types.ObjectId.isValid(accountId)) {
-      query.accountId = accountId;
+      query.accountId = new mongoose.Types.ObjectId(accountId);
     } else {
       return { entries: [], total: 0, page: 1, limit: 20 };
     }
@@ -90,14 +90,21 @@ const getLedgerEntries = async (
       .populate("voucherId", "voucherType referenceNumber narration status")
       .sort(sort)
       .session(options.session || null);
-    return { entries, total: entries.length };
+    const aggregate = await Ledger.aggregate([
+      { $match: query },
+      { $group: { _id: null, totalDebit: { $sum: "$debit" }, totalCredit: { $sum: "$credit" } } }
+    ]);
+    const totalDebit = aggregate[0]?.totalDebit || 0;
+    const totalCredit = aggregate[0]?.totalCredit || 0;
+    
+    return { entries, total: entries.length, totalDebit, totalCredit };
   }
 
   const page = Math.max(1, parseInt(options.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 20));
   const skip = (page - 1) * limit;
 
-  const [entries, total] = await Promise.all([
+  const [entries, total, aggregate] = await Promise.all([
     Ledger.find(query)
       .populate("accountId", "accountName accountCode accountNature accountCategory")
       .populate("voucherId", "voucherType referenceNumber narration status")
@@ -106,9 +113,16 @@ const getLedgerEntries = async (
       .limit(limit)
       .session(options.session || null),
     Ledger.countDocuments(query).session(options.session || null),
+    Ledger.aggregate([
+      { $match: query },
+      { $group: { _id: null, totalDebit: { $sum: "$debit" }, totalCredit: { $sum: "$credit" } } }
+    ])
   ]);
 
-  return { entries, total, page, limit };
+  const totalDebit = aggregate[0]?.totalDebit || 0;
+  const totalCredit = aggregate[0]?.totalCredit || 0;
+
+  return { entries, total, page, limit, totalDebit, totalCredit };
 };
 
 export default {

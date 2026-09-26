@@ -7,6 +7,10 @@ import financialPeriodRepository from "../../../finance/financial-periods/reposi
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
 import Batch from "../../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
+import accountRepository from "../../../finance/chart-of-accounts/repositories/account.repository.js";
+import accountGroupRepository from "../../../finance/chart-of-accounts/repositories/accountGroup.repository.js";
+import openingBalanceService from "../../../finance/opening-balances/services/openingBalance.service.js";
+import ledgerService from "../../../finance/ledger/services/ledger.service.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -47,31 +51,118 @@ const createCustomer = async (workspaceId, companyId, userId, payload) => {
     }
   }
 
-  const customer = await customerRepository.createCustomer({
-    workspaceId,
-    companyId,
-    branchId: branchId || null,
-    customerCode,
-    customerType,
-    name,
-    mobile,
-    alternateMobile,
-    email,
-    gstNumber,
-    panNumber,
-    drugLicenseNumber,
-    billingAddress,
-    shippingAddress,
-    creditLimit,
-    creditDays,
-    openingBalance,
-    openingBalanceType,
-    notes,
-    status,
-    createdBy: userId,
-  });
+  const session = await mongoose.startSession();
+  session.startTransaction();
 
-  return customer.toSafeObject();
+  try {
+    // 1. Get or create CURRENT_ASSETS account group
+    let currentAssetsGroup = await accountGroupRepository.findGroupByCode(companyId, "CURRENT_ASSETS", { session });
+    
+    if (!currentAssetsGroup) {
+      currentAssetsGroup = await accountGroupRepository.createGroup({
+        workspaceId,
+        companyId,
+        groupCode: "CURRENT_ASSETS",
+        groupName: "Current Assets",
+        nature: "ASSET",
+        parentGroupId: null,
+        isSystemGroup: true,
+        createdBy: userId,
+      }, { session });
+    }
+
+    // 2. Get or create SUNDRY_DEBTORS account group
+    let sundryDebtorsGroup = await accountGroupRepository.findGroupByCode(companyId, "SUNDRY_DEBTORS", { session });
+    
+    if (!sundryDebtorsGroup) {
+      sundryDebtorsGroup = await accountGroupRepository.createGroup({
+        workspaceId,
+        companyId,
+        groupCode: "SUNDRY_DEBTORS",
+        groupName: "Sundry Debtors",
+        nature: "ASSET",
+        parentGroupId: currentAssetsGroup._id,
+        isSystemGroup: true,
+        createdBy: userId,
+      }, { session });
+    }
+
+    // 3. Create the Ledger Account for the customer under SUNDRY_DEBTORS
+    const accCode = customerCode ? `CUST-${customerCode}` : `CUST-${Date.now()}`;
+    const ledgerAccount = await accountRepository.createAccount({
+      workspaceId,
+      companyId,
+      accountCode: accCode,
+      accountName: `${name} - Customer`,
+      accountGroupId: sundryDebtorsGroup._id,
+      accountNature: "ASSET",
+      accountCategory: "CUSTOMER",
+      openingBalance: openingBalance || 0,
+      openingBalanceType: openingBalanceType || "dr",
+      status: "active",
+      isSystemAccount: false,
+      createdBy: userId,
+    }, { session });
+
+    // 3. Create the Customer with the linked ledger account
+    const customer = await customerRepository.createCustomer({
+      workspaceId,
+      companyId,
+      branchId: branchId || null,
+      customerCode,
+      customerType,
+      name,
+      mobile,
+      alternateMobile,
+      email,
+      gstNumber,
+      panNumber,
+      drugLicenseNumber,
+      billingAddress,
+      shippingAddress,
+      creditLimit,
+      creditDays,
+      openingBalance,
+      openingBalanceType,
+      notes,
+      status,
+      ledgerAccountId: ledgerAccount._id,
+      createdBy: userId,
+    }, { session });
+
+    // 4. Post Opening Balance Journal if opening balance is provided
+    console.log("--- CUSTOMER CREATION LOG ---");
+    console.log(`Customer Ledger Account created with ID: ${ledgerAccount._id}`);
+    console.log(`Opening Balance value: ${openingBalance}`);
+    if (openingBalance && openingBalance > 0) {
+      console.log("Posting Opening Balance Journal...");
+      try {
+        await openingBalanceService.postOpeningBalanceJournal(
+          workspaceId,
+          companyId,
+          userId,
+          ledgerAccount._id,
+          openingBalance,
+          openingBalanceType || "dr",
+          { session }
+        );
+        console.log("Successfully posted Opening Balance Journal");
+      } catch (err) {
+        console.error("Failed to post opening balance:", err);
+      }
+    } else {
+      console.log("No opening balance provided or it is <= 0. Skipping journal.");
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return customer.toSafeObject();
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
 };
 
 const getCustomers = async (workspaceId, companyId, query = {}) => {
@@ -194,24 +285,24 @@ const deleteCustomer = async (customerId, companyId, workspaceId, userId) => {
 |--------------------------------------------------------------------------
 */
 
-const getCustomerLedger = async (customerId, companyId, workspaceId) => {
+const getCustomerLedger = async (customerId, companyId, workspaceId, query = {}) => {
   const customer = await getCustomerById(customerId, companyId, workspaceId);
 
-  const ledger = [];
-  if (customer.openingBalance > 0) {
-    ledger.push({
-      date: customer.createdAt,
-      description: "Opening Balance",
-      voucherType: "OPENING_BALANCE",
-      debit: customer.openingBalanceType === "dr" ? customer.openingBalance : 0,
-      credit:
-        customer.openingBalanceType === "cr" ? customer.openingBalance : 0,
-      balance: customer.openingBalance,
-      balanceType: customer.openingBalanceType,
-    });
+  if (!customer.ledgerAccountId) {
+    return [];
   }
 
-  return ledger;
+  const ledgerResult = await ledgerService.getLedger(
+    workspaceId,
+    companyId,
+    { 
+      accountId: customer.ledgerAccountId, 
+      sort: query.sort || { voucherDate: -1, createdAt: -1 },
+      ...query 
+    }
+  );
+
+  return ledgerResult;
 };
 
 const getCustomerOutstanding = async (customerId, companyId, workspaceId) => {

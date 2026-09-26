@@ -14,6 +14,7 @@ import {
   getCustomerLedger,
   getCustomerOutstanding,
   getCustomerPayments,
+  getCustomerSales,
 } from "../controllers/customer.controller.js";
 
 import {
@@ -72,6 +73,12 @@ router.get(
   "/:customerId/payments",
   validate(customerIdParamSchema, "params"),
   getCustomerPayments,
+);
+
+router.get(
+  "/:customerId/sales",
+  validate(customerIdParamSchema, "params"),
+  getCustomerSales,
 );
 
 export default router;
