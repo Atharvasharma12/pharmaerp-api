@@ -103,6 +103,11 @@ const getAccounts = async (
     query.accountCategory = filters.accountCategory;
   }
 
+  if (filters.excludeCategories) {
+    const excludeArr = filters.excludeCategories.split(",").map(c => c.trim());
+    query.accountCategory = { $nin: excludeArr };
+  }
+
   if (filters.status) {
     query.status = filters.status;
   }

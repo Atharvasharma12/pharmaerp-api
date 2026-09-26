@@ -202,24 +202,27 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
   try {
     const isCashPaid = (String(newSale.paymentMethod).toLowerCase() === "cash" || newSale.cashTendered > 0) && String(newSale.status).toLowerCase() === "paid" && newSale.grandTotal > 0;
     const isUpiPaid = String(newSale.paymentMethod).toLowerCase() === "upi" && String(newSale.status).toLowerCase() === "paid" && newSale.grandTotal > 0;
-    
 
-    
+
+
     // Find Sales Account
     const salesAccountsResult = await accountRepository.getAccounts(
       newSale.workspaceId,
       newSale.companyId,
-      { accountCategory: "SALES" },
-      { limit: 1 }
+      { accountCategory: "SALES" }
     );
-    
 
-
+    let salesAccount = null;
     if (salesAccountsResult.accounts && salesAccountsResult.accounts.length > 0) {
-      const salesAccount = salesAccountsResult.accounts[0];
-      
+      const accounts = salesAccountsResult.accounts;
+      salesAccount = accounts.find(a => a.accountCode === "SALES-REVENUE") 
+                  || accounts.find(a => String(a.accountName).toLowerCase().includes("revenue")) 
+                  || accounts[0];
+    }
+
+    if (salesAccount) {
+      // 1. If customer has a ledger account, first create the SALE JV (Customer -> Sales)
       if (customer.ledgerAccountId) {
-        // --- CUSTOMER HAS LEDGER ACCOUNT (2 JVs: Sale & Receipt) ---
         const saleJvPayload = {
           voucherDate: newSale.date,
           voucherType: "SALE",
@@ -242,137 +245,115 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           ]
         };
         
-        console.log("--- ATTEMPTING TO CREATE SALES JV ---");
-        console.log(JSON.stringify(saleJvPayload, null, 2));
-
         try {
-          const jvResult = await journalVoucherService.createJournalVoucher(
+          await journalVoucherService.createJournalVoucher(
             newSale.workspaceId,
             newSale.companyId,
             user?._id,
             saleJvPayload
           );
-          console.log(`--- SALES JV CREATED SUCCESSFULLY: ${jvResult._id} ---`);
         } catch (jvErr) {
           console.error("--- FAILED TO CREATE SALES JV ---", jvErr);
         }
+      }
 
-        if (isCashPaid) {
+      // 2. Determine counterparty for the receipt (Customer if they have an account, otherwise Sales directly)
+      const receiptCounterpartyId = customer.ledgerAccountId || salesAccount._id;
+      const receiptNarrationSuffix = customer.ledgerAccountId ? "from Customer" : "Sale";
+
+      if (isCashPaid) {
+        // --- CASH RECEIPT ---
+        const treasuryCashAccount = await CashAccount.findOne({ 
+          companyId: newSale.companyId, 
+          workspaceId: newSale.workspaceId,
+          isDeleted: false
+        });
+
+        let cashLedgerAccountId = null;
+        if (treasuryCashAccount) {
+          cashLedgerAccountId = treasuryCashAccount.ledgerAccountId;
+        } else {
           const cashAccountsResult = await accountRepository.getAccounts(
             newSale.workspaceId,
             newSale.companyId,
-            { accountCategory: "CASH" },
-            { limit: 1 }
+            { accountCategory: "CASH" }
           );
-          
           if (cashAccountsResult.accounts && cashAccountsResult.accounts.length > 0) {
-            const cashLedgerAccount = cashAccountsResult.accounts[0];
-            
-            // Find the Treasury Cash Account linked to this ledger account
-            const treasuryCashAccount = await CashAccount.findOne({ 
-              ledgerAccountId: cashLedgerAccount._id, 
-              companyId: newSale.companyId, 
-              workspaceId: newSale.workspaceId,
-              isDeleted: false 
-            });
-
-            if (treasuryCashAccount) {
-              await cashTransactionService.createCashTransaction(
-                newSale.workspaceId,
-                newSale.companyId,
-                user?._id,
-                {
-                  transactionDate: newSale.date || new Date(),
-                  cashAccountId: treasuryCashAccount._id,
-                  transactionType: "CASH_IN",
-                  direction: "CREDIT",
-                  amount: newSale.grandTotal,
-                  referenceNumber: newSale.invoiceNo,
-                  narration: `Cash Receipt for Invoice ${newSale.invoiceNo}`,
-                  counterpartyAccountId: customer.ledgerAccountId,
-                  denominations: [{ denomination: 1, quantity: newSale.grandTotal }],
-                }
-              );
-            }
-          }
-        } else if (isUpiPaid) {
-          // If paid via UPI, auto-generate Bank Transaction
-          const primaryBankAccount = await BankAccount.findOne({
-            companyId: newSale.companyId,
-            workspaceId: newSale.workspaceId,
-            isDeleted: false,
-            isActive: true,
-            isPrimary: true
-          });
-
-          // If no primary bank account, try finding any active bank account
-          const bankAccount = primaryBankAccount || await BankAccount.findOne({
-            companyId: newSale.companyId,
-            workspaceId: newSale.workspaceId,
-            isDeleted: false,
-            isActive: true
-          });
-
-          if (bankAccount) {
-            await bankTransactionService.createBankTransaction(
-              newSale.workspaceId,
-              newSale.companyId,
-              user?._id,
-              {
-                transactionDate: newSale.date || new Date(),
-                bankAccountId: bankAccount._id,
-                transactionType: "UPI",
-                direction: "CREDIT", // Money coming in
-                amount: newSale.grandTotal,
-                referenceNumber: newSale.invoiceNo,
-                narration: `UPI Receipt for Invoice ${newSale.invoiceNo}`,
-                counterpartyAccountId: customer.ledgerAccountId
-              }
-            );
+            const accounts = cashAccountsResult.accounts;
+            const bestCash = accounts.find(a => a.accountCode === "PETTY-CASH") 
+                          || accounts.find(a => String(a.accountName).toLowerCase().includes("cash"))
+                          || accounts[0];
+            cashLedgerAccountId = bestCash._id;
           }
         }
-      } else if (isCashPaid) {
-        // --- CUSTOMER HAS NO LEDGER ACCOUNT, BUT IT IS A CASH SALE (1 JV via Cash Transaction: Direct Cash -> Sales) ---
-        const cashAccountsResult = await accountRepository.getAccounts(
-          newSale.workspaceId,
-          newSale.companyId,
-          { accountCategory: "CASH" },
-          { limit: 1 }
-        );
-        
-        if (cashAccountsResult.accounts && cashAccountsResult.accounts.length > 0) {
-          const cashLedgerAccount = cashAccountsResult.accounts[0];
-          
-          // Find the Treasury Cash Account linked to this ledger account
-          const treasuryCashAccount = await CashAccount.findOne({ 
-            ledgerAccountId: cashLedgerAccount._id, 
-            companyId: newSale.companyId, 
-            workspaceId: newSale.workspaceId,
-            isDeleted: false 
-          });
 
+        if (cashLedgerAccountId) {
+          let txSuccess = false;
           if (treasuryCashAccount) {
-            await cashTransactionService.createCashTransaction(
-              newSale.workspaceId,
-              newSale.companyId,
-              user?._id,
-              {
+            try {
+              const cashTxPayload = {
                 transactionDate: newSale.date || new Date(),
                 cashAccountId: treasuryCashAccount._id,
                 transactionType: "CASH_IN",
                 direction: "CREDIT",
                 amount: newSale.grandTotal,
                 referenceNumber: newSale.invoiceNo,
-                narration: `Direct Cash Sale for Invoice ${newSale.invoiceNo}`,
-                counterpartyAccountId: salesAccount._id,
+                narration: `Cash ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
+                counterpartyAccountId: receiptCounterpartyId,
                 denominations: [{ denomination: 1, quantity: newSale.grandTotal }],
-              }
+              };
+              
+              console.log("--- ATTEMPTING TO CREATE CASH TRANSACTION (TREASURY) ---");
+              console.log(JSON.stringify(cashTxPayload, null, 2));
+              
+              await cashTransactionService.createCashTransaction(
+                newSale.workspaceId,
+                newSale.companyId,
+                user?._id,
+                cashTxPayload
+              );
+              txSuccess = true;
+            } catch (ctErr) {
+              console.error("Failed to create cash transaction in treasury, falling back to JV:", ctErr);
+            }
+          }
+          
+          if (!txSuccess) {
+            const fallbackJvPayload = {
+              voucherDate: newSale.date || new Date(),
+              voucherType: "RECEIPT",
+              referenceNumber: newSale.invoiceNo,
+              narration: `Cash ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
+              status: "POSTED",
+              lines: [
+                {
+                  accountId: cashLedgerAccountId,
+                  debit: newSale.grandTotal,
+                  credit: 0,
+                  narration: `Cash Received for Invoice ${newSale.invoiceNo}`
+                },
+                {
+                  accountId: receiptCounterpartyId,
+                  debit: 0,
+                  credit: newSale.grandTotal,
+                  narration: `Offset for Invoice ${newSale.invoiceNo}`
+                }
+              ]
+            };
+            
+            console.log("--- ATTEMPTING TO CREATE FALLBACK CASH JV ---");
+            console.log(JSON.stringify(fallbackJvPayload, null, 2));
+            
+            await journalVoucherService.createJournalVoucher(
+              newSale.workspaceId,
+              newSale.companyId,
+              user?._id,
+              fallbackJvPayload
             );
           }
         }
-
       } else if (isUpiPaid) {
-        // --- CUSTOMER HAS NO LEDGER ACCOUNT, BUT IT IS A UPI SALE (1 JV via Bank Transaction: Direct Bank -> Sales) ---
+        // --- UPI RECEIPT ---
         const primaryBankAccount = await BankAccount.findOne({
           companyId: newSale.companyId,
           workspaceId: newSale.workspaceId,
@@ -388,22 +369,75 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           isActive: true
         });
 
+        let txSuccess = false;
         if (bankAccount) {
-          await bankTransactionService.createBankTransaction(
-            newSale.workspaceId,
-            newSale.companyId,
-            user?._id,
-            {
+          try {
+            const bankTxPayload = {
               transactionDate: newSale.date || new Date(),
               bankAccountId: bankAccount._id,
               transactionType: "UPI",
               direction: "CREDIT",
               amount: newSale.grandTotal,
               referenceNumber: newSale.invoiceNo,
-              narration: `Direct UPI Sale for Invoice ${newSale.invoiceNo}`,
-              counterpartyAccountId: salesAccount._id
-            }
+              narration: `UPI ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
+              counterpartyAccountId: receiptCounterpartyId
+            };
+            
+            console.log("--- ATTEMPTING TO CREATE BANK TRANSACTION (TREASURY) ---");
+            console.log(JSON.stringify(bankTxPayload, null, 2));
+            
+            await bankTransactionService.createBankTransaction(
+              newSale.workspaceId,
+              newSale.companyId,
+              user?._id,
+              bankTxPayload
+            );
+            txSuccess = true;
+          } catch (btErr) {
+            console.error("Failed to create bank transaction, falling back to JV:", btErr);
+          }
+        }
+        
+        if (!txSuccess) {
+          const bankAccountsResult = await accountRepository.getAccounts(
+            newSale.workspaceId,
+            newSale.companyId,
+            { accountCategory: "BANK" }
           );
+          if (bankAccountsResult.accounts && bankAccountsResult.accounts.length > 0) {
+            const bankLedgerAccount = bankAccountsResult.accounts[0];
+            const fallbackUpiJvPayload = {
+              voucherDate: newSale.date || new Date(),
+              voucherType: "RECEIPT",
+              referenceNumber: newSale.invoiceNo,
+              narration: `UPI ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
+              status: "POSTED",
+              lines: [
+                {
+                  accountId: bankLedgerAccount._id,
+                  debit: newSale.grandTotal,
+                  credit: 0,
+                  narration: `UPI Received for Invoice ${newSale.invoiceNo}`
+                },
+                {
+                  accountId: receiptCounterpartyId,
+                  debit: 0,
+                  credit: newSale.grandTotal,
+                  narration: `Offset for Invoice ${newSale.invoiceNo}`
+                }
+              ]
+            };
+            
+            console.log("--- ATTEMPTING TO CREATE FALLBACK UPI JV ---");
+            console.log(JSON.stringify(fallbackUpiJvPayload, null, 2));
+            
+            await journalVoucherService.createJournalVoucher(
+              newSale.workspaceId,
+              newSale.companyId,
+              user?._id,
+              fallbackUpiJvPayload
+            );
+          }
         }
       }
     }
