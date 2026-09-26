@@ -50,8 +50,9 @@ const findCustomerByCode = async (customerCode, options = {}) => {
     .select(options.select || "");
 };
 
-const createCustomer = async (payload) => {
-  return Customer.create(payload);
+const createCustomer = async (payload, options = {}) => {
+  const [customer] = await Customer.create([payload], { session: options.session || null });
+  return customer;
 };
 
 const saveCustomer = async (customer) => {

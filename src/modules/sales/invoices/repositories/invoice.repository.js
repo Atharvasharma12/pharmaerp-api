@@ -6,6 +6,19 @@ const createInvoice = async (invoiceData) => {
   return invoice.save();
 };
 
+const getLatestInvoiceByPrefix = async (companyId, workspaceId, prefix) => {
+  return SalesInvoice.findOne({
+    companyId: new mongoose.Types.ObjectId(companyId),
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    invoiceNo: { $regex: `^${prefix}` },
+    isDeleted: false,
+  })
+    .sort({ invoiceNo: -1 })
+    .select("invoiceNo")
+    .lean();
+};
+
+
 const getInvoicesByCustomerId = async (customerId, companyId, workspaceId, filters = {}, pagination = {}) => {
   const page = Math.max(1, parseInt(pagination.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(pagination.limit) || 10));
@@ -22,12 +35,15 @@ const getInvoicesByCustomerId = async (customerId, companyId, workspaceId, filte
     query.branchId = new mongoose.Types.ObjectId(filters.branchId);
   }
 
-  const [invoices, total] = await Promise.all([
+  const [invoices, total, aggregate] = await Promise.all([
     SalesInvoice.find(query).sort({ date: -1 }).skip(skip).limit(limit).lean(),
     SalesInvoice.countDocuments(query),
+    SalesInvoice.aggregate([{ $match: query }, { $group: { _id: null, totalAmount: { $sum: "$grandTotal" } } }]),
   ]);
 
-  return { sales: invoices, total, page, limit };
+  const totalSalesAmount = aggregate[0]?.totalAmount || 0;
+
+  return { sales: invoices, total, page, limit, totalSalesAmount };
 };
 
 const getAllInvoices = async (companyId, workspaceId, filters = {}, pagination = {}) => {
@@ -67,4 +83,5 @@ export default {
   createInvoice,
   getInvoicesByCustomerId,
   getAllInvoices,
+  getLatestInvoiceByPrefix,
 };

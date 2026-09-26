@@ -78,6 +78,11 @@ const createLedgerEntry = async (session, payload) => {
     { session }
   );
 
+  console.log("--- LEDGER ENTRY CREATED ---");
+  console.log(`Account ID: ${accountId}`);
+  console.log(`Voucher: ${voucherNumber}`);
+  console.log(`Debit: ${debit}, Credit: ${credit}, Running Balance: ${runningBalance}`);
+
   return entry.toSafeObject();
 };
 
@@ -157,6 +162,10 @@ const getLedger = async (workspaceId, companyId, query = {}) => {
     total: result.total,
     page: result.page,
     limit: result.limit,
+    meta: {
+      totalDebit: result.totalDebit,
+      totalCredit: result.totalCredit,
+    }
   };
 };
 

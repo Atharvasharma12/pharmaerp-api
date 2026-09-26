@@ -1,6 +1,7 @@
 import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 import customerService from "../services/customer.service.js";
+import invoiceService from "../../../sales/invoices/services/invoice.service.js";
 
 export const createCustomer = asyncHandler(async (req, res) => {
   const customer = await customerService.createCustomer(
@@ -70,7 +71,8 @@ export const getCustomerLedger = asyncHandler(async (req, res) => {
   const ledger = await customerService.getCustomerLedger(
     req.params.customerId,
     req.companyId,
-    req.workspaceId
+    req.workspaceId,
+    req.query
   );
 
   return res
@@ -102,4 +104,18 @@ export const getCustomerPayments = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, "Customer payments fetched successfully", payments));
+});
+
+export const getCustomerSales = asyncHandler(async (req, res) => {
+  const salesResult = await invoiceService.getCustomerSales(
+    req.params.customerId,
+    req.companyId,
+    req.workspaceId,
+    null,
+    req.query
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer sales fetched successfully", salesResult));
 });
