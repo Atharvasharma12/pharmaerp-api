@@ -159,6 +159,7 @@ const workspaceProductSchema = new mongoose.Schema(
 
     stockistMarginPercent: { type: Number, default: null },
     retailerMarginPercent: { type: Number, default: null },
+    b2cDiscountPercent: { type: Number, default: 5 },
     rateBExtraPct: { type: Number, default: null },
     rateAExtraPct: { type: Number, default: null },
 

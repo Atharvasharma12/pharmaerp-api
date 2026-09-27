@@ -119,6 +119,16 @@ export const updateWorkspaceProductSchema = Joi.object({
   status: Joi.string()
     .valid(...Object.values(WORKSPACE_PRODUCT_STATUS))
     .optional(),
+
+  mrp: Joi.number().min(0).allow(null).optional(),
+  ptr: Joi.number().min(0).allow(null).optional(),
+  pts: Joi.number().min(0).allow(null).optional(),
+  rateA: Joi.number().min(0).allow(null).optional(),
+  rateB: Joi.number().min(0).allow(null).optional(),
+  rateC: Joi.number().min(0).allow(null).optional(),
+  b2cDiscountPercent: Joi.number().min(0).max(100).allow(null).optional(),
+  hsn: Joi.number().allow(null).optional(),
+  hsnTaxpercent: Joi.number().allow(null).optional(),
 }).min(1);
 
 // ---------------------

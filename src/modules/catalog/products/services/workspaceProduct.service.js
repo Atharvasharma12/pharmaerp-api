@@ -321,6 +321,15 @@ const updateWorkspaceProduct = async (productId, workspaceId, payload, user) => 
     "composition",
     "notes",
     "status",
+    "mrp",
+    "ptr",
+    "pts",
+    "rateA",
+    "rateB",
+    "rateC",
+    "hsn",
+    "hsnTaxpercent",
+    "b2cDiscountPercent",
   ];
 
   allowedFields.forEach((field) => {
@@ -583,6 +592,69 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
 
   const safeFixed = (val) => Number(Number(val || 0).toFixed(2));
 
+  // --- OPTIMIZATION: O(1) Pre-fetching & Bulk Writes ---
+  const itemCodesToFetch = new Set();
+  const namesToFetch = new Set();
+  const batchNosToFetch = new Set();
+
+  for (const item of items) {
+    if (item.name && String(item.name).trim()) namesToFetch.add(String(item.name).trim());
+    if (item.itemCode || item.code) itemCodesToFetch.add(String(item.itemCode || item.code).trim());
+    if (item.batchNo && String(item.batchNo).trim()) batchNosToFetch.add(String(item.batchNo).trim());
+  }
+
+  const wpQuery = { workspaceId, $or: [] };
+  if (itemCodesToFetch.size > 0) wpQuery.$or.push({ itemCode: { $in: Array.from(itemCodesToFetch) } });
+  if (namesToFetch.size > 0) wpQuery.$or.push({ name: { $in: Array.from(namesToFetch) } });
+  
+  let existingProducts = [];
+  if (wpQuery.$or.length > 0) {
+    existingProducts = await WorkspaceProduct.find(wpQuery).lean().select('_id name itemCode');
+  }
+
+  const productByCode = new Map();
+  const productByName = new Map();
+  for (const p of existingProducts) {
+    if (p.itemCode) productByCode.set(p.itemCode, p);
+    if (p.name) productByName.set(p.name.toLowerCase(), p);
+  }
+
+  const existingProductIds = existingProducts.map(p => p._id);
+  let existingFacilities = [];
+  let existingBatches = [];
+  
+  if (effectiveBranchId && existingProductIds.length > 0) {
+    existingFacilities = await ProductFacility.find({
+      workspaceId,
+      facility_id: effectiveBranchId,
+      product_id: { $in: existingProductIds }
+    }).lean().select('_id product_id total_qty_available qoh atp itemCode');
+
+    if (batchNosToFetch.size > 0) {
+      existingBatches = await Batch.find({
+        workspaceId,
+        branch_id: effectiveBranchId,
+        product: { $in: existingProductIds },
+        batchNo: { $in: Array.from(batchNosToFetch) }
+      }).lean().select('_id product batchNo expiryDate batchQty');
+    }
+  }
+
+  const facilityMap = new Map(); // key: product_id string
+  for (const f of existingFacilities) {
+    facilityMap.set(f.product_id.toString(), f);
+  }
+
+  const batchMap = new Map(); // key: product_id_batchNo_expiryDate
+  for (const b of existingBatches) {
+    const exp = b.expiryDate || "";
+    batchMap.set(`${b.product.toString()}_${b.batchNo}_${exp}`, b);
+  }
+
+  const productOps = [];
+  const facilityOps = [];
+  const batchOps = [];
+
   for (let index = 0; index < items.length; index++) {
     const item = items[index];
     const rowNum = index + 1;
@@ -607,10 +679,8 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       const batchScheme = toNumber(item.batchScheme || item.deal);
       const freeFromPurchase = toNumber(item.freeFromPurchase || item.free);
       const totalScheme = batchScheme + freeFromPurchase;
-      const schemeDiscountPercent =
-        totalScheme > 0 ? safeFixed((freeFromPurchase / totalScheme) * 100) : 0;
+      const schemeDiscountPercent = totalScheme > 0 ? safeFixed((freeFromPurchase / totalScheme) * 100) : 0;
 
-      // Rate pricing calculations matching legacy rules
       const gstPercent = 5;
       const retailerMarginPercent = 20;
       const stockistMarginPercent = 10;
@@ -626,31 +696,27 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       let rateA = autoCalcRateA ? (importedRateA > 0 ? importedRateA : safeFixed(rateB * 0.90)) : importedRateA;
       let rateC = autoCalcRateC ? (importedRateC > 0 ? importedRateC : (mrp > 0 ? safeFixed(mrp * 0.84) : 0)) : importedRateC;
 
-      // Check if product already exists in workspace
       let product = null;
-
-      if (itemCode) {
-        const existingPf = await ProductFacility.findOne({ workspaceId, itemCode });
-        if (existingPf && existingPf.product_id) {
-          product = await workspaceProductRepository.findWorkspaceProductById(
-            existingPf.product_id,
-            workspaceId
-          );
-        }
+      if (itemCode && productByCode.has(itemCode)) {
+        product = productByCode.get(itemCode);
+      } else if (productByName.has(productName.toLowerCase())) {
+        product = productByName.get(productName.toLowerCase());
       }
 
-      if (!product) {
-        product = await workspaceProductRepository.findWorkspaceProductByName(
-          productName,
-          workspaceId,
-        );
-      }
-
+      let productId;
       if (product) {
         updatedCount++;
+        productId = product._id;
+        importedProducts.push(product); // Just lean object
       } else {
-        // Create new WorkspaceProduct
+        productId = new mongoose.Types.ObjectId();
+        
+        // Generate a unique workspaceProductCode for bulkWrite since pre-save hooks don't run
+        const wpCode = `WP${Math.floor(100000 + Math.random() * 900000)}${Date.now().toString().slice(-4)}${index}`;
+
         const productPayload = {
+          _id: productId,
+          workspaceProductCode: wpCode,
           workspaceId,
           name: productName,
           productType,
@@ -673,59 +739,64 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
         if (item.manufacturer) productPayload.manufacturer = item.manufacturer;
         if (item.HsnMaster) productPayload.HsnMaster = item.HsnMaster;
 
-        product = await workspaceProductRepository.createWorkspaceProduct(productPayload);
+        productOps.push({
+          insertOne: { document: productPayload }
+        });
+
+        // Add to map so subsequent rows can find it
+        const newProduct = { _id: productId, name: productName, itemCode };
+        if (itemCode) productByCode.set(itemCode, newProduct);
+        productByName.set(productName.toLowerCase(), newProduct);
+        
+        importedProducts.push(newProduct);
         createdCount++;
       }
 
-      // If branchId or facility is provided, handle ProductFacility
       const targetBranchId = branchId || item.branchId || item.branch_id || item.facility_id || user?.activeContext?.branchId || fallbackBranchId || null;
       if (targetBranchId) {
-        let pf = await ProductFacility.findOne({
-          workspaceId,
-          facility_id: targetBranchId,
-          product_id: product._id,
-        });
-
         const initialQty = toNumber(item.qty || item.stockQty || item.batchQty || 0);
-
+        let pf = facilityMap.get(productId.toString());
+        
         if (!pf) {
-          pf = new ProductFacility({
+          const newPf = {
             workspaceId,
             facility_id: targetBranchId,
-            product_id: product._id,
+            product_id: productId,
             total_qty_available: initialQty,
             qoh: initialQty,
             atp: initialQty,
             itemCode: itemCode || undefined,
-          });
+          };
+          facilityOps.push({ insertOne: { document: newPf } });
+          facilityMap.set(productId.toString(), newPf);
         } else if (initialQty > 0) {
           pf.total_qty_available += initialQty;
           pf.qoh += initialQty;
           pf.atp += initialQty;
           if (itemCode) pf.itemCode = itemCode;
+          
+          facilityOps.push({
+            updateOne: {
+              filter: { _id: pf._id },
+              update: { $inc: { total_qty_available: initialQty, qoh: initialQty, atp: initialQty }, $set: { itemCode: pf.itemCode } }
+            }
+          });
         }
-
-        await pf.save();
       }
 
-      // If batch details are provided, handle Batch creation
-      if (item.batchNo && String(item.batchNo).trim()) {
+      if (item.batchNo && String(item.batchNo).trim() && targetBranchId) {
         const batchNo = String(item.batchNo).trim();
         const expiryDate = formatExpiry(item.expiryDate);
         const batchQty = toNumber(item.batchQty || item.qty || 0);
-
-        let batch = await Batch.findOne({
-          workspaceId,
-          branch_id: targetBranchId,
-          product: product._id,
-          batchNo,
-        });
+        const batchKey = `${productId.toString()}_${batchNo}_${expiryDate}`;
+        
+        let batch = batchMap.get(batchKey);
 
         if (!batch) {
-          batch = new Batch({
+          const newBatch = {
             workspaceId,
             branch_id: targetBranchId,
-            product: product._id,
+            product: productId,
             batchNo,
             expiryDate,
             batchQty,
@@ -738,18 +809,41 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
             rateC,
             freeQty: freeFromPurchase,
             schemeDiscountPercent,
-          });
+          };
+          batchOps.push({ insertOne: { document: newBatch } });
+          batchMap.set(batchKey, newBatch);
         } else if (batchQty > 0) {
           batch.batchQty += batchQty;
+          batchOps.push({
+            updateOne: {
+              filter: { _id: batch._id },
+              update: { $inc: { batchQty: batchQty } }
+            }
+          });
         }
-
-        await batch.save();
       }
-
-      importedProducts.push(product.toSafeObject ? product.toSafeObject() : product);
     } catch (err) {
       failedRows.push({ row: rowNum, name: item.name, error: err.message });
       skippedCount++;
+    }
+  }
+
+  // --- Execute Chunked BulkWrites ---
+  const chunkArray = (arr, size) => Array.from({ length: Math.ceil(arr.length / size) }, (v, i) => arr.slice(i * size, i * size + size));
+
+  if (productOps.length > 0) {
+    for (const chunk of chunkArray(productOps, 1000)) {
+      await WorkspaceProduct.bulkWrite(chunk, { ordered: false });
+    }
+  }
+  if (facilityOps.length > 0) {
+    for (const chunk of chunkArray(facilityOps, 1000)) {
+      await ProductFacility.bulkWrite(chunk, { ordered: false });
+    }
+  }
+  if (batchOps.length > 0) {
+    for (const chunk of chunkArray(batchOps, 1000)) {
+      await Batch.bulkWrite(chunk, { ordered: false });
     }
   }
 

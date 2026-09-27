@@ -75,6 +75,7 @@ const purchaseBillSchema = new mongoose.Schema(
     },
 
     purchaseBillNo: { type: String, trim: true, default: "" },
+    supplierInvoiceNo: { type: String, trim: true, default: "" },
     invoiceDate: { type: String, trim: true, default: "" },
     financialPeriodId: { type: mongoose.Schema.Types.ObjectId, ref: "FinancialPeriod", default: null },
     rateBasis: { type: String, trim: true, default: "PTS" },

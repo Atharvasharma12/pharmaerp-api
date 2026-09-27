@@ -145,6 +145,18 @@ const getPurchaseHistory = async (productId, workspaceId, companyId, pagination 
   };
 };
 
+const getLatestBillByPrefix = async (companyId, workspaceId, prefix) => {
+  return PurchaseBill.findOne({
+    companyId: new mongoose.Types.ObjectId(companyId),
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    purchaseBillNo: { $regex: `^${prefix}` },
+    isDeleted: false,
+  })
+    .sort({ purchaseBillNo: -1 })
+    .select("purchaseBillNo")
+    .lean();
+};
+
 const purchaseBillRepository = {
   createPurchaseBill,
   updatePurchaseBill,
@@ -153,6 +165,7 @@ const purchaseBillRepository = {
   getPurchaseBills,
   softDeletePurchaseBill,
   getPurchaseHistory,
+  getLatestBillByPrefix,
 };
 
 export default purchaseBillRepository;
