@@ -7,6 +7,7 @@ import ProductFacility from "../../products/models/productFacility.model.js";
 import Supplier from "../../../parties/suppliers/models/supplier.model.js";
 import Company from "../../../organization/companies/models/company.model.js";
 import WorkspaceProduct from "../../products/models/workspaceProduct.model.js";
+import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 
 const formatExpiry = (val) => {
   if (!val) return "";
@@ -51,6 +52,7 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
     amountPaid = 0,
     amountDue,
     gstSlabs,
+    supplierInvoiceNo,
   } = payload;
 
   if (!items || items.length === 0) {
@@ -61,7 +63,24 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
     throw new ApiError(400, "Supplier is required");
   }
 
-  const generatedBillNo = purchaseBillNo || `PB-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  let resolvedBranchId = branchId || null;
+  let branchCode = "BR01";
+  if (!resolvedBranchId) {
+    try {
+      const activeBranches = await branchRepository.getCompanyBranches(companyId);
+      if (Array.isArray(activeBranches) && activeBranches.length > 0) {
+        resolvedBranchId = activeBranches[0]._id;
+        branchCode = activeBranches[0].branchCode || branchCode;
+      }
+    } catch (bErr) {}
+  } else {
+    try {
+      const branchDoc = await branchRepository.findBranchById(resolvedBranchId);
+      if (branchDoc && branchDoc.branchCode) {
+        branchCode = branchDoc.branchCode;
+      }
+    } catch (bErr) {}
+  }
 
   // Determine financial period based on invoice date
   let period = await financialPeriodRepository.findPeriodByDate(companyId, workspaceId, invoiceDate ? new Date(invoiceDate) : new Date());
@@ -71,12 +90,60 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
     period = periods.periods && periods.periods[0];
   }
   const financialPeriodId = period ? period._id : null;
+
+  // Calculate Financial Year string
+  let fyString;
+  if (period && period.startDate && period.endDate) {
+    const startYear = new Date(period.startDate).getFullYear();
+    const endYear = new Date(period.endDate).getFullYear();
+    fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
+  } else {
+    const saleDate = invoiceDate ? new Date(invoiceDate) : new Date();
+    const month = saleDate.getMonth();
+    const year = saleDate.getFullYear();
+    let startYear, endYear;
+    if (month >= 3) {
+      startYear = year;
+      endYear = year + 1;
+    } else {
+      startYear = year - 1;
+      endYear = year;
+    }
+    fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
+  }
+
+  let sequenceNo = 1;
+  const numericBranchCode = branchCode.replace(/^BR/i, '');
+  const invoicePrefix = `PB${numericBranchCode}-${fyString}-`;
+
+  try {
+    const lastInvoice = await purchaseBillRepository.getLatestBillByPrefix(
+      companyId,
+      workspaceId,
+      invoicePrefix
+    );
+    if (lastInvoice && lastInvoice.purchaseBillNo) {
+      const parts = lastInvoice.purchaseBillNo.split('-');
+      if (parts.length >= 3) {
+        const lastSeq = parseInt(parts[2], 10);
+        if (!isNaN(lastSeq)) {
+          sequenceNo = lastSeq + 1;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Error generating purchase bill sequence:", err);
+  }
+
+  const generatedBillNo = purchaseBillNo || `${invoicePrefix}${sequenceNo.toString().padStart(4, '0')}`;
+
   const bill = await purchaseBillRepository.createPurchaseBill({
     workspaceId,
     companyId,
-    branchId: branchId || null,
+    branchId: resolvedBranchId,
     supplierId,
     purchaseBillNo: generatedBillNo,
+    supplierInvoiceNo: supplierInvoiceNo || "",
     invoiceDate: invoiceDate || "",
     financialPeriodId,
     rateBasis: rateBasis || "PTS",
@@ -156,6 +223,7 @@ const updatePurchaseBill = async (billId, workspaceId, companyId, userId, payloa
     amountPaid = 0,
     amountDue,
     gstSlabs,
+    supplierInvoiceNo,
   } = payload;
 
   if (!items || items.length === 0) {
@@ -181,6 +249,7 @@ const updatePurchaseBill = async (billId, workspaceId, companyId, userId, payloa
       branchId: branchId || null,
       supplierId,
       purchaseBillNo: purchaseBillNo || existingBill.purchaseBillNo,
+      supplierInvoiceNo: supplierInvoiceNo !== undefined ? supplierInvoiceNo : existingBill.supplierInvoiceNo,
       invoiceDate: invoiceDate || "",
       financialPeriodId,
       rateBasis: rateBasis || "PTS",

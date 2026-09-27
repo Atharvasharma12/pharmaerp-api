@@ -44,6 +44,7 @@ export const createPurchaseBillSchema = Joi.object({
   branchId: objectId.allow(null).optional(),
   supplierId: objectId.required(),
   purchaseBillNo: Joi.string().trim().max(100).allow("").optional(),
+  supplierInvoiceNo: Joi.string().trim().max(100).allow("").optional(),
   invoiceDate: Joi.string().trim().max(20).allow("").optional(),
   rateBasis: Joi.string().trim().valid("PTS", "PTR").default("PTS"),
 
