@@ -1679,3 +1679,13 @@ SALE_RETURN      → Sales Return posting
 13. cancellation reverses all stock + JV effects
 14. avgCostPrice recalculated with weighted average on every stock IN
 ```
+
+---
+
+# Changelog & Recent Updates
+
+### Recent Updates
+- **POS / Sales**: Added UI validation to prevent checkout without a valid Customer Name in `SalesDesktopPage.jsx`.
+- **POS / Sales**: Implemented optional chaining fallback (`"Walk-in Retail Customer"`) to prevent rendering crashes on sales receipts when `customer` is null in `SalesReceiptModal.jsx`.
+- **POS / B2B Sales Cart**: When selecting a product batch, the discount percentage (`disc`) is now explicitly initialized to `0` by default, rather than inheriting a scheme discount in `WorkspaceProductBatchSelectorModal.jsx`.
+- **Finance / Journal Vouchers**: Removed duplicate GST ledger entry creation for GSTR-1 (Sales) and GSTR-2 (Purchases) during Journal Voucher posting (`journalPosting.service.js`), because the document-level services (`invoice.service.js`) already correctly create these entries.
