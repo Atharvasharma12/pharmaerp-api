@@ -6,6 +6,7 @@ import Batch from "../../products/models/batch.model.js";
 import ProductFacility from "../../products/models/productFacility.model.js";
 import Supplier from "../../../parties/suppliers/models/supplier.model.js";
 import Company from "../../../organization/companies/models/company.model.js";
+import WorkspaceProduct from "../../products/models/workspaceProduct.model.js";
 
 const formatExpiry = (val) => {
   if (!val) return "";
@@ -315,6 +316,36 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId) => {
           atp: totalIngestQty,
         });
       }
+    }
+
+    // 3. Update Workspace Product with latest rates
+    const productUpdate = {};
+    if (item.mrp !== undefined) productUpdate.mrp = item.mrp;
+    if (item.finalRateA !== undefined) {
+      productUpdate.rateA = item.finalRateA;
+      productUpdate.finalRateA = item.finalRateA;
+      productUpdate.pts = item.finalRateA;
+    }
+    if (item.finalRateB !== undefined) {
+      productUpdate.rateB = item.finalRateB;
+      productUpdate.finalRateB = item.finalRateB;
+      productUpdate.ptr = item.finalRateB;
+    }
+    if (item.rateC !== undefined) {
+      productUpdate.rateC = item.rateC;
+    }
+    if (item.cRatePct !== undefined) {
+      productUpdate.rateCPercentage = item.cRatePct;
+    }
+    if (item.finalRateC !== undefined) productUpdate.finalRateC = item.finalRateC;
+    if (item.hsn) productUpdate.hsn = item.hsn;
+    if (item.gst !== undefined) productUpdate.hsnTaxpercent = item.gst;
+
+    if (Object.keys(productUpdate).length > 0) {
+      await WorkspaceProduct.updateOne(
+        { _id: item.productId, workspaceId },
+        { $set: productUpdate }
+      );
     }
   }
 

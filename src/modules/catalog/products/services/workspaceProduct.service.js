@@ -321,6 +321,15 @@ const updateWorkspaceProduct = async (productId, workspaceId, payload, user) => 
     "composition",
     "notes",
     "status",
+    "mrp",
+    "ptr",
+    "pts",
+    "rateA",
+    "rateB",
+    "rateC",
+    "hsn",
+    "hsnTaxpercent",
+    "b2cDiscountPercent",
   ];
 
   allowedFields.forEach((field) => {
