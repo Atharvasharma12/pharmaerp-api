@@ -49,8 +49,8 @@ export const createPurchaseBillSchema = Joi.object({
 
   items: Joi.array().items(itemSchema).min(1).required(),
 
-  extraDiscountPct: Joi.number().min(0).max(100).default(0),
-  extraDiscountAmt: Joi.number().min(0).default(0),
+  extraDiscountPct: Joi.number().min(-100).max(100).default(0),
+  extraDiscountAmt: Joi.number().default(0),
 
   grossTotal: Joi.number().min(0).required(),
   schemeDiscount: Joi.number().min(0).default(0),
