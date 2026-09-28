@@ -19,6 +19,6 @@ router.use(companyContextMiddleware);
 // Routes
 router.get("/", getAllCustomerSales);
 router.get("/customer/:customerId", getCustomerSales);
-router.post("/customer/:customerId", recordCustomerSale);
+router.post("/customer/:customerId?", recordCustomerSale);
 
 export default router;

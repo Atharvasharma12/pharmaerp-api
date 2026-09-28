@@ -72,6 +72,10 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: "Cash",
     },
+    payments: {
+      type: Array,
+      default: [],
+    },
     status: {
       type: String,
       default: "Paid",
