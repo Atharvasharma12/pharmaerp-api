@@ -1,5 +1,6 @@
 import { DayClosing } from "./dayClosing.model.js";
 import { Shift } from "../shifts/shift.model.js";
+import CashAccount from "../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
 import ApiError from "../../../utils/ApiError.js";
 
 export const createDayClosing = async (data) => {
@@ -24,14 +25,46 @@ export const createDayClosing = async (data) => {
   let actualTotal = 0;
   let openingTotal = 0;
 
-  shifts.forEach((shift) => {
-    expectedTotal += shift.expectedClosingCashAmount;
-    actualTotal += shift.actualClosingCashAmount;
-    openingTotal += shift.openingFloatAmount;
-  });
+  if (shifts.length > 0) {
+    // Sort shifts by open time to reliably get first/last
+    shifts.sort((a, b) => new Date(a.openedAt || a.createdAt) - new Date(b.openedAt || b.createdAt));
+    
+    const firstShift = shifts[0];
+    const lastShift = shifts[shifts.length - 1];
+
+    openingTotal = firstShift.openingFloatAmount || 0;
+    expectedTotal = lastShift.expectedClosingCashAmount || 0;
+    actualTotal = lastShift.actualClosingCashAmount || 0;
+  }
+
+  // Resolve the branch's system default cash account for traceability
+  let resolvedCashAccountId = null;
+  if (branchId) {
+    try {
+      const systemDefaultCA = await CashAccount.findOne({
+        branchId,
+        isSystemDefault: true,
+        isDeleted: false,
+      });
+      if (systemDefaultCA) {
+        resolvedCashAccountId = systemDefaultCA._id;
+      } else {
+        // Fallback: branch primary (legacy)
+        const primaryCA = await CashAccount.findOne({
+          branchId,
+          isPrimary: true,
+          isDeleted: false,
+        });
+        if (primaryCA) resolvedCashAccountId = primaryCA._id;
+      }
+    } catch (caErr) {
+      console.warn("[DayClosing] Could not resolve cash account:", caErr.message);
+    }
+  }
 
   const dayClosing = await DayClosing.create({
     ...data,
+    cashAccountId: resolvedCashAccountId,
     shifts: shifts.map(s => s._id),
     openingFloatAmount: openingTotal,
     expectedClosingCashAmount: expectedTotal,

@@ -65,6 +65,10 @@ const getCashAccounts = async (
     query.isPrimary =
       filters.isPrimary === "true" || filters.isPrimary === true;
   }
+  if (filters.isSystemDefault !== undefined) {
+    query.isSystemDefault =
+      filters.isSystemDefault === "true" || filters.isSystemDefault === true;
+  }
   if (filters.search) {
     const searchRegex = new RegExp(filters.search.trim(), "i");
     query.$or = [
@@ -104,17 +108,34 @@ const setPrimaryCashAccount = async (
   cashAccountId,
   companyId,
   workspaceId,
+  branchId,
   options = {},
 ) => {
   const session = options.session;
-  // Set all others to isPrimary = false
+
+  // Build filter — only unset primary for accounts in the SAME branch
+  // This prevents Branch A's primary being cleared when Branch B sets its default
+  const unsetFilter = {
+    companyId,
+    workspaceId,
+    _id: { $ne: cashAccountId },
+    isDeleted: false,
+  };
+  if (branchId) {
+    unsetFilter.branchId = branchId;
+  } else {
+    // For accounts with no branch (central), only unset others with no branch
+    unsetFilter.branchId = null;
+  }
+
+  // Set all other accounts in this branch to isPrimary = false
   await CashAccount.updateMany(
-    { companyId, workspaceId, _id: { $ne: cashAccountId }, isDeleted: false },
+    unsetFilter,
     { $set: { isPrimary: false } },
     { session },
   );
 
-  // Set this one to isPrimary = true
+  // Set this account to isPrimary = true
   const updated = await CashAccount.findOneAndUpdate(
     { _id: cashAccountId, companyId, workspaceId, isDeleted: false },
     { $set: { isPrimary: true } },

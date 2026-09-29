@@ -54,6 +54,14 @@ const cashAccountSchema = new mongoose.Schema(
       index: true,
     },
 
+    // isSystemDefault: marks this as the branch's immutable operating cash drawer.
+    // Auto-created when a branch is created. Cannot be deleted, renamed, or un-defaulted.
+    isSystemDefault: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: Object.values(CASH_ACCOUNT_STATUS),
@@ -95,9 +103,10 @@ cashAccountSchema.methods.toSafeObject = function () {
   return account;
 };
 
-// Unique index: accountName must be unique per company (excluding deleted)
+// Unique index: accountName must be unique per branch per company (excluding deleted)
+// This allows the same name (e.g. "Main Counter") across different branches
 cashAccountSchema.index(
-  { companyId: 1, accountName: 1 },
+  { companyId: 1, branchId: 1, accountName: 1 },
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },

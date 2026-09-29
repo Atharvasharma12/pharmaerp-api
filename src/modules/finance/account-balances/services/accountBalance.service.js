@@ -66,17 +66,36 @@ const recalculateBalance = async (accountId, companyId, workspaceId) => {
   let debitTotal = 0;
   let creditTotal = 0;
 
-  if (account.openingBalance && account.openingBalance > 0) {
-    const type = account.openingBalanceType || "dr";
-    if (type.toLowerCase() === "dr") {
-      debitTotal = account.openingBalance;
-    } else {
-      creditTotal = account.openingBalance;
+  // Retrieve all ledger entries to recalculate absolute totals
+  const ledgerRepository = (await import("../../ledger/repositories/ledger.repository.js")).default;
+  const entriesResult = await ledgerRepository.getLedgerEntries(
+    workspaceId,
+    companyId,
+    accountId,
+    {},
+    { all: true }
+  );
+
+  if (entriesResult && entriesResult.entries && entriesResult.entries.length > 0) {
+    for (const entry of entriesResult.entries) {
+      debitTotal += entry.debit || 0;
+      creditTotal += entry.credit || 0;
+    }
+  } else {
+    // Fallback if no ledger exists yet but there is an opening balance
+    if (account.openingBalance && account.openingBalance > 0) {
+      const type = account.openingBalanceType || "dr";
+      if (type.toLowerCase() === "dr") {
+        debitTotal = account.openingBalance;
+      } else {
+        creditTotal = account.openingBalance;
+      }
     }
   }
 
-  // Note: Ledger entry summation will be added here once the Ledger module is built.
-  // Currently, we synchronize directly with the Account opening balance.
+  // We should also recalculate the ledger running balances for consistency
+  const ledgerService = (await import("../../ledger/services/ledger.service.js")).default;
+  await ledgerService.recalculateLedger(accountId, companyId, workspaceId, {});
 
   const updatedBalance = await accountBalanceRepository.upsertBalance(
     accountId,

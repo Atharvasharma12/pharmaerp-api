@@ -2,9 +2,11 @@ import mongoose from "mongoose";
 import Ledger from "../models/ledger.model.js";
 
 const createLedgerEntry = async (payload, options = {}) => {
+  const t = Date.now();
   const [entry] = await Ledger.create([payload], {
     session: options.session || null,
   });
+  import('fs').then(fs => fs.appendFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-timing.txt', `Ledger.create took: ${Date.now() - t}ms\\n`));
   return entry;
 };
 
@@ -22,13 +24,17 @@ const findLastLedgerEntry = async (
     return null;
   }
 
-  return Ledger.findOne({
+  const t = Date.now();
+  const res = await Ledger.findOne({
     workspaceId,
     companyId,
     accountId,
   })
     .sort({ voucherDate: -1, createdAt: -1 })
     .session(options.session || null);
+  
+  import('fs').then(fs => fs.appendFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-timing.txt', `findLastLedgerEntry took: ${Date.now() - t}ms\\n`));
+  return res;
 };
 
 const deleteLedgerEntriesByVoucherId = async (voucherId, options = {}) => {
@@ -78,6 +84,44 @@ const getLedgerEntries = async (
     }
     if (filters.endDate) {
       query.voucherDate.$lte = new Date(filters.endDate);
+    }
+  }
+
+  // Branch isolation for Cash Accounts: STRICT whitelist approach
+  if (filters.branchId) {
+    const Account = mongoose.model("Account");
+    const allCashAccounts = await Account.find({
+      companyId: new mongoose.Types.ObjectId(companyId),
+      isDeleted: false,
+      accountCategory: "CASH"
+    }).select("_id");
+    const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
+
+    const CashAccount = mongoose.model("CashAccount");
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+    const validBranchCashAccounts = await CashAccount.find({
+      companyId: new mongoose.Types.ObjectId(companyId),
+      isDeleted: false,
+      branchId: targetBranchId
+    }).select("ledgerAccountId");
+    const validLedgerIds = validBranchCashAccounts
+      .map(c => c.ledgerAccountId?.toString())
+      .filter(Boolean);
+
+    const invalidLedgerIds = allCashAccountIds
+      .filter(id => !validLedgerIds.includes(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (invalidLedgerIds.length > 0) {
+      if (query.accountId) {
+        // If accountId is already requested, but it belongs to another branch, return empty!
+        const requestedId = query.accountId.toString();
+        if (invalidLedgerIds.some(id => id.toString() === requestedId)) {
+          return { entries: [], total: 0, page: 1, limit: 20, totalDebit: 0, totalCredit: 0 };
+        }
+      } else {
+        query.accountId = { $nin: invalidLedgerIds };
+      }
     }
   }
 

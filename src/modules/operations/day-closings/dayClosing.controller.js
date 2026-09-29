@@ -133,10 +133,16 @@ export const getDraftDayClosingSummary = asyncHandler(async (req, res, next) => 
     totalNetSales += s.netSales;
     totalCashNet += s.cashNet;
     totalQrNet += s.qrNet;
-    totalExpected += s.expectedClosingCashAmount;
-    totalActual += (s.actualClosingCashAmount || 0);
-    totalOpening += (s.openingFloatAmount || 0);
   });
+
+  if (shiftSummaries.length > 0) {
+    const firstShift = shiftSummaries[0];
+    const lastShift = shiftSummaries[shiftSummaries.length - 1];
+    
+    totalOpening = firstShift.openingFloatAmount || 0;
+    totalExpected = lastShift.expectedClosingCashAmount || 0;
+    totalActual = lastShift.actualClosingCashAmount || 0;
+  }
 
   const summary = {
     date,
@@ -215,7 +221,7 @@ export const createDayClosing = asyncHandler(async (req, res, next) => {
 
 export const listDayClosings = asyncHandler(async (req, res, next) => {
   const branchId = req.headers["x-branch-id"] || req.branchId || req.query.branchId || null;
-  const { date } = req.query;
+  const { date, status, sort = "desc" } = req.query;
   
   const filter = {
     workspaceId: req.workspaceId,
@@ -230,8 +236,15 @@ export const listDayClosings = asyncHandler(async (req, res, next) => {
     endOfDay.setUTCHours(23, 59, 59, 999);
     filter.date = { $gte: startOfDay, $lte: endOfDay };
   }
+  if (status && status !== "all") filter.status = status;
 
-  const dayClosings = await DayClosing.find(filter).sort({ createdAt: -1 }).populate("shifts");
+  const sortOrder = sort === "asc" ? 1 : -1;
+  const dayClosings = await DayClosing.find(filter)
+    .sort({ createdAt: sortOrder })
+    .populate("shifts")
+    .populate("createdBy", "fullName email")
+    .populate("approvedBy", "fullName email");
+    
   res.status(200).json({ success: true, data: dayClosings });
 });
 

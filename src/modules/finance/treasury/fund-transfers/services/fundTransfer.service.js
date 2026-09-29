@@ -201,10 +201,49 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       { session },
     );
 
-    // 9. Save the Fund Transfer record
+    // 9. Auto-link to open shift and resolve branchId
+    // Determine which cash account to use for shift detection (prefer FROM, fallback TO)
+    let resolvedShiftId = payload.shiftId || null;
+    let resolvedBranchId = null;
+
+    const primaryCashAccountId =
+      fromAccountType === "CASH" ? fromAccountId
+      : toAccountType === "CASH" ? toAccountId
+      : null;
+
+    if (primaryCashAccountId) {
+      const cashAccDoc = await CashAccount
+        .findOne({ _id: primaryCashAccountId })
+        .select("branchId")
+        .session(session);
+      if (cashAccDoc?.branchId) {
+        resolvedBranchId = cashAccDoc.branchId;
+      }
+    }
+
+    // If shiftId not explicitly provided, auto-detect the currently open shift for this branch
+    if (!resolvedShiftId && resolvedBranchId) {
+      try {
+        const { Shift } = await import("../../../../operations/shifts/shift.model.js");
+        const openShift = await Shift.findOne({
+          companyId,
+          workspaceId,
+          branchId: resolvedBranchId,
+          status: "open",
+        }).select("_id").session(session);
+        if (openShift) resolvedShiftId = openShift._id;
+      } catch (shiftErr) {
+        // Non-fatal: if shift lookup fails, transfer still saves without shiftId
+        console.warn("[FundTransfer] Could not auto-link shift:", shiftErr.message);
+      }
+    }
+
+    // 10. Save the Fund Transfer record
     const fundTransferPayload = {
       workspaceId,
       companyId,
+      branchId: resolvedBranchId,
+      shiftId: resolvedShiftId,
       transferNumber,
       transferDate: new Date(transferDate),
       transferType,

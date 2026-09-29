@@ -1,0 +1,11 @@
+MongoServerError: E11000 duplicate key error collection: erp.cashdenominations index: companyId_1_countNumber_1 dup key: { companyId: ObjectId('6abb78c0e39bb220e38db776'), countNumber: "CD-2026-00017" }
+    at InsertOneOperation.handleOk (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongodb\lib\operations\insert.js:51:19)
+    at executeOperationWithRetries (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongodb\lib\operations\execute_operation.js:194:34)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async executeOperation (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongodb\lib\operations\execute_operation.js:83:16)
+    at async Collection.insertOne (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongodb\lib\collection.js:154:16)
+    at async model.$__save (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongoose\lib\model.js:428:16)
+    at async model.save (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongoose\lib\model.js:667:5)
+    at async C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongoose\lib\model.js:2816:9
+    at async Promise.all (index 0)
+    at async Function.create (C:\Users\Intel\Desktop\erp\erp-backend\node_modules\mongoose\lib\model.js:2801:11)

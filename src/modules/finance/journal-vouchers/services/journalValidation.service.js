@@ -65,13 +65,19 @@ const validateJournalLines = async (companyId, workspaceId, lines = [], voucherD
 
     if (debit > 0) hasDebit = true;
     if (credit > 0) hasCredit = true;
+  }
 
-    // Validate account existence and scope
-    const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
-      line.accountId,
-      companyId,
-      workspaceId
-    );
+  const accountIds = lines.map(l => l.accountId);
+  const accounts = await accountRepository.getAccountsByIds(accountIds, companyId, workspaceId);
+  const accountMap = {};
+  if (accounts) {
+    accounts.forEach(a => { accountMap[a._id.toString()] = a; });
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const account = accountMap[line.accountId.toString()];
+
     if (!account) {
       throw new ApiError(
         404,

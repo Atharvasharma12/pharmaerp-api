@@ -1,9 +1,9 @@
 import mongoose from "mongoose";
 import SalesInvoice from "../models/invoice.model.js";
 
-const createInvoice = async (invoiceData) => {
+const createInvoice = async (invoiceData, options = {}) => {
   const invoice = new SalesInvoice(invoiceData);
-  return invoice.save();
+  return invoice.save({ session: options.session || null });
 };
 
 const getLatestInvoiceByPrefix = async (companyId, workspaceId, prefix) => {

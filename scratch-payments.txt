@@ -1,8 +1,31 @@
 [
   {
-    "paymentType": "UPI",
-    "amount": 117,
-    "denominations": [],
-    "returnedDenominations": []
+    "paymentType": "Cash",
+    "amount": 351,
+    "cashAccountId": "6abc00bf62ad165a84cb59de",
+    "denominations": [
+      {
+        "denomination": 200,
+        "quantity": 2
+      }
+    ],
+    "returnedDenominations": [
+      {
+        "denomination": 2,
+        "quantity": 2
+      },
+      {
+        "denomination": 5,
+        "quantity": 1
+      },
+      {
+        "denomination": 10,
+        "quantity": 2
+      },
+      {
+        "denomination": 20,
+        "quantity": 1
+      }
+    ]
   }
 ]

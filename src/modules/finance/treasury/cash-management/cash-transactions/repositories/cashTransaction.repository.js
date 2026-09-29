@@ -60,6 +60,31 @@ const getCashTransactions = async (
   };
 
   if (filters.cashAccountId) query.cashAccountId = filters.cashAccountId;
+
+  // Branch isolation for Cash Transactions: STRICT whitelist approach
+  if (filters.branchId) {
+    const CashAccount = mongoose.model("CashAccount");
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+    
+    // Find cash accounts that explicitly belong to THIS branch
+    const validBranchCashAccounts = await CashAccount.find({
+      companyId,
+      isDeleted: false,
+      branchId: targetBranchId
+    }).select("_id");
+    
+    const validCashAccountIds = validBranchCashAccounts.map((c) => c._id.toString());
+
+    if (query.cashAccountId) {
+      // If cashAccountId is requested, verify it's valid
+      const requestedId = query.cashAccountId.toString();
+      if (!validCashAccountIds.includes(requestedId)) {
+        return options.all ? { cashTransactions: [], total: 0 } : { cashTransactions: [], total: 0, page: 1, limit: 20 };
+      }
+    } else {
+      query.cashAccountId = { $in: validCashAccountIds.map(id => new mongoose.Types.ObjectId(id)) };
+    }
+  }
   if (filters.transactionType) query.transactionType = filters.transactionType;
   if (filters.direction) query.direction = filters.direction;
   if (filters.status) query.status = filters.status;
