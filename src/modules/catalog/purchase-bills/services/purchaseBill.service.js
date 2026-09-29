@@ -8,6 +8,11 @@ import Supplier from "../../../parties/suppliers/models/supplier.model.js";
 import Company from "../../../organization/companies/models/company.model.js";
 import WorkspaceProduct from "../../products/models/workspaceProduct.model.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
+import ledgerService from "../../../finance/ledger/services/ledger.service.js";
+import journalVoucherService from "../../../finance/journal-vouchers/services/journalVoucher.service.js";
+import Account from "../../../finance/chart-of-accounts/models/account.model.js";
+import { VOUCHER_TYPE } from "../../../finance/journal-vouchers/constants/voucherType.constant.js";
+import { VOUCHER_STATUS } from "../../../finance/journal-vouchers/constants/voucherStatus.constant.js";
 
 const formatExpiry = (val) => {
   if (!val) return "";
@@ -72,14 +77,14 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
         resolvedBranchId = activeBranches[0]._id;
         branchCode = activeBranches[0].branchCode || branchCode;
       }
-    } catch (bErr) {}
+    } catch (bErr) { }
   } else {
     try {
       const branchDoc = await branchRepository.findBranchById(resolvedBranchId);
       if (branchDoc && branchDoc.branchCode) {
         branchCode = branchDoc.branchCode;
       }
-    } catch (bErr) {}
+    } catch (bErr) { }
   }
 
   // Determine financial period based on invoice date
@@ -296,7 +301,7 @@ const getPurchaseBillById = async (billId, companyId, workspaceId) => {
   return bill;
 };
 
-const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId) => {
+const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId, userId) => {
   const bill = await purchaseBillRepository.findPurchaseBillByIdAndWorkspace(
     billId,
     workspaceId,
@@ -425,6 +430,64 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId) => {
     companyId,
     { status: "RECEIVED" }
   );
+
+  // 4. Create Journal Voucher for Purchase
+  console.log("Creating journal voucher for purchase...");
+  try {
+    const supplier = await Supplier.findById(bill.supplierId);
+    let cogsAccount = await Account.findOne({ workspaceId, companyId, accountCode: "COGS" }) || await Account.findOne({ workspaceId, companyId, accountCategory: "PURCHASE" });
+    let taxAccount = await Account.findOne({ workspaceId, companyId, accountCode: "TAX-PAYABLE" }) || await Account.findOne({ workspaceId, companyId, accountCategory: "GST" });
+
+    if (supplier && supplier.ledgerAccountId && cogsAccount) {
+      const lines = [];
+      const cogsAmount = bill.taxableAfterExtraDisc > 0 ? bill.taxableAfterExtraDisc : bill.taxableSubtotal;
+      
+      lines.push({
+        accountId: cogsAccount._id.toString(),
+        debit: cogsAmount,
+        credit: 0,
+        narration: `Purchase against bill ${bill.purchaseBillNo}`,
+      });
+
+      if (taxAccount && bill.totalGst > 0) {
+        lines.push({
+          accountId: taxAccount._id.toString(),
+          debit: bill.totalGst,
+          credit: 0,
+          narration: `Input GST for bill ${bill.purchaseBillNo}`,
+        });
+      }
+
+      lines.push({
+        accountId: supplier.ledgerAccountId.toString(),
+        debit: 0,
+        credit: bill.grandTotal,
+        narration: `Purchase from supplier for bill ${bill.purchaseBillNo}`,
+      });
+
+      // Handle small rounding differences
+      let totalDebit = lines.reduce((acc, l) => acc + l.debit, 0);
+      let totalCredit = lines.reduce((acc, l) => acc + l.credit, 0);
+      if (Math.abs(totalDebit - totalCredit) > 0.0001) {
+        // Adjust the COGS line to balance
+        lines[0].debit += (totalCredit - totalDebit);
+      }
+
+      await journalVoucherService.createJournalVoucher(workspaceId, companyId, userId, {
+        lines,
+        voucherDate: bill.invoiceDate || bill.createdAt,
+        voucherType: VOUCHER_TYPE.PURCHASE,
+        referenceNumber: bill.purchaseBillNo,
+        narration: `Purchase Bill Ingested: ${bill.purchaseBillNo}`,
+        status: VOUCHER_STATUS.POSTED,
+      });
+      console.log("Purchase journal voucher created and posted successfully.");
+    } else {
+      console.log("Missing supplier ledger account or COGS account, skipped journal creation.");
+    }
+  } catch (e) {
+    console.error("Error creating purchase journal voucher:", e);
+  }
 
   return updatedBill;
 };

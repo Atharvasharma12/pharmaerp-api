@@ -68,12 +68,17 @@ export const getPurchaseBillById = asyncHandler(async (req, res) => {
 export const ingestPurchaseBill = asyncHandler(async (req, res) => {
   let branchId = req.headers["x-branch-id"] || req.body.branchId || null;
 
+  console.log(`[Controller] Ingesting Purchase Bill ID: ${req.params.billId}`);
+
   const bill = await purchaseBillService.ingestPurchaseBill(
     req.params.billId,
     req.workspaceId,
     req.companyId,
-    branchId
+    branchId,
+    req.user._id
   );
+
+  console.log(`[Controller] Successfully ingested bill: ${bill.purchaseBillNo}`);
 
   return res
     .status(200)

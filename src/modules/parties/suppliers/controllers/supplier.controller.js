@@ -70,7 +70,8 @@ export const getSupplierLedger = asyncHandler(async (req, res) => {
   const ledger = await supplierService.getSupplierLedger(
     req.params.supplierId,
     req.companyId,
-    req.workspaceId
+    req.workspaceId,
+    req.query
   );
 
   return res
@@ -94,7 +95,8 @@ export const getSupplierPurchases = asyncHandler(async (req, res) => {
   const purchases = await supplierService.getSupplierPurchases(
     req.params.supplierId,
     req.companyId,
-    req.workspaceId
+    req.workspaceId,
+    req.query
   );
 
   return res

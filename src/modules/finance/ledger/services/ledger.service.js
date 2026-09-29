@@ -16,12 +16,16 @@ const createLedgerEntry = async (session, payload) => {
     narration,
   } = payload;
 
+  console.log("createLedgerEntry payload:", { workspaceId, companyId, accountId, voucherId });
+
   const account = await accountRepository.findAccountByIdCompanyAndWorkspace(
     accountId,
     companyId,
     workspaceId,
     { session }
   );
+
+  console.log("Found account:", account?._id || null);
 
   if (!account) {
     throw new ApiError(404, "Account not found for ledger entry");

@@ -2,6 +2,9 @@ import ApiError from "../../../../utils/ApiError.js";
 import supplierRepository from "../repositories/supplier.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import { SUPPLIER_STATUS } from "../constants/supplier.constant.js";
+import ledgerService from "../../../finance/ledger/services/ledger.service.js";
+import ledgerRepository from "../../../finance/ledger/repositories/ledger.repository.js";
+import purchaseBillRepository from "../../../catalog/purchase-bills/repositories/purchaseBill.repository.js";
 
 const createSupplier = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -186,28 +189,44 @@ const deleteSupplier = async (supplierId, companyId, workspaceId, userId) => {
 |--------------------------------------------------------------------------
 */
 
-const getSupplierLedger = async (supplierId, companyId, workspaceId) => {
+const getSupplierLedger = async (supplierId, companyId, workspaceId, query = {}) => {
+  console.log("Fetching ledger for supplier:", supplierId);
   const supplier = await getSupplierById(supplierId, companyId, workspaceId);
 
-  const ledger = [];
-  if (supplier.openingBalance > 0) {
-    ledger.push({
-      date: supplier.createdAt,
-      description: "Opening Balance",
-      voucherType: "OPENING_BALANCE",
-      debit: supplier.openingBalanceType === "dr" ? supplier.openingBalance : 0,
-      credit:
-        supplier.openingBalanceType === "cr" ? supplier.openingBalance : 0,
-      balance: supplier.openingBalance,
-      balanceType: supplier.openingBalanceType,
-    });
+  if (!supplier.ledgerAccountId) {
+    console.log("Supplier has no ledgerAccountId!", supplierId);
+    return { entries: [], total: 0, page: 1, limit: 20, meta: { totalDebit: 0, totalCredit: 0 } };
   }
 
-  return ledger;
+  console.log("Supplier ledgerAccountId:", supplier.ledgerAccountId);
+  
+  const ledgerData = await ledgerService.getLedger(workspaceId, companyId, {
+    accountId: supplier.ledgerAccountId,
+    ...query,
+  });
+
+  console.log("Ledger data fetched successfully, total entries:", ledgerData?.total);
+  return ledgerData;
 };
 
 const getSupplierOutstanding = async (supplierId, companyId, workspaceId) => {
   const supplier = await getSupplierById(supplierId, companyId, workspaceId);
+
+  if (!supplier.ledgerAccountId) {
+    return {
+      outstandingAmount: supplier.openingBalance || 0,
+      balanceType: supplier.openingBalanceType || "cr",
+    };
+  }
+
+  const lastEntry = await ledgerRepository.findLastLedgerEntry(workspaceId, companyId, supplier.ledgerAccountId);
+
+  if (lastEntry) {
+    return {
+      outstandingAmount: Math.abs(lastEntry.runningBalance || 0),
+      balanceType: (lastEntry.runningBalance >= 0) ? "cr" : "dr", // for liability (supplier), >0 is CR
+    };
+  }
 
   return {
     outstandingAmount: supplier.openingBalance || 0,
@@ -215,14 +234,25 @@ const getSupplierOutstanding = async (supplierId, companyId, workspaceId) => {
   };
 };
 
-const getSupplierPurchases = async (supplierId, companyId, workspaceId) => {
-  await getSupplierById(supplierId, companyId, workspaceId);
-  return [];
+const getSupplierPurchases = async (supplierId, companyId, workspaceId, query = {}) => {
+  await getSupplierById(supplierId, companyId, workspaceId); // Validate supplier
+
+  const { page, limit, sort, ...filters } = query;
+  filters.supplierId = supplierId;
+
+  const result = await purchaseBillRepository.getPurchaseBills(
+    workspaceId,
+    companyId,
+    filters,
+    { page, limit, sort }
+  );
+
+  return result;
 };
 
 const getSupplierPayments = async (supplierId, companyId, workspaceId) => {
   await getSupplierById(supplierId, companyId, workspaceId);
-  return [];
+  return []; // Will implement when Payment module is ready
 };
 
 export default {
