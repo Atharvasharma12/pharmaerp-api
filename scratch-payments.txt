@@ -1,0 +1,8 @@
+[
+  {
+    "paymentType": "UPI",
+    "amount": 117,
+    "denominations": [],
+    "returnedDenominations": []
+  }
+]
