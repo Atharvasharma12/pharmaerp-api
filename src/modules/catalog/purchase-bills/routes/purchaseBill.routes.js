@@ -12,6 +12,8 @@ import {
   getPurchaseBillById,
   ingestPurchaseBill,
   getPurchaseHistory,
+  payPurchaseBill,
+  bulkPayPurchaseBills,
 } from "../controllers/purchaseBill.controller.js";
 
 import {
@@ -65,6 +67,19 @@ router.post(
   "/:billId/ingest",
   validate(purchaseBillIdParamSchema, "params"),
   ingestPurchaseBill
+);
+
+// Bulk pay purchase bills
+router.post(
+  "/bulk/pay",
+  bulkPayPurchaseBills
+);
+
+// Pay purchase bill
+router.post(
+  "/:billId/pay",
+  validate(purchaseBillIdParamSchema, "params"),
+  payPurchaseBill
 );
 
 export default router;

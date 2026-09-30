@@ -501,6 +501,181 @@ const getPurchaseHistory = async (productId, workspaceId, companyId, query = {})
   );
 };
 
+const payPurchaseBill = async (billId, workspaceId, companyId, userId, payload) => {
+  const { amount, accountId, paymentDate, referenceNumber, narration } = payload;
+  
+  if (!amount || amount <= 0) {
+    throw new ApiError(400, "Valid payment amount is required");
+  }
+
+  const bill = await purchaseBillRepository.findPurchaseBillByIdAndWorkspace(
+    billId,
+    workspaceId,
+    companyId
+  );
+
+  if (!bill) {
+    throw new ApiError(404, "Purchase bill not found");
+  }
+
+  const supplier = await Supplier.findById(bill.supplierId);
+  if (!supplier || !supplier.ledgerAccountId) {
+    throw new ApiError(400, "Supplier ledger account is not configured properly");
+  }
+
+  // Find the payment source account (Cash/Bank)
+  let paymentAccount = null;
+  if (accountId) {
+    paymentAccount = await Account.findOne({ _id: accountId, workspaceId, companyId });
+  } else {
+    // Default to a generic CASH account
+    paymentAccount = await Account.findOne({ workspaceId, companyId, accountCode: "CASH" }) 
+                  || await Account.findOne({ workspaceId, companyId, accountCategory: "CASH" });
+  }
+
+  if (!paymentAccount) {
+    throw new ApiError(400, "Payment source account (Cash/Bank) could not be determined");
+  }
+
+  // 1. Update Bill Paid Amounts
+  const newAmountPaid = (bill.amountPaid || 0) + Number(amount);
+  const newAmountDue = Math.max(0, (bill.grandTotal || 0) - newAmountPaid);
+  
+  const updateData = {
+    amountPaid: newAmountPaid, 
+    amountDue: newAmountDue 
+  };
+
+  // If the bill is fully paid, change status to PAID
+  if (newAmountDue === 0) {
+    updateData.status = "PAID";
+  } else if (bill.status === "RECEIVED") {
+    // Optionally change to partially paid, but for now we keep it as RECEIVED or set to PARTIALLY_PAID
+    // The user specifically requested to change to PAID when from received.
+    updateData.status = "PARTIALLY_PAID"; 
+  }
+
+  const updatedBill = await purchaseBillRepository.updatePurchaseBill(
+    billId,
+    workspaceId,
+    companyId,
+    updateData
+  );
+
+  // 2. Create Journal Voucher for Payment
+  // Supplier Payment: Supplier A/c Dr, Cash/Bank A/c Cr
+  const lines = [
+    {
+      accountId: supplier.ledgerAccountId.toString(),
+      debit: Number(amount),
+      credit: 0,
+      narration: narration || `Payment for Bill ${bill.purchaseBillNo}`,
+    },
+    {
+      accountId: paymentAccount._id.toString(),
+      debit: 0,
+      credit: Number(amount),
+      narration: narration || `Paid to supplier for Bill ${bill.purchaseBillNo}`,
+    }
+  ];
+
+  await journalVoucherService.createJournalVoucher(workspaceId, companyId, userId, {
+    lines,
+    voucherDate: paymentDate ? new Date(paymentDate) : new Date(),
+    voucherType: VOUCHER_TYPE.PAYMENT,
+    referenceNumber: referenceNumber || bill.purchaseBillNo,
+    narration: narration || `Payment made against Bill ${bill.purchaseBillNo}`,
+    status: VOUCHER_STATUS.POSTED,
+  });
+
+  return updatedBill;
+};
+
+const bulkPayPurchaseBills = async (workspaceId, companyId, userId, payload) => {
+  const { supplierId, totalAmount, allocations, accountId, paymentDate, paymentMode, referenceNumber, narration } = payload;
+  
+  if (!totalAmount || totalAmount <= 0) {
+    throw new ApiError(400, "Valid total payment amount is required");
+  }
+
+  if (!allocations || !Array.isArray(allocations) || allocations.length === 0) {
+    throw new ApiError(400, "Bill allocations are required for bulk payment");
+  }
+
+  const supplier = await Supplier.findById(supplierId);
+  if (!supplier || !supplier.ledgerAccountId) {
+    throw new ApiError(400, "Supplier ledger account is not configured properly");
+  }
+
+  let paymentAccount = null;
+  if (accountId) {
+    paymentAccount = await Account.findOne({ _id: accountId, workspaceId, companyId });
+  } else {
+    paymentAccount = await Account.findOne({ workspaceId, companyId, accountCode: "CASH" }) 
+                  || await Account.findOne({ workspaceId, companyId, accountCategory: "CASH" });
+  }
+
+  if (!paymentAccount) {
+    throw new ApiError(400, "Payment source account (Cash/Bank) could not be determined");
+  }
+
+  let actualTotalAllocated = 0;
+  
+  // 1. Update Each Bill
+  for (const alloc of allocations) {
+    if (alloc.amountPaid <= 0) continue;
+    
+    const bill = await purchaseBillRepository.findPurchaseBillByIdAndWorkspace(alloc.billId, workspaceId, companyId);
+    if (!bill) continue;
+
+    actualTotalAllocated += alloc.amountPaid;
+
+    const newAmountPaid = (bill.amountPaid || 0) + Number(alloc.amountPaid);
+    const newAmountDue = Math.max(0, (bill.grandTotal || 0) - newAmountPaid);
+    
+    const updateData = { amountPaid: newAmountPaid, amountDue: newAmountDue };
+    
+    if (newAmountDue === 0) {
+      updateData.status = "PAID";
+    } else if (bill.status === "RECEIVED" || bill.status === "CONFIRMED") {
+      updateData.status = "PARTIALLY_PAID"; 
+    }
+
+    await purchaseBillRepository.updatePurchaseBill(bill._id, workspaceId, companyId, updateData);
+  }
+
+  if (actualTotalAllocated <= 0) {
+    throw new ApiError(400, "No valid amounts allocated to bills");
+  }
+
+  // 2. Create Single Journal Voucher for Bulk Payment
+  const lines = [
+    {
+      accountId: supplier.ledgerAccountId.toString(),
+      debit: Number(actualTotalAllocated),
+      credit: 0,
+      narration: narration || `Bulk Payment via ${paymentMode || "Cash"}`,
+    },
+    {
+      accountId: paymentAccount._id.toString(),
+      debit: 0,
+      credit: Number(actualTotalAllocated),
+      narration: narration || `Bulk Paid to supplier`,
+    }
+  ];
+
+  await journalVoucherService.createJournalVoucher(workspaceId, companyId, userId, {
+    lines,
+    voucherDate: paymentDate ? new Date(paymentDate) : new Date(),
+    voucherType: VOUCHER_TYPE.PAYMENT,
+    referenceNumber: referenceNumber || `BULK-${Date.now()}`,
+    narration: narration || `Bulk Payment made to supplier (${allocations.length} bills)`,
+    status: VOUCHER_STATUS.POSTED,
+  });
+
+  return { success: true, allocated: actualTotalAllocated };
+};
+
 const purchaseBillService = {
   createPurchaseBill,
   updatePurchaseBill,
@@ -508,6 +683,8 @@ const purchaseBillService = {
   getPurchaseBillById,
   ingestPurchaseBill,
   getPurchaseHistory,
+  payPurchaseBill,
+  bulkPayPurchaseBills,
 };
 
 export default purchaseBillService;

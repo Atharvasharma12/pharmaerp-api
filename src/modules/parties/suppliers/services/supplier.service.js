@@ -5,6 +5,7 @@ import { SUPPLIER_STATUS } from "../constants/supplier.constant.js";
 import ledgerService from "../../../finance/ledger/services/ledger.service.js";
 import ledgerRepository from "../../../finance/ledger/repositories/ledger.repository.js";
 import purchaseBillRepository from "../../../catalog/purchase-bills/repositories/purchaseBill.repository.js";
+import * as xlsx from "xlsx";
 
 const createSupplier = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -72,18 +73,42 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
 
 const getSuppliers = async (workspaceId, companyId, query = {}) => {
   const { page, limit, sort, ...filters } = query;
-  const result = await supplierRepository.getSuppliers(
-    workspaceId,
-    companyId,
-    filters,
-    { page, limit, sort },
+  const [result, stats] = await Promise.all([
+    supplierRepository.getSuppliers(
+      workspaceId,
+      companyId,
+      filters,
+      { page, limit, sort },
+    ),
+    supplierRepository.getSuppliersStats(
+      workspaceId,
+      companyId,
+      filters
+    )
+  ]);
+
+  const populatedSuppliers = await Promise.all(
+    result.suppliers.map(async (s) => {
+      const obj = s.toSafeObject();
+      try {
+        const outstanding = await getSupplierOutstanding(s._id, companyId, workspaceId);
+        return {
+          ...obj,
+          outstandingAmount: outstanding.outstandingAmount,
+          balanceType: outstanding.balanceType
+        };
+      } catch (err) {
+        return { ...obj, outstandingAmount: 0, balanceType: "cr" };
+      }
+    })
   );
 
   return {
-    suppliers: result.suppliers.map((s) => s.toSafeObject()),
+    suppliers: populatedSuppliers,
     total: result.total,
     page: result.page,
     limit: result.limit,
+    stats,
   };
 };
 
@@ -255,6 +280,189 @@ const getSupplierPayments = async (supplierId, companyId, workspaceId) => {
   return []; // Will implement when Payment module is ready
 };
 
+
+
+const previewImport = async (workspaceId, companyId, fileBuffer) => {
+  const workbook = xlsx.read(fileBuffer, { type: "buffer" });
+  const sheetName = workbook.SheetNames[0];
+  const worksheet = workbook.Sheets[sheetName];
+
+  // Read as array of arrays first to find the header row
+  const rawRows = xlsx.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+  
+  if (rawRows.length === 0) {
+    throw new ApiError(400, "The Excel file is empty.");
+  }
+
+  // Find the header row (look for common keywords and multiple columns)
+  let headerRowIndex = 0;
+  for (let i = 0; i < Math.min(20, rawRows.length); i++) {
+    const validCells = rawRows[i].filter(c => String(c).trim() !== "");
+    const rowStr = rawRows[i].map(c => String(c).toLowerCase()).join(" ");
+    
+    // Real header row has multiple columns and combinations of keywords
+    if (
+      validCells.length >= 3 && 
+      (rowStr.includes("name") || rowStr.includes("ledger") || rowStr.includes("party")) &&
+      (rowStr.includes("mobile") || rowStr.includes("phone") || rowStr.includes("sno") || rowStr.includes("balance") || rowStr.includes("email"))
+    ) {
+      headerRowIndex = i;
+      break;
+    }
+  }
+
+  const headers = rawRows[headerRowIndex].map(h => String(h).toLowerCase().trim());
+  const dataRows = rawRows.slice(headerRowIndex + 1);
+
+  const data = dataRows.map(rowArr => {
+    const obj = {};
+    let lastHeader = "";
+    headers.forEach((h, idx) => {
+      let currentHeader = h;
+      if (currentHeader) {
+        lastHeader = currentHeader;
+      } else if (lastHeader.includes("mobile") || lastHeader.includes("phone")) {
+        currentHeader = `${lastHeader}_${idx}`; 
+      }
+      
+      if (currentHeader && rowArr[idx] !== undefined && rowArr[idx] !== "") {
+        obj[currentHeader] = rowArr[idx];
+      }
+    });
+    return obj;
+  }).filter(row => Object.keys(row).length > 0);
+
+  const existingSuppliers = await supplierRepository.getSuppliers(
+    workspaceId,
+    companyId,
+    {},
+    { limit: 100000 }
+  );
+  
+  const existingMobilePhones = new Set(existingSuppliers.suppliers.map(s => s.mobile).filter(Boolean));
+  const existingEmails = new Set(existingSuppliers.suppliers.map(s => s.email).filter(Boolean));
+  const existingGSTs = new Set(existingSuppliers.suppliers.map(s => s.gstNumber).filter(Boolean));
+
+  const parsedRows = data.map((lowerRow, index) => {
+    const businessName = String(lowerRow["name"] || lowerRow["ledger name"] || lowerRow["party name"] || lowerRow["ledger"] || "").trim();
+    
+    // Extract mobile from any column that looks like mobile/phone
+    let mobile = "";
+    const mobileKeys = Object.keys(lowerRow).filter(k => k.includes("mobile") || k.includes("phone"));
+    for (const mk of mobileKeys) {
+      const val = String(lowerRow[mk]).replace(/\D/g, ''); // Extract only digits
+      if (val.length >= 10) {
+        const potentialMobile = val.substring(val.length - 10); // get last 10 digits
+        if (/^[6-9][0-9]{9}$/.test(potentialMobile)) {
+          mobile = potentialMobile;
+          break; // Found a valid Indian mobile number
+        }
+      }
+    }
+
+    const email = String(lowerRow["email"] || "").trim();
+    const gstNumber = String(lowerRow["gstin"] || lowerRow["gstin no."] || lowerRow["gstin no"] || lowerRow["gst"] || lowerRow["tin"] || "").trim();
+    const panNumber = String(lowerRow["pan"] || lowerRow["panno"] || "").trim();
+    
+    // Combine addresses
+    const addrParts = [
+      String(lowerRow["address1"] || lowerRow["address"] || lowerRow["address & details"] || ""),
+      String(lowerRow["address2"] || ""),
+      String(lowerRow["address3"] || "")
+    ].filter(Boolean).map(s => s.trim());
+    
+    const addressLine1 = addrParts.join(", ");
+    
+    // License
+    const drugLicenseNumber = String(lowerRow["licence"] || lowerRow["dl no"] || "").trim();
+
+    // Extract balance
+    let openingBalance = 0;
+    let openingBalanceType = "cr";
+    const rawBalance = String(lowerRow["balance"] || lowerRow["cramount"] || lowerRow["outstanding"] || "").trim().toLowerCase();
+    
+    if (rawBalance) {
+      if (rawBalance.includes("dr")) openingBalanceType = "dr";
+      else if (rawBalance.includes("cr")) openingBalanceType = "cr";
+      
+      const numMatch = rawBalance.match(/[\d.]+/);
+      if (numMatch) {
+        openingBalance = parseFloat(numMatch[0]) || 0;
+      }
+    }
+
+    const errors = [];
+
+    // Skip completely empty rows or rows that are just repeated headers (common in PDF/Excel reports)
+    const normalizedName = businessName.toLowerCase();
+    if (!businessName || normalizedName === "ledger name" || normalizedName === "name" || normalizedName === "party name" || normalizedName === "ledger") {
+      return null;
+    }
+
+    if (!businessName) errors.push("Business Name is required");
+    
+    if (mobile) {
+      if (!/^[6-9][0-9]{9}$/.test(mobile)) errors.push("Invalid mobile number format");
+      else if (existingMobilePhones.has(mobile)) errors.push("Mobile number already exists in workspace");
+    }
+
+    if (email) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Invalid email format");
+      else if (existingEmails.has(email)) errors.push("Email already exists in workspace");
+    }
+
+    if (gstNumber) {
+      // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
+      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) errors.push("Invalid GST Number format");
+      else if (existingGSTs.has(gstNumber)) errors.push("GST Number already exists in workspace");
+    }
+
+    if (panNumber) {
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) errors.push("Invalid PAN Number format");
+    }
+
+    return {
+      rowNumber: index + headerRowIndex + 2, // Accounting for header and 0-indexing
+      data: {
+        businessName,
+        mobile: mobile || null,
+        email: email || null,
+        gstNumber: gstNumber || null,
+        panNumber: panNumber || null,
+        drugLicenseNumber: drugLicenseNumber || null,
+        address: { addressLine1 },
+        openingBalance,
+        openingBalanceType,
+        creditDays: 0,
+      },
+      isValid: errors.length === 0,
+      errors
+    };
+  }).filter(Boolean); // Filter out skipped null rows
+
+  return parsedRows;
+};
+
+const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
+  const results = {
+    successful: 0,
+    failed: 0,
+    errors: []
+  };
+
+  for (const supplierData of suppliersData) {
+    try {
+      await createSupplier(workspaceId, companyId, userId, supplierData);
+      results.successful++;
+    } catch (error) {
+      results.failed++;
+      results.errors.push(`Failed for ${supplierData.businessName}: ${error.message}`);
+    }
+  }
+
+  return results;
+};
+
 export default {
   createSupplier,
   getSuppliers,
@@ -265,4 +473,6 @@ export default {
   getSupplierOutstanding,
   getSupplierPurchases,
   getSupplierPayments,
+  previewImport,
+  confirmImport,
 };

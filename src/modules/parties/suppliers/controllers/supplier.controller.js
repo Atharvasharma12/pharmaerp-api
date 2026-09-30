@@ -115,3 +115,25 @@ export const getSupplierPayments = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Supplier payments fetched successfully", payments));
 });
+
+export const previewImport = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json(new ApiResponse(400, "Excel file is required"));
+  }
+  const result = await supplierService.previewImport(
+    req.workspaceId,
+    req.companyId,
+    req.file.buffer
+  );
+  return res.status(200).json(new ApiResponse(200, "Preview generated successfully", result));
+});
+
+export const confirmImport = asyncHandler(async (req, res) => {
+  const result = await supplierService.confirmImport(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    req.body.suppliers
+  );
+  return res.status(200).json(new ApiResponse(200, "Suppliers imported successfully", result));
+});

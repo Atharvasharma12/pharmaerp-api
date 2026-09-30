@@ -97,3 +97,30 @@ export const getPurchaseHistory = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Product purchase history fetched successfully", history));
 });
+
+export const payPurchaseBill = asyncHandler(async (req, res) => {
+  const bill = await purchaseBillService.payPurchaseBill(
+    req.params.billId,
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    req.body
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Purchase bill payment recorded successfully", bill));
+});
+
+export const bulkPayPurchaseBills = asyncHandler(async (req, res) => {
+  const result = await purchaseBillService.bulkPayPurchaseBills(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    req.body
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Bulk payment recorded successfully", result));
+});
