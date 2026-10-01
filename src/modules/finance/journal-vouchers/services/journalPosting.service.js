@@ -114,13 +114,13 @@ const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, opt
       balanceObj.creditTotal += creditChange;
 
       let newBalance = 0;
-      let newBalanceType = "Dr";
+      let newBalanceType = "dr";
       if (balanceObj.debitTotal >= balanceObj.creditTotal) {
         newBalance = balanceObj.debitTotal - balanceObj.creditTotal;
-        newBalanceType = "Dr";
+        newBalanceType = "dr";
       } else {
         newBalance = balanceObj.creditTotal - balanceObj.debitTotal;
-        newBalanceType = "Cr";
+        newBalanceType = "cr";
       }
 
       balanceUpserts.push({

@@ -6,7 +6,9 @@ import { openShift as openShiftService, closeShift, cancelShift as cancelShiftSe
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
 import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTransfer.model.js";
 import { FUND_TRANSFER_STATUS } from "../../finance/treasury/fund-transfers/constants/fundTransfer.constant.js";
+import PaymentQr from "../../finance/treasury/payment-qr/models/paymentQr.model.js";
 import { getTimePeriod } from "../../../utils/timePeriod.js";
+import { getBusinessDateRange } from "../../../utils/businessDate.js";
 
 export const createShift = asyncHandler(async (req, res, next) => {
   const branchId = req.headers["x-branch-id"] || req.branchId || req.query.branchId || req.body.branchId || null;
@@ -20,21 +22,16 @@ export const createShift = asyncHandler(async (req, res, next) => {
   }
 
   // Handle date selection: default today, optionally tomorrow
-  const requestedDate = req.body.date ? new Date(req.body.date) : new Date();
-  const shiftDate = new Date(requestedDate);
-  shiftDate.setHours(0, 0, 0, 0);
+  const { canonicalDate, dateFilter, dateStr } = getBusinessDateRange(req.body.date);
   
   // Guard: no shift if that date already has a closed day closing
-  const startOfShiftDay = new Date(shiftDate); startOfShiftDay.setUTCHours(0,0,0,0);
-  const endOfShiftDay = new Date(shiftDate); endOfShiftDay.setUTCHours(23,59,59,999);
-  
   const existingDC = await DayClosing.findOne({
     branchId,
-    date: { $gte: startOfShiftDay, $lte: endOfShiftDay },
+    date: dateFilter,
     status: { $ne: "cancelled" }
   });
   if (existingDC) {
-    return next(new ApiError(400, `Day closing already done for ${requestedDate.toDateString()}. Cannot open shift.`));
+    return next(new ApiError(400, `Day closing already done for ${dateStr}. Cannot open shift.`));
   }
 
   const now = new Date();
@@ -47,7 +44,7 @@ export const createShift = asyncHandler(async (req, res, next) => {
     branchId,
     openedBy: req.user?._id,
     openedAt: now,
-    date: shiftDate,
+    date: canonicalDate,
     openPeriod: openPeriod.id,
     shiftNo: `SHF-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`
   };
@@ -67,11 +64,8 @@ export const listShifts = asyncHandler(async (req, res, next) => {
   
   if (branchId) filter.branchId = branchId;
   if (date) {
-    const startOfDay = new Date(date);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-    filter.date = { $gte: startOfDay, $lte: endOfDay };
+    const { dateFilter } = getBusinessDateRange(date);
+    filter.date = dateFilter;
   }
   if (status && status !== "all") filter.status = status;
   
@@ -128,6 +122,16 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
   let returnCount = 0; // stubbed until SalesReturn is built
   let returnAmount = 0;
 
+  // Per-UPI breakdown: { [paymentQrId]: { transactionCount, totalAmount } }
+  const upiBreakdownRaw = {};
+
+  const _trackUpi = (paymentQrId, amount) => {
+    const key = paymentQrId ? String(paymentQrId) : "unattributed";
+    if (!upiBreakdownRaw[key]) upiBreakdownRaw[key] = { transactionCount: 0, totalAmount: 0 };
+    upiBreakdownRaw[key].transactionCount++;
+    upiBreakdownRaw[key].totalAmount += amount;
+  };
+
   for (const inv of invoices) {
     // If we model returns as negative grandTotals in the future:
     if (inv.grandTotal < 0) {
@@ -146,6 +150,7 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
         if (pType.includes("UPI") || pType.includes("QR")) {
           hasUpi = true;
           qrNet += (p.amount || 0);
+          _trackUpi(p.paymentQrId, p.amount || 0);
         } else if (pType.includes("CASH")) {
           hasCash = true;
           cashNet += (p.amount || 0);
@@ -162,6 +167,7 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
       if (pMethod.includes("UPI") || pMethod.includes("QR")) {
         paymentQrCount++;
         qrNet += inv.grandTotal;
+        _trackUpi(inv.paymentQrId, inv.grandTotal);
       } else if (pMethod.includes("CASH")) {
         cashInvoiceCount++;
         cashNet += (inv.cashTendered - inv.changeDue > 0) ? (inv.cashTendered - inv.changeDue) : inv.grandTotal;
@@ -171,6 +177,26 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
       }
     }
   }
+
+  // Enrich upiBreakdown with PaymentQr metadata
+  const qrIds = Object.keys(upiBreakdownRaw).filter(k => k !== "unattributed");
+  let upiBreakdown = [];
+  if (qrIds.length > 0) {
+    const qrDocs = await PaymentQr.find({ _id: { $in: qrIds } }).select("upiId label provider").lean();
+    const qrMap = {};
+    for (const qr of qrDocs) qrMap[String(qr._id)] = qr;
+
+    upiBreakdown = Object.entries(upiBreakdownRaw).map(([key, data]) => {
+      if (key === "unattributed") {
+        return { paymentQrId: null, upiId: "Unattributed", label: "Legacy / Untracked", provider: null, ...data };
+      }
+      const qr = qrMap[key] || {};
+      return { paymentQrId: key, upiId: qr.upiId || key, label: qr.label || key, provider: qr.provider || null, ...data };
+    });
+  } else if (upiBreakdownRaw["unattributed"]) {
+    upiBreakdown = [{ paymentQrId: null, upiId: "Unattributed", label: "Legacy / Untracked", provider: null, ...upiBreakdownRaw["unattributed"] }];
+  }
+
 
   const expectedClosingCashAmount_raw = (shift.openingFloatAmount || 0) + cashNet;
 
@@ -249,6 +275,7 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
     cashOut: 0,
     cashNet,
     qrNet,
+    upiBreakdown,
     expectedClosingCashAmount,
     withdrawals,
     deposits,
@@ -271,11 +298,8 @@ export const getShiftCountByDate = asyncHandler(async (req, res, next) => {
   
   const filter = { branchId };
   if (date) {
-    const startOfDay = new Date(date);
-    startOfDay.setUTCHours(0, 0, 0, 0);
-    const endOfDay = new Date(date);
-    endOfDay.setUTCHours(23, 59, 59, 999);
-    filter.date = { $gte: startOfDay, $lte: endOfDay };
+    const { dateFilter } = getBusinessDateRange(date);
+    filter.date = dateFilter;
   }
   
   const count = await Shift.countDocuments(filter);

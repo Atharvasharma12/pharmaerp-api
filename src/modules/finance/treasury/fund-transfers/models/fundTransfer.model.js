@@ -35,6 +35,14 @@ const fundTransferSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Optional: links this transfer to the day closing it was performed within
+    dayClosingId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "DayClosing",
+      default: null,
+      index: true,
+    },
+
     transferNumber: {
       type: String,
       required: [true, "Transfer number is required"],
@@ -231,6 +239,9 @@ fundTransferSchema.index({
 
 // Shift-linked transfer lookup (used by shift summary)
 fundTransferSchema.index({ shiftId: 1, status: 1, isDeleted: 1 });
+
+// Day closing-linked transfer lookup (used by day closing summary)
+fundTransferSchema.index({ dayClosingId: 1, status: 1, isDeleted: 1 });
 
 // Branch-level fund transfer reporting
 fundTransferSchema.index({ branchId: 1, workspaceId: 1, companyId: 1, status: 1, isDeleted: 1, transferDate: -1 });

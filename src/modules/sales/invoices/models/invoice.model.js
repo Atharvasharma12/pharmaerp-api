@@ -72,6 +72,14 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: "Cash",
     },
+    // For single-method UPI invoices: which PaymentQr (UPI VPA) received the payment
+    // For split payments, each UPI entry inside payments[] carries its own paymentQrId
+    paymentQrId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PaymentQr",
+      default: null,
+      index: true,
+    },
     payments: {
       type: Array,
       default: [],
@@ -115,6 +123,10 @@ const invoiceSchema = new mongoose.Schema(
 );
 
 invoiceSchema.index({ companyId: 1, workspaceId: 1, date: -1 });
+// Per-UPI analytics: single-method UPI invoices
+invoiceSchema.index({ companyId: 1, paymentQrId: 1, date: -1 });
+// Per-UPI analytics: split-payment UPI sub-items
+invoiceSchema.index({ companyId: 1, "payments.paymentQrId": 1, date: -1 });
 
 const SalesInvoice = mongoose.model("SalesInvoice", invoiceSchema);
 

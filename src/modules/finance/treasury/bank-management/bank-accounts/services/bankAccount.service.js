@@ -214,14 +214,14 @@ const getBankAccounts = async (workspaceId, companyId, query = {}) => {
         );
         if (accountBalanceObj) {
           const bal = accountBalanceObj.balance || 0;
-          const balType = accountBalanceObj.balanceType || "dr";
+          const balType = (accountBalanceObj.balanceType || "dr").toLowerCase();
           balance = balType === "dr" ? bal : -bal;
         } else {
           // Fallback to opening balance
           const ledgerAccount = b.ledgerAccountId;
           if (ledgerAccount && typeof ledgerAccount === "object") {
             const opBal = ledgerAccount.openingBalance || 0;
-            const opType = ledgerAccount.openingBalanceType || "dr";
+            const opType = (ledgerAccount.openingBalanceType || "dr").toLowerCase();
             balance = opType === "dr" ? opBal : -opBal;
           }
         }
@@ -262,14 +262,14 @@ const getBankAccountById = async (id, companyId, workspaceId) => {
     );
     if (accountBalanceObj) {
       const bal = accountBalanceObj.balance || 0;
-      const balType = accountBalanceObj.balanceType || "dr";
+      const balType = (accountBalanceObj.balanceType || "dr").toLowerCase();
       balance = balType === "dr" ? bal : -bal;
     } else {
       // Fallback to opening balance
       const ledgerAccount = bankAccount.ledgerAccountId;
       if (ledgerAccount && typeof ledgerAccount === "object") {
         const opBal = ledgerAccount.openingBalance || 0;
-        const opType = ledgerAccount.openingBalanceType || "dr";
+        const opType = (ledgerAccount.openingBalanceType || "dr").toLowerCase();
         balance = opType === "dr" ? opBal : -opBal;
       }
     }

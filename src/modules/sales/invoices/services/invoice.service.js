@@ -14,12 +14,109 @@ import cashTransactionService from "../../../finance/treasury/cash-management/ca
 import CashAccount from "../../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
 import bankTransactionService from "../../../finance/treasury/bank-management/bank-transactions/services/bankTransaction.service.js";
 import BankAccount from "../../../finance/treasury/bank-management/bank-accounts/models/bankAccount.model.js";
+import PaymentQr from "../../../finance/treasury/payment-qr/models/paymentQr.model.js";
 
 import voucherNumberService from "../../../finance/journal-vouchers/services/voucherNumber.service.js";
 import cashTransactionRepository from "../../../finance/treasury/cash-management/cash-transactions/repositories/cashTransaction.repository.js";
 import cashDenominationRepository from "../../../finance/treasury/cash-management/cash-denominations/repositories/cashDenomination.repository.js";
 
+/**
+ * Validates that all cash payments have explicit denomination breakdowns
+ * and that received - returned exactly equals the cash amount.
+ */
+const validateCashDenominations = (saleData) => {
+  const isCashMethod = String(saleData.paymentMethod || "").toLowerCase() === "cash";
+  const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
+
+  const cashPayments = [];
+
+  if (paymentsList.length > 0) {
+    for (const [index, p] of paymentsList.entries()) {
+      const pType = String(p.paymentType || p.mode || "").toLowerCase();
+      if (pType === "cash") {
+        cashPayments.push({
+          index,
+          amount: Number(p.amount || 0),
+          denominations: Array.isArray(p.denominations) && p.denominations.length > 0
+            ? p.denominations
+            : (index === 0 && Array.isArray(saleData.denominations) ? saleData.denominations : []),
+          returnedDenominations: Array.isArray(p.returnedDenominations) && p.returnedDenominations.length > 0
+            ? p.returnedDenominations
+            : (index === 0 && Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : []),
+        });
+      }
+    }
+  } else if (isCashMethod) {
+    cashPayments.push({
+      index: 0,
+      amount: Number(saleData.grandTotal || 0),
+      denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
+      returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : [],
+    });
+  }
+
+  for (const cp of cashPayments) {
+    if (cp.amount <= 0) continue;
+
+    const denoms = (Array.isArray(cp.denominations) ? cp.denominations : []).filter(
+      d => Number(d.quantity) > 0 && Number(d.denomination) > 0
+    );
+    const returnedDenoms = (Array.isArray(cp.returnedDenominations) ? cp.returnedDenominations : []).filter(
+      d => Number(d.quantity) > 0 && Number(d.denomination) > 0
+    );
+
+    if (denoms.length === 0) {
+      throw new ApiError(
+        400,
+        `Cash payment of ₹${cp.amount.toFixed(2)} requires exact denomination breakdown. Please provide customer cash denominations.`
+      );
+    }
+
+    const receivedTotal = denoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+    const returnedTotal = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+
+    if (receivedTotal < cp.amount) {
+      throw new ApiError(
+        400,
+        `Received cash denominations total (₹${receivedTotal.toFixed(2)}) is less than required cash amount (₹${cp.amount.toFixed(2)}).`
+      );
+    }
+
+    const expectedChange = Math.max(0, receivedTotal - cp.amount);
+    if (Math.abs(returnedTotal - expectedChange) > 0.01) {
+      throw new ApiError(
+        400,
+        `Change returned denominations total (₹${returnedTotal.toFixed(2)}) must exactly equal expected change (₹${expectedChange.toFixed(2)}).`
+      );
+    }
+
+    const netCash = receivedTotal - returnedTotal;
+    if (Math.abs(netCash - cp.amount) > 0.01) {
+      throw new ApiError(
+        400,
+        `Net cash denomination total (₹${netCash.toFixed(2)}) does not match cash payment amount (₹${cp.amount.toFixed(2)}).`
+      );
+    }
+  }
+
+  // Backfill denominations to payments list if passed only at root saleData level
+  if (Array.isArray(saleData.payments)) {
+    const cashRow = saleData.payments.find(p => String(p.paymentType || p.mode || "").toLowerCase() === "cash");
+    if (cashRow) {
+      if ((!cashRow.denominations || cashRow.denominations.length === 0) && Array.isArray(saleData.denominations) && saleData.denominations.length > 0) {
+        cashRow.denominations = saleData.denominations;
+      }
+      if ((!cashRow.returnedDenominations || cashRow.returnedDenominations.length === 0) && Array.isArray(saleData.returnedDenominations) && saleData.returnedDenominations.length > 0) {
+        cashRow.returnedDenominations = saleData.returnedDenominations;
+      }
+    }
+  }
+};
+
 const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null) => {
+  // Enforce mandatory cash denomination breakdown
+  validateCashDenominations(saleData);
+
   const _timingStats = [];
   const _startTotal = Date.now();
   let _lastTime = _startTotal;
@@ -129,6 +226,24 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
   const isAutoGenerated = saleData.invoiceNo && (saleData.invoiceNo.startsWith("RET-INV") || saleData.invoiceNo.startsWith("TAX-INV"));
   const finalInvoiceNo = isAutoGenerated ? generatedInvoiceNo : (saleData.invoiceNo || generatedInvoiceNo);
 
+  // Resolve paymentQrId for UPI attribution:
+  // - For single-method UPI: use top-level saleData.paymentQrId
+  // - For split payments: pick paymentQrId from first UPI sub-payment
+  // - For all other methods: null (backward compatible)
+  let resolvedPaymentQrId = null;
+  const paymentMethodUpper = String(saleData.paymentMethod || "").toUpperCase();
+  if (saleData.paymentQrId) {
+    resolvedPaymentQrId = saleData.paymentQrId;
+  } else if (Array.isArray(saleData.payments)) {
+    const upiPayment = saleData.payments.find(p =>
+      String(p.paymentType || "").toUpperCase().includes("UPI") && p.paymentQrId
+    );
+    if (upiPayment) resolvedPaymentQrId = upiPayment.paymentQrId;
+  } else if (paymentMethodUpper.includes("UPI") || paymentMethodUpper.includes("QR")) {
+    // Single-method UPI without explicit paymentQrId — keep null (unattributed)
+    resolvedPaymentQrId = null;
+  }
+
   const newSale = {
     workspaceId: workspaceId || customer.workspaceId,
     companyId: companyId || customer.companyId,
@@ -145,6 +260,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     cashTendered: saleData.cashTendered || 0,
     changeDue: saleData.changeDue || 0,
     paymentMethod: saleData.paymentMethod || "Cash",
+    paymentQrId: resolvedPaymentQrId || null,
     payments: Array.isArray(saleData.payments) ? saleData.payments : [],
     denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
     status: saleData.status || "Paid",
@@ -369,9 +485,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
         saleData.payments = [{
           paymentType: "cash",
           amount: newSale.grandTotal,
-          denominations: Array.isArray(saleData.denominations) && saleData.denominations.length > 0 
-                  ? saleData.denominations 
-                  : [{ denomination: 1, quantity: newSale.grandTotal }]
+          denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
+          returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : []
         }];
       } else if (isUpiPaid && !saleData.payments) {
         saleData.payments = [{
@@ -379,8 +494,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           amount: newSale.grandTotal
         }];
       }
-
-      import('fs').then(fs => fs.writeFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-payments.txt', JSON.stringify(paymentsList, null, 2)));
 
       for (const payment of paymentsList) {
         const paymentType = String(payment.paymentType || payment.mode || "").toLowerCase();
@@ -423,21 +536,15 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
             let txSuccess = false;
             if (treasuryCashAccount) {
               try {
-                // Determine received vs returned based on denominations payload
-                let receivedAmount = amount;
-                let changeAmount = 0;
-                let receivedDenoms = [{ denomination: 1, quantity: amount }];
-                let returnedDenoms = [];
-
-                if (Array.isArray(payment.denominations) && payment.denominations.length > 0) {
-                  receivedDenoms = payment.denominations;
-                  receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-                }
-
-                if (Array.isArray(payment.returnedDenominations) && payment.returnedDenominations.length > 0) {
-                  returnedDenoms = payment.returnedDenominations;
-                  changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-                }
+                // Determine received vs returned based on validated denominations payload
+                let receivedDenoms = Array.isArray(payment.denominations) && payment.denominations.length > 0
+                  ? payment.denominations
+                  : (Array.isArray(saleData.denominations) ? saleData.denominations : []);
+                let returnedDenoms = Array.isArray(payment.returnedDenominations)
+                  ? payment.returnedDenominations
+                  : [];
+                let receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+                let changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
 
                 // 1. Process CASH_IN for exact received amount
                 const cashInPayload = {
@@ -537,7 +644,19 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           }
         } else if (paymentType === "upi") {
           // --- UPI RECEIPT ---
-          const bankAccount = primaryBankAccount || defaultBankAccount;
+          let bankAccount = null;
+          
+          const qrIdToLookup = payment.paymentQrId || resolvedPaymentQrId;
+          if (qrIdToLookup) {
+             const paymentQr = await PaymentQr.findById(qrIdToLookup).session(session);
+             if (paymentQr && paymentQr.bankAccountId) {
+                bankAccount = await BankAccount.findOne({ _id: paymentQr.bankAccountId, isDeleted: false, isActive: true }).session(session);
+             }
+          }
+          
+          if (!bankAccount) {
+            bankAccount = primaryBankAccount || defaultBankAccount;
+          }
 
           let txSuccess = false;
           if (bankAccount) {
@@ -567,8 +686,11 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           }
           
           if (!txSuccess) {
-            if (bankAccountsResult && bankAccountsResult.accounts && bankAccountsResult.accounts.length > 0) {
-              const bankLedgerAccount = bankAccountsResult.accounts[0];
+            let bankLedgerAccountId = bankAccount?.ledgerAccountId;
+            if (!bankLedgerAccountId && bankAccountsResult && bankAccountsResult.accounts && bankAccountsResult.accounts.length > 0) {
+              bankLedgerAccountId = bankAccountsResult.accounts[0]._id;
+            }
+            if (bankLedgerAccountId) {
               const fallbackUpiJvPayload = {
                 voucherNumber: nextReceiptJv(),
                 voucherDate: newSale.date || new Date(),
@@ -578,7 +700,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                 status: "POSTED",
                 lines: [
                   {
-                    accountId: bankLedgerAccount._id,
+                    accountId: bankLedgerAccountId,
                     debit: amount,
                     credit: 0,
                     narration: `UPI Received for Invoice ${newSale.invoiceNo}`

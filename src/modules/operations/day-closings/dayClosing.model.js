@@ -38,6 +38,11 @@ const dayClosingSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    dayClosingNo: {
+      type: String,
+      trim: true,
+      index: true,
+    },
     status: {
       type: String,
       enum: ["draft", "closed", "cancelled"],
@@ -78,6 +83,28 @@ const dayClosingSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    openingDenominations: [
+      {
+        denomination: { type: Number },
+        count: { type: Number },
+        amount: { type: Number },
+      },
+    ],
+    closingDenominations: [
+      {
+        denomination: { type: Number },
+        count: { type: Number },
+        amount: { type: Number },
+      },
+    ],
+    totalFundWithdrawals: {
+      type: Number,
+      default: 0,
+    },
+    totalFundDeposits: {
+      type: Number,
+      default: 0,
     },
     cashDifferenceAmount: {
       type: Number,

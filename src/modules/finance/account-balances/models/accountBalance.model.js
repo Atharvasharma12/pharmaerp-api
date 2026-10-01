@@ -59,7 +59,7 @@ const accountBalanceSchema = new mongoose.Schema(
   }
 );
 
-accountBalanceSchema.pre("save", async function () {
+accountBalanceSchema.pre("validate", async function () {
   const debit = this.debitTotal || 0;
   const credit = this.creditTotal || 0;
   if (debit >= credit) {

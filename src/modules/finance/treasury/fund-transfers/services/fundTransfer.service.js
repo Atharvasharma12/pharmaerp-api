@@ -201,9 +201,10 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       { session },
     );
 
-    // 9. Auto-link to open shift and resolve branchId
+    // 9. Auto-link to open shift / day closing and resolve branchId
     // Determine which cash account to use for shift detection (prefer FROM, fallback TO)
     let resolvedShiftId = payload.shiftId || null;
+    let resolvedDayClosingId = payload.dayClosingId || null;
     let resolvedBranchId = null;
 
     const primaryCashAccountId =
@@ -238,12 +239,29 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       }
     }
 
+    // If dayClosingId not explicitly provided, auto-detect draft day closing for this branch
+    if (!resolvedDayClosingId && resolvedBranchId) {
+      try {
+        const { DayClosing } = await import("../../../../operations/day-closings/dayClosing.model.js");
+        const draftDC = await DayClosing.findOne({
+          companyId,
+          workspaceId,
+          branchId: resolvedBranchId,
+          status: "draft",
+        }).select("_id").session(session);
+        if (draftDC) resolvedDayClosingId = draftDC._id;
+      } catch (dcErr) {
+        console.warn("[FundTransfer] Could not auto-link day closing:", dcErr.message);
+      }
+    }
+
     // 10. Save the Fund Transfer record
     const fundTransferPayload = {
       workspaceId,
       companyId,
       branchId: resolvedBranchId,
       shiftId: resolvedShiftId,
+      dayClosingId: resolvedDayClosingId,
       transferNumber,
       transferDate: new Date(transferDate),
       transferType,

@@ -6,12 +6,14 @@ import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTrans
 import { FUND_TRANSFER_STATUS } from "../../finance/treasury/fund-transfers/constants/fundTransfer.constant.js";
 import ApiError from "../../../utils/ApiError.js";
 import { getTimePeriod, periodIdToLabel } from "../../../utils/timePeriod.js";
+import { getBusinessDateRange } from "../../../utils/businessDate.js";
 
 export const openShift = async (data) => {
   const { workspaceId, companyId, branchId, date } = data;
 
   // Ensure no open day closing for this date
-  const dayClosing = await DayClosing.findOne({ branchId, date, status: { $ne: "cancelled" } });
+  const { dateFilter } = getBusinessDateRange(date);
+  const dayClosing = await DayClosing.findOne({ branchId, date: dateFilter, status: { $ne: "cancelled" } });
   if (dayClosing) {
     throw new ApiError(400, "A day closing process already exists for this date.");
   }
@@ -145,14 +147,11 @@ export const closeShift = async (shiftId, userId, actualClosingCashAmount, closi
   }
 
   // Count existing closed shifts today with same name pattern
-  const startOfDay = new Date(shift.date);
-  startOfDay.setUTCHours(0, 0, 0, 0);
-  const endOfDay = new Date(shift.date);
-  endOfDay.setUTCHours(23, 59, 59, 999);
+  const { dateFilter } = getBusinessDateRange(shift.date);
 
   const sameNameCount = await Shift.countDocuments({
     branchId: shift.branchId,
-    date: { $gte: startOfDay, $lte: endOfDay },
+    date: dateFilter,
     status: "closed",
     shiftName: { $regex: `^${baseName}`, $options: "i" },
     _id: { $ne: shift._id },
