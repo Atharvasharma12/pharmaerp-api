@@ -72,6 +72,15 @@ const saveAccount = async (account) => {
   return account.save();
 };
 
+const getAccountsByIds = async (accountIds, companyId, workspaceId, options = {}) => {
+  return Account.find({
+    _id: { $in: accountIds },
+    companyId,
+    workspaceId,
+    isDeleted: false,
+  }).session(options.session || null);
+};
+
 const getAccounts = async (
   workspaceId,
   companyId,
@@ -115,6 +124,41 @@ const getAccounts = async (
   if (filters.search) {
     const searchRegex = new RegExp(filters.search.trim(), "i");
     query.$or = [{ accountName: searchRegex }, { accountCode: searchRegex }];
+  }
+
+  // Branch isolation for Cash Accounts: STRICT whitelist approach
+  if (filters.branchId) {
+    const Account = mongoose.model("Account");
+    const allCashAccounts = await Account.find({
+      companyId,
+      isDeleted: false,
+      accountCategory: "CASH"
+    }).select("_id");
+    const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
+
+    const CashAccount = mongoose.model("CashAccount");
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+    const validBranchCashAccounts = await CashAccount.find({
+      companyId,
+      isDeleted: false,
+      branchId: targetBranchId
+    }).select("ledgerAccountId");
+    const validLedgerIds = validBranchCashAccounts
+      .map(c => c.ledgerAccountId?.toString())
+      .filter(Boolean);
+
+    const invalidLedgerIds = allCashAccountIds
+      .filter(id => !validLedgerIds.includes(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (invalidLedgerIds.length > 0) {
+      if (query._id) {
+        // If there's already an _id query (e.g. from search), merge it
+        query._id = { ...query._id, $nin: invalidLedgerIds };
+      } else {
+        query._id = { $nin: invalidLedgerIds };
+      }
+    }
   }
 
   const sort = options.sort || { accountName: 1 };
@@ -186,6 +230,7 @@ export default {
   findAccountByName,
   createAccount,
   saveAccount,
+  getAccountsByIds,
   getAccounts,
   deleteAccountById,
 };

@@ -1,3 +1,5 @@
+process.env.TZ = "Asia/Kolkata";
+
 import express from "express";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";

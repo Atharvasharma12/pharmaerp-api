@@ -79,7 +79,7 @@ const findOrCreateSystemAccount = async (
 // ---------------------------------------------------------------------------
 // CREATE CASH TRANSACTION
 // ---------------------------------------------------------------------------
-const createCashTransaction = async (workspaceId, companyId, userId, payload) => {
+const createCashTransaction = async (workspaceId, companyId, userId, payload, options = {}) => {
   const {
     transactionDate,
     cashAccountId,
@@ -92,12 +92,16 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
     denominations,
   } = payload;
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const providedSession = options.session;
+  const session = providedSession || await mongoose.startSession();
+  
+  if (!providedSession) {
+    session.startTransaction();
+  }
 
   try {
     // 1. Verify CashAccount exists and is active
-    const cashAccount = await CashAccount.findOne({
+    const cashAccount = payload.preLoadedCashAccount || await CashAccount.findOne({
       _id: cashAccountId,
       companyId,
       workspaceId,
@@ -169,14 +173,14 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
     }
 
     // 3. Generate unique transaction number
-    const transactionNumber = await cashTransactionRepository.getNextTransactionNumber(
+    const transactionNumber = payload.transactionNumber || await cashTransactionRepository.getNextTransactionNumber(
       companyId,
       workspaceId,
       { session },
     );
 
     // 4. Generate journal voucher number
-    const voucherNumber = await voucherNumberService.generateVoucherNumber(
+    const voucherNumber = payload.voucherNumber || await voucherNumberService.generateVoucherNumber(
       companyId,
       workspaceId,
       VOUCHER_TYPE.JOURNAL,
@@ -248,7 +252,7 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
 
     // 7. Add voucherId to lines and save
     const linesWithVoucher = lines.map((l) => ({ ...l, voucherId: journalVoucher._id }));
-    await journalLineRepository.createLines(linesWithVoucher, { session });
+    const savedLines = await journalLineRepository.createLines(linesWithVoucher, { session });
 
     // 8. Post the voucher immediately
     await journalPostingService.postJournalVoucher(
@@ -256,7 +260,7 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
       companyId,
       workspaceId,
       userId,
-      { session },
+      { session, preLoadedVoucher: journalVoucher, preLoadedLines: savedLines },
     );
 
     // 9. Save the Cash Transaction record
@@ -287,7 +291,7 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
         0,
       );
 
-      const countNumber = await cashDenominationRepository.getNextCountNumber(
+      const countNumber = payload.countNumber || await cashDenominationRepository.getNextCountNumber(
         companyId,
         workspaceId,
         { session },
@@ -351,13 +355,17 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload) =>
       { session },
     );
 
-    await session.commitTransaction();
-    session.endSession();
+    if (!providedSession) {
+      await session.commitTransaction();
+      session.endSession();
+    }
 
-    return getCashTransactionById(cashTransaction._id, companyId, workspaceId);
+    return getCashTransactionById(cashTransaction._id, companyId, workspaceId, { session });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    if (!providedSession) {
+      await session.abortTransaction();
+      session.endSession();
+    }
     throw error;
   }
 };
@@ -385,12 +393,13 @@ const getCashTransactions = async (workspaceId, companyId, query = {}) => {
 // ---------------------------------------------------------------------------
 // GET CASH TRANSACTION BY ID
 // ---------------------------------------------------------------------------
-const getCashTransactionById = async (id, companyId, workspaceId) => {
+const getCashTransactionById = async (id, companyId, workspaceId, options = {}) => {
   const cashTransaction =
     await cashTransactionRepository.findCashTransactionByIdCompanyAndWorkspace(
       id,
       companyId,
       workspaceId,
+      options
     );
   if (!cashTransaction) {
     throw new ApiError(404, "Cash Transaction not found");

@@ -26,9 +26,21 @@ const dayClosingSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    // Reference to the branch's system default cash account used in this day closing
+    cashAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CashAccount",
+      default: null,
+      index: true,
+    },
     date: {
       type: Date,
       required: true,
+      index: true,
+    },
+    dayClosingNo: {
+      type: String,
+      trim: true,
       index: true,
     },
     status: {
@@ -71,6 +83,28 @@ const dayClosingSchema = new mongoose.Schema(
       type: Number,
       default: 0,
       min: 0,
+    },
+    openingDenominations: [
+      {
+        denomination: { type: Number },
+        count: { type: Number },
+        amount: { type: Number },
+      },
+    ],
+    closingDenominations: [
+      {
+        denomination: { type: Number },
+        count: { type: Number },
+        amount: { type: Number },
+      },
+    ],
+    totalFundWithdrawals: {
+      type: Number,
+      default: 0,
+    },
+    totalFundDeposits: {
+      type: Number,
+      default: 0,
     },
     cashDifferenceAmount: {
       type: Number,

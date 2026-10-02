@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import invoiceRepository from "../repositories/invoice.repository.js";
 import customerRepository from "../../../parties/customers/repositories/customer.repository.js";
@@ -13,9 +14,178 @@ import cashTransactionService from "../../../finance/treasury/cash-management/ca
 import CashAccount from "../../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
 import bankTransactionService from "../../../finance/treasury/bank-management/bank-transactions/services/bankTransaction.service.js";
 import BankAccount from "../../../finance/treasury/bank-management/bank-accounts/models/bankAccount.model.js";
+import PaymentQr from "../../../finance/treasury/payment-qr/models/paymentQr.model.js";
+
+import voucherNumberService from "../../../finance/journal-vouchers/services/voucherNumber.service.js";
+import cashTransactionRepository from "../../../finance/treasury/cash-management/cash-transactions/repositories/cashTransaction.repository.js";
+import cashDenominationRepository from "../../../finance/treasury/cash-management/cash-denominations/repositories/cashDenomination.repository.js";
+
+/**
+ * Validates that all cash payments have explicit denomination breakdowns
+ * and that received - returned exactly equals the cash amount.
+ */
+const validateCashDenominations = (saleData) => {
+  const isCashMethod = String(saleData.paymentMethod || "").toLowerCase() === "cash";
+  const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
+
+  const cashPayments = [];
+
+  if (paymentsList.length > 0) {
+    for (const [index, p] of paymentsList.entries()) {
+      const pType = String(p.paymentType || p.mode || "").toLowerCase();
+      if (pType === "cash") {
+        cashPayments.push({
+          index,
+          amount: Number(p.amount || 0),
+          denominations: Array.isArray(p.denominations) && p.denominations.length > 0
+            ? p.denominations
+            : (index === 0 && Array.isArray(saleData.denominations) ? saleData.denominations : []),
+          returnedDenominations: Array.isArray(p.returnedDenominations) && p.returnedDenominations.length > 0
+            ? p.returnedDenominations
+            : (index === 0 && Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : []),
+        });
+      }
+    }
+  } else if (isCashMethod) {
+    cashPayments.push({
+      index: 0,
+      amount: Number(saleData.grandTotal || 0),
+      denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
+      returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : [],
+    });
+  }
+
+  for (const cp of cashPayments) {
+    if (cp.amount <= 0) continue;
+
+    const denoms = (Array.isArray(cp.denominations) ? cp.denominations : []).filter(
+      d => Number(d.quantity) > 0 && Number(d.denomination) > 0
+    );
+    const returnedDenoms = (Array.isArray(cp.returnedDenominations) ? cp.returnedDenominations : []).filter(
+      d => Number(d.quantity) > 0 && Number(d.denomination) > 0
+    );
+
+    if (denoms.length === 0) {
+      throw new ApiError(
+        400,
+        `Cash payment of ₹${cp.amount.toFixed(2)} requires exact denomination breakdown. Please provide customer cash denominations.`
+      );
+    }
+
+    const receivedTotal = denoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+    const returnedTotal = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+
+    if (receivedTotal < cp.amount) {
+      throw new ApiError(
+        400,
+        `Received cash denominations total (₹${receivedTotal.toFixed(2)}) is less than required cash amount (₹${cp.amount.toFixed(2)}).`
+      );
+    }
+
+    const expectedChange = Math.max(0, receivedTotal - cp.amount);
+    if (Math.abs(returnedTotal - expectedChange) > 0.01) {
+      throw new ApiError(
+        400,
+        `Change returned denominations total (₹${returnedTotal.toFixed(2)}) must exactly equal expected change (₹${expectedChange.toFixed(2)}).`
+      );
+    }
+
+    const netCash = receivedTotal - returnedTotal;
+    if (Math.abs(netCash - cp.amount) > 0.01) {
+      throw new ApiError(
+        400,
+        `Net cash denomination total (₹${netCash.toFixed(2)}) does not match cash payment amount (₹${cp.amount.toFixed(2)}).`
+      );
+    }
+  }
+
+  // Backfill denominations to payments list if passed only at root saleData level
+  if (Array.isArray(saleData.payments)) {
+    const cashRow = saleData.payments.find(p => String(p.paymentType || p.mode || "").toLowerCase() === "cash");
+    if (cashRow) {
+      if ((!cashRow.denominations || cashRow.denominations.length === 0) && Array.isArray(saleData.denominations) && saleData.denominations.length > 0) {
+        cashRow.denominations = saleData.denominations;
+      }
+      if ((!cashRow.returnedDenominations || cashRow.returnedDenominations.length === 0) && Array.isArray(saleData.returnedDenominations) && saleData.returnedDenominations.length > 0) {
+        cashRow.returnedDenominations = saleData.returnedDenominations;
+      }
+    }
+  }
+};
 
 const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null) => {
-  const customer = await customerRepository.findCustomerById(customerId, companyId, workspaceId);
+  // Enforce mandatory cash denomination breakdown
+  validateCashDenominations(saleData);
+
+  const _timingStats = [];
+  const _startTotal = Date.now();
+  let _lastTime = _startTotal;
+  const _logTime = (label) => {
+    const now = Date.now();
+    _timingStats.push(`${label}: ${now - _lastTime}ms`);
+    _lastTime = now;
+  };
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    _logTime('Session started');
+    
+    // Calculate Financial Year string early for prefix
+    const saleDateObj = saleData.date ? new Date(saleData.date) : new Date();
+    let earlyFyString = "";
+    const month = saleDateObj.getMonth();
+    const year = saleDateObj.getFullYear();
+    if (month >= 3) {
+      earlyFyString = `${year.toString().slice(-2)}${(year + 1).toString().slice(-2)}`;
+    } else {
+      earlyFyString = `${(year - 1).toString().slice(-2)}${year.toString().slice(-2)}`;
+    }
+    const earlyBranchCode = "BR01"; // Fallback, will adjust later if needed
+    const invoicePrefix = `${earlyBranchCode}-${earlyFyString}-`;
+
+    // Fetch all required reference data concurrently to eliminate sequential network latency
+    const [
+      customer,
+      activeBranches,
+      periods,
+      lastInvoice,
+      company,
+      salesAccountsResult,
+      cashAccountsResult,
+      bankAccountsResult,
+      primaryBankAccount,
+      defaultBankAccount,
+      defaultCashAccount
+    ] = await Promise.all([
+      customerRepository.findCustomerById(customerId, companyId, workspaceId),
+      branchRepository.getCompanyBranches(companyId),
+      financialPeriodRepository.getPeriods(workspaceId, companyId, { isCurrent: true, all: true }),
+      invoiceRepository.getLatestInvoiceByPrefix(companyId, workspaceId, invoicePrefix),
+      Company.findOne({ _id: companyId, workspaceId }),
+      accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "SALES" }),
+      accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "CASH" }),
+      accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "BANK" }),
+      BankAccount.findOne({ companyId, workspaceId, isDeleted: false, isActive: true, isPrimary: true }),
+      BankAccount.findOne({ companyId, workspaceId, isDeleted: false, isActive: true }),
+      // Fetch branch-primary cash account — prefer isPrimary:true in the branch
+      CashAccount.findOne({
+        companyId,
+        workspaceId,
+        ...(saleData.branchId ? { branchId: saleData.branchId } : {}),
+        isPrimary: true,
+        isDeleted: false,
+      }).then(acc =>
+        // Fallback: any active cash account in this branch
+        acc || CashAccount.findOne({
+          companyId,
+          workspaceId,
+          ...(saleData.branchId ? { branchId: saleData.branchId } : {}),
+          isDeleted: false,
+        })
+      )
+    ]);
 
   if (!customer) {
     throw new ApiError(404, "Customer not found");
@@ -23,78 +193,56 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
   let resolvedBranchId = saleData.branchId || null;
   let branchCode = "BR01";
-  if (!resolvedBranchId) {
-    try {
-      const activeBranches = await branchRepository.getCompanyBranches(companyId);
-      if (Array.isArray(activeBranches) && activeBranches.length > 0) {
-        resolvedBranchId = activeBranches[0]._id;
-        branchCode = activeBranches[0].branchCode || branchCode;
-      }
-    } catch (bErr) {
-      // Fallback
-    }
-  } else {
-    try {
-      const branchDoc = await branchRepository.findBranchById(resolvedBranchId);
-      if (branchDoc && branchDoc.branchCode) {
-        branchCode = branchDoc.branchCode;
-      }
-    } catch (bErr) {
-      // Fallback
-    }
+  if (!resolvedBranchId && Array.isArray(activeBranches) && activeBranches.length > 0) {
+    resolvedBranchId = activeBranches[0]._id;
+    branchCode = activeBranches[0].branchCode || branchCode;
   }
 
-  const periods = await financialPeriodRepository.getPeriods(workspaceId, companyId, { isCurrent: true, all: true });
   let period = periods.periods && periods.periods[0];
   const financialPeriodId = period ? period._id : null;
 
-  // Calculate Financial Year string
-  let fyString;
+  let fyString = earlyFyString;
   if (period && period.startDate && period.endDate) {
     const startYear = new Date(period.startDate).getFullYear();
     const endYear = new Date(period.endDate).getFullYear();
     fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
-  } else {
-    const saleDate = saleData.date ? new Date(saleData.date) : new Date();
-    const month = saleDate.getMonth(); // 0-11
-    const year = saleDate.getFullYear();
-    let startYear, endYear;
-    if (month >= 3) { // April to Dec
-      startYear = year;
-      endYear = year + 1;
-    } else { // Jan to March
-      startYear = year - 1;
-      endYear = year;
-    }
-    fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
   }
 
+  const finalInvoicePrefix = `${branchCode}-${fyString}-`;
   let sequenceNo = 1;
-  const invoicePrefix = `${branchCode}-${fyString}-`;
-
-  try {
-    const lastInvoice = await invoiceRepository.getLatestInvoiceByPrefix(
-      companyId,
-      workspaceId,
-      invoicePrefix
-    );
-    if (lastInvoice && lastInvoice.invoiceNo) {
-      const parts = lastInvoice.invoiceNo.split('-');
-      if (parts.length >= 3) {
-        const lastSeq = parseInt(parts[2], 10);
-        if (!isNaN(lastSeq)) {
-          sequenceNo = lastSeq + 1;
-        }
+  
+  if (lastInvoice && lastInvoice.invoiceNo && lastInvoice.invoiceNo.startsWith(finalInvoicePrefix)) {
+    const parts = lastInvoice.invoiceNo.split('-');
+    if (parts.length >= 3) {
+      const lastSeq = parseInt(parts[2], 10);
+      if (!isNaN(lastSeq)) {
+        sequenceNo = lastSeq + 1;
       }
     }
-  } catch (err) {
-    console.error("Error generating invoice sequence:", err);
   }
 
-  const generatedInvoiceNo = `${invoicePrefix}${sequenceNo.toString().padStart(4, '0')}`;
+  const generatedInvoiceNo = `${finalInvoicePrefix}${sequenceNo.toString().padStart(4, '0')}`;
 
   const isAutoGenerated = saleData.invoiceNo && (saleData.invoiceNo.startsWith("RET-INV") || saleData.invoiceNo.startsWith("TAX-INV"));
   const finalInvoiceNo = isAutoGenerated ? generatedInvoiceNo : (saleData.invoiceNo || generatedInvoiceNo);
+
+  // Resolve paymentQrId for UPI attribution:
+  // - For single-method UPI: use top-level saleData.paymentQrId
+  // - For split payments: pick paymentQrId from first UPI sub-payment
+  // - For all other methods: null (backward compatible)
+  let resolvedPaymentQrId = null;
+  const paymentMethodUpper = String(saleData.paymentMethod || "").toUpperCase();
+  if (saleData.paymentQrId) {
+    resolvedPaymentQrId = saleData.paymentQrId;
+  } else if (Array.isArray(saleData.payments)) {
+    const upiPayment = saleData.payments.find(p =>
+      String(p.paymentType || "").toUpperCase().includes("UPI") && p.paymentQrId
+    );
+    if (upiPayment) resolvedPaymentQrId = upiPayment.paymentQrId;
+  } else if (paymentMethodUpper.includes("UPI") || paymentMethodUpper.includes("QR")) {
+    // Single-method UPI without explicit paymentQrId — keep null (unattributed)
+    resolvedPaymentQrId = null;
+  }
 
   const newSale = {
     workspaceId: workspaceId || customer.workspaceId,
@@ -112,6 +260,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     cashTendered: saleData.cashTendered || 0,
     changeDue: saleData.changeDue || 0,
     paymentMethod: saleData.paymentMethod || "Cash",
+    paymentQrId: resolvedPaymentQrId || null,
     payments: Array.isArray(saleData.payments) ? saleData.payments : [],
     denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
     status: saleData.status || "Paid",
@@ -122,11 +271,16 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     createdByName: user?.name || null,
     createdByEmail: user?.email || null,
   };
+  _logTime('Data setup completed');
 
-  const savedInvoice = await invoiceRepository.createInvoice(newSale);
+  const savedInvoice = await invoiceRepository.createInvoice(newSale, { session });
+  _logTime('Invoice created in DB');
 
-  // Deduct inventory from Batch and ProductFacility
+  // Deduct inventory from Batch and ProductFacility using bulkWrite for O(1) queries
   if (Array.isArray(newSale.items) && newSale.items.length > 0) {
+    const batchOps = [];
+    const facilityOps = [];
+
     for (const item of newSale.items) {
       const qtyToDeduct = Number(item.qty) || 0;
       if (qtyToDeduct <= 0) continue;
@@ -135,35 +289,31 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       const rawBatchId = item.batchId || (item.batch && item.batch._id) || item.batch;
 
       if (rawBatchId) {
-        try {
-          const batchDoc = await Batch.findById(rawBatchId);
-          if (batchDoc) {
-            batchDoc.batchQty = Math.max(0, (batchDoc.batchQty || 0) - qtyToDeduct);
-
-            await batchDoc.save();
+        batchOps.push({
+          updateOne: {
+            filter: { _id: rawBatchId },
+            update: { $inc: { batchQty: -qtyToDeduct } }
           }
-        } catch (err) {
-          console.error("Error deducting batch stock for sale:", err);
-        }
+        });
       }
 
       if (productId && resolvedBranchId) {
-        try {
-          const facilityDoc = await ProductFacility.findOne({
-            product_id: productId,
-            facility_id: resolvedBranchId
-          });
-          if (facilityDoc) {
-            facilityDoc.total_qty_available = Math.max(0, (facilityDoc.total_qty_available || 0) - qtyToDeduct);
-            facilityDoc.qoh = Math.max(0, (facilityDoc.qoh || 0) - qtyToDeduct);
-            facilityDoc.atp = Math.max(0, (facilityDoc.atp || 0) - qtyToDeduct);
-            await facilityDoc.save();
+        facilityOps.push({
+          updateOne: {
+            filter: { product_id: productId, facility_id: resolvedBranchId },
+            update: { $inc: { total_qty_available: -qtyToDeduct, qoh: -qtyToDeduct, atp: -qtyToDeduct } }
           }
-        } catch (err) {
-          console.error("Error deducting product facility stock for sale:", err);
-        }
+        });
       }
     }
+
+    if (batchOps.length > 0) {
+      await Batch.bulkWrite(batchOps, { session });
+    }
+    if (facilityOps.length > 0) {
+      await ProductFacility.bulkWrite(facilityOps, { session });
+    }
+    _logTime('Inventory bulk write completed');
   }
 
   // Auto-create GSTR-1 Entry for GST Ledger
@@ -176,7 +326,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
         : (newSale.subtotal || 0) - (newSale.discount || 0)
     );
 
-    const company = await Company.findOne({ _id: newSale.companyId, workspaceId: newSale.workspaceId });
     const companyGstin = company?.gstin || "";
     const customerGstin = customer?.gstNumber || "";
     const isIgst = companyGstin && customerGstin && companyGstin.substring(0, 2) !== customerGstin.substring(0, 2);
@@ -195,7 +344,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       igst: isIgst ? totalGst : 0,
       totalAmount: Number(newSale.grandTotal || 0),
       narration: `Sale Bill ${newSale.invoiceNo} (${newSale.billingMode}) - Customer: ${customer.name || "Customer"}`,
-    });
+    }, { session });
+    _logTime('GST Ledger entry created');
   } catch (gstErr) {
     console.error("Failed to auto-create GSTR-1 entry for sale bill:", gstErr);
   }
@@ -207,13 +357,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
 
 
-    // Find Sales Account
-    const salesAccountsResult = await accountRepository.getAccounts(
-      newSale.workspaceId,
-      newSale.companyId,
-      { accountCategory: "SALES" }
-    );
-
     let salesAccount = null;
     if (salesAccountsResult.accounts && salesAccountsResult.accounts.length > 0) {
       const accounts = salesAccountsResult.accounts;
@@ -223,9 +366,82 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     }
 
     if (salesAccount) {
+      // Pre-calculate how many sequences we need to generate to run them in ONE concurrent burst
+      let needsSaleJv = customer.ledgerAccountId ? 1 : 0;
+      let needsReceiptJv = 0;
+      let needsCashTx = 0;
+
+      const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
+      let prePayments = [...paymentsList];
+      if (isCashPaid && prePayments.length === 0) prePayments.push({paymentType: 'cash', amount: newSale.grandTotal});
+      else if (isUpiPaid && prePayments.length === 0) prePayments.push({paymentType: 'upi', amount: newSale.grandTotal});
+
+      for (const p of prePayments) {
+        if (String(p.paymentType || p.mode).toLowerCase() === "cash") {
+           needsReceiptJv += 1;
+           needsCashTx += 1; // CASH_IN
+           let changeAmount = 0;
+           if (Array.isArray(p.returnedDenominations) && p.returnedDenominations.length > 0) {
+             changeAmount = p.returnedDenominations.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+           }
+           if (changeAmount > 0) {
+             needsReceiptJv += 1; 
+             needsCashTx += 1; // CASH_OUT
+           }
+        } else if (String(p.paymentType || p.mode).toLowerCase() === "upi") {
+           needsReceiptJv += 1; // fallback JV
+        }
+      }
+
+      // Fire voucher sequence queries simultaneously (they use safe $inc)
+      const salePromises = [];
+      const receiptPromises = [];
+      
+      if (needsSaleJv) salePromises.push(voucherNumberService.generateVoucherNumber(newSale.companyId, newSale.workspaceId, "SALE", { session }));
+      for(let i=0; i<needsReceiptJv; i++) receiptPromises.push(voucherNumberService.generateVoucherNumber(newSale.companyId, newSale.workspaceId, "JOURNAL", { session }));
+
+      // For cashTx and count, fetch once from DB and increment locally to avoid uncommitted race conditions
+      let baseCashTx = null;
+      let baseCount = null;
+      if (needsCashTx > 0) {
+         baseCashTx = await cashTransactionRepository.getNextTransactionNumber(newSale.companyId, newSale.workspaceId, { session });
+         baseCount = await cashDenominationRepository.getNextCountNumber(newSale.companyId, newSale.workspaceId, { session });
+      }
+
+      const [saleRes, receiptRes] = await Promise.all([
+        Promise.all(salePromises),
+        Promise.all(receiptPromises)
+      ]);
+
+      const cashTxRes = [];
+      const countRes = [];
+      
+      if (needsCashTx > 0) {
+        const txParts = baseCashTx.split("-");
+        const txPrefix = txParts.slice(0, 2).join("-") + "-";
+        const txSeq = parseInt(txParts[txParts.length - 1]) || 1;
+
+        const countParts = baseCount.split("-");
+        const countPrefix = countParts.slice(0, 2).join("-") + "-";
+        const countSeq = parseInt(countParts[countParts.length - 1]) || 1;
+
+        for (let i = 0; i < needsCashTx; i++) {
+          cashTxRes.push(`${txPrefix}${String(txSeq + i).padStart(5, "0")}`);
+          countRes.push(`${countPrefix}${String(countSeq + i).padStart(5, "0")}`);
+        }
+      }
+      
+      let saleIdx = 0, receiptIdx = 0, cashTxIdx = 0, countIdx = 0;
+      
+      const preSaleJv = needsSaleJv ? saleRes[0] : null;
+      const nextReceiptJv = () => receiptRes[receiptIdx++];
+      const nextCashTx = () => cashTxRes[cashTxIdx++];
+      const nextCount = () => countRes[countIdx++];
+
       // 1. If customer has a ledger account, first create the SALE JV (Customer -> Sales)
       if (customer.ledgerAccountId) {
         const saleJvPayload = {
+          voucherNumber: preSaleJv,
           voucherDate: newSale.date,
           voucherType: "SALE",
           referenceNumber: newSale.invoiceNo,
@@ -252,11 +468,13 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
             newSale.workspaceId,
             newSale.companyId,
             user?._id,
-            saleJvPayload
+            saleJvPayload,
+            { session }
           );
         } catch (jvErr) {
           console.error("--- FAILED TO CREATE SALES JV ---", jvErr);
         }
+        _logTime('Sale Journal Voucher created');
       }
 
       // 2. Determine counterparty for the receipt (Customer if they have an account, otherwise Sales directly)
@@ -267,9 +485,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
         saleData.payments = [{
           paymentType: "cash",
           amount: newSale.grandTotal,
-          denominations: Array.isArray(saleData.denominations) && saleData.denominations.length > 0 
-                  ? saleData.denominations 
-                  : [{ denomination: 1, quantity: newSale.grandTotal }]
+          denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
+          returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : []
         }];
       } else if (isUpiPaid && !saleData.payments) {
         saleData.payments = [{
@@ -277,9 +494,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           amount: newSale.grandTotal
         }];
       }
-
-      const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
-      import('fs').then(fs => fs.writeFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-payments.txt', JSON.stringify(paymentsList, null, 2)));
 
       for (const payment of paymentsList) {
         const paymentType = String(payment.paymentType || payment.mode || "").toLowerCase();
@@ -289,32 +503,27 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
         if (paymentType === "cash") {
           // --- CASH RECEIPT ---
+          // Always use the branch's system default cash account.
+          // User selection (payment.cashAccountId) is intentionally ignored.
           let treasuryCashAccount = null;
-          if (payment.cashAccountId) {
+
+          if (saleData.branchId) {
+            // First try: system default (the immutable branch operating cash drawer)
             treasuryCashAccount = await CashAccount.findOne({
-              _id: payment.cashAccountId,
-              companyId: newSale.companyId, 
-              workspaceId: newSale.workspaceId,
-              isDeleted: false
-            });
+              companyId,
+              workspaceId,
+              branchId: saleData.branchId,
+              isSystemDefault: true,
+              isDeleted: false,
+            }).session(session);
           }
+
+          // Fallback: branch primary (for legacy branches without isSystemDefault)
           if (!treasuryCashAccount) {
-            treasuryCashAccount = await CashAccount.findOne({ 
-              companyId: newSale.companyId, 
-              workspaceId: newSale.workspaceId,
-              isDeleted: false
-            });
+            treasuryCashAccount = defaultCashAccount;
           }
 
           let cashLedgerAccountId = null;
-          if (treasuryCashAccount) {
-            cashLedgerAccountId = treasuryCashAccount.ledgerAccountId;
-          } else {
-            const cashAccountsResult = await accountRepository.getAccounts(
-              newSale.workspaceId,
-              newSale.companyId,
-              { accountCategory: "CASH" }
-            );
             if (cashAccountsResult.accounts && cashAccountsResult.accounts.length > 0) {
               const accounts = cashAccountsResult.accounts;
               const bestCash = accounts.find(a => a.accountCode === "PETTY-CASH") 
@@ -322,32 +531,29 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                             || accounts[0];
               cashLedgerAccountId = bestCash._id;
             }
-          }
 
           if (cashLedgerAccountId) {
             let txSuccess = false;
             if (treasuryCashAccount) {
               try {
-                // Determine received vs returned based on denominations payload
-                let receivedAmount = amount;
-                let changeAmount = 0;
-                let receivedDenoms = [{ denomination: 1, quantity: amount }];
-                let returnedDenoms = [];
-
-                if (Array.isArray(payment.denominations) && payment.denominations.length > 0) {
-                  receivedDenoms = payment.denominations;
-                  receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-                }
-
-                if (Array.isArray(payment.returnedDenominations) && payment.returnedDenominations.length > 0) {
-                  returnedDenoms = payment.returnedDenominations;
-                  changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-                }
+                // Determine received vs returned based on validated denominations payload
+                let receivedDenoms = Array.isArray(payment.denominations) && payment.denominations.length > 0
+                  ? payment.denominations
+                  : (Array.isArray(saleData.denominations) ? saleData.denominations : []);
+                let returnedDenoms = Array.isArray(payment.returnedDenominations)
+                  ? payment.returnedDenominations
+                  : [];
+                let receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+                let changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
 
                 // 1. Process CASH_IN for exact received amount
                 const cashInPayload = {
+                  transactionNumber: nextCashTx(),
+                  voucherNumber: nextReceiptJv(),
+                  countNumber: nextCount(),
                   transactionDate: newSale.date || new Date(),
                   cashAccountId: treasuryCashAccount._id,
+                  preLoadedCashAccount: treasuryCashAccount,
                   transactionType: "CASH_IN",
                   direction: "CREDIT",
                   amount: receivedAmount,
@@ -363,14 +569,19 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                   newSale.workspaceId,
                   newSale.companyId,
                   user?._id,
-                  cashInPayload
+                  cashInPayload,
+                  { session }
                 );
 
                 // 2. Process CASH_OUT if change was given
                 if (changeAmount > 0) {
                   const cashOutPayload = {
+                    transactionNumber: nextCashTx(),
+                    voucherNumber: nextReceiptJv(),
+                    countNumber: nextCount(),
                     transactionDate: newSale.date || new Date(),
                     cashAccountId: treasuryCashAccount._id,
+                    preLoadedCashAccount: treasuryCashAccount,
                     transactionType: "CASH_OUT",
                     direction: "DEBIT",
                     amount: changeAmount,
@@ -386,7 +597,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                     newSale.workspaceId,
                     newSale.companyId,
                     user?._id,
-                    cashOutPayload
+                    cashOutPayload,
+                    { session }
                   );
                 }
 
@@ -399,6 +611,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
             
             if (!txSuccess) {
               const fallbackJvPayload = {
+                voucherNumber: nextReceiptJv(),
                 voucherDate: newSale.date || new Date(),
                 voucherType: "RECEIPT",
                 referenceNumber: newSale.invoiceNo,
@@ -424,26 +637,26 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                 newSale.workspaceId,
                 newSale.companyId,
                 user?._id,
-                fallbackJvPayload
+                fallbackJvPayload,
+                { session }
               );
             }
           }
         } else if (paymentType === "upi") {
           // --- UPI RECEIPT ---
-          const primaryBankAccount = await BankAccount.findOne({
-            companyId: newSale.companyId,
-            workspaceId: newSale.workspaceId,
-            isDeleted: false,
-            isActive: true,
-            isPrimary: true
-          });
-
-          const bankAccount = primaryBankAccount || await BankAccount.findOne({
-            companyId: newSale.companyId,
-            workspaceId: newSale.workspaceId,
-            isDeleted: false,
-            isActive: true
-          });
+          let bankAccount = null;
+          
+          const qrIdToLookup = payment.paymentQrId || resolvedPaymentQrId;
+          if (qrIdToLookup) {
+             const paymentQr = await PaymentQr.findById(qrIdToLookup).session(session);
+             if (paymentQr && paymentQr.bankAccountId) {
+                bankAccount = await BankAccount.findOne({ _id: paymentQr.bankAccountId, isDeleted: false, isActive: true }).session(session);
+             }
+          }
+          
+          if (!bankAccount) {
+            bankAccount = primaryBankAccount || defaultBankAccount;
+          }
 
           let txSuccess = false;
           if (bankAccount) {
@@ -463,7 +676,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                 newSale.workspaceId,
                 newSale.companyId,
                 user?._id,
-                bankTxPayload
+                bankTxPayload,
+                { session }
               );
               txSuccess = true;
             } catch (btErr) {
@@ -472,14 +686,13 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
           }
           
           if (!txSuccess) {
-            const bankAccountsResult = await accountRepository.getAccounts(
-              newSale.workspaceId,
-              newSale.companyId,
-              { accountCategory: "BANK" }
-            );
-            if (bankAccountsResult.accounts && bankAccountsResult.accounts.length > 0) {
-              const bankLedgerAccount = bankAccountsResult.accounts[0];
+            let bankLedgerAccountId = bankAccount?.ledgerAccountId;
+            if (!bankLedgerAccountId && bankAccountsResult && bankAccountsResult.accounts && bankAccountsResult.accounts.length > 0) {
+              bankLedgerAccountId = bankAccountsResult.accounts[0]._id;
+            }
+            if (bankLedgerAccountId) {
               const fallbackUpiJvPayload = {
+                voucherNumber: nextReceiptJv(),
                 voucherDate: newSale.date || new Date(),
                 voucherType: "RECEIPT",
                 referenceNumber: payment.txnRefNo || payment.referenceNo || newSale.invoiceNo,
@@ -487,7 +700,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                 status: "POSTED",
                 lines: [
                   {
-                    accountId: bankLedgerAccount._id,
+                    accountId: bankLedgerAccountId,
                     debit: amount,
                     credit: 0,
                     narration: `UPI Received for Invoice ${newSale.invoiceNo}`
@@ -505,7 +718,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                 newSale.workspaceId,
                 newSale.companyId,
                 user?._id,
-                fallbackUpiJvPayload
+                fallbackUpiJvPayload,
+                { session }
               );
             }
           }
@@ -515,8 +729,25 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
   } catch (jvErr) {
     console.error("Error generating journal vouchers for sale bill:", jvErr);
   }
+  _logTime('All payments processed');
 
-  return savedInvoice;
+    await session.commitTransaction();
+    session.endSession();
+    
+    _logTime('Transaction Committed');
+    _timingStats.push(`--- Total Time: ${Date.now() - _startTotal}ms ---`);
+    import('fs').then(fs => fs.appendFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-timing.txt', new Date().toISOString() + '\\n' + _timingStats.join('\\n') + '\\n\\n'));
+
+    return savedInvoice;
+  } catch (error) {
+    try {
+      await session.abortTransaction();
+    } catch (abortErr) {
+      // Ignore abort errors if transaction is already committed or aborted
+    }
+    session.endSession();
+    throw error;
+  }
 };
 
 const getCustomerSales = async (customerId, companyId, workspaceId, branchId = null, pagination = {}) => {

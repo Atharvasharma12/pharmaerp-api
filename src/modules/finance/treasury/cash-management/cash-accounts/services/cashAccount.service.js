@@ -25,11 +25,12 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
   session.startTransaction();
 
   try {
-    // 1. Check for duplicate account name in this company
+    // 1. Check for duplicate account name in this branch (branch-scoped uniqueness)
     const existing = await mongoose
       .model("CashAccount")
       .findOne({
         companyId,
+        branchId: branchId || null,
         accountName: String(accountName).trim(),
         isDeleted: false,
       })
@@ -38,7 +39,9 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
     if (existing) {
       throw new ApiError(
         400,
-        "A cash account with this name already exists for this company",
+        branchId
+          ? "A cash account with this name already exists for this branch"
+          : "A cash account with this name already exists for this company",
       );
     }
 
@@ -117,6 +120,7 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
       description: description || null,
       ledgerAccountId: ledgerAccount._id,
       isPrimary: !!isPrimary,
+      isSystemDefault: !!payload.isSystemDefault,
       createdBy: userId,
     };
 
@@ -125,20 +129,25 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
       { session },
     );
 
-    // 6. Handle isPrimary logic
+    // 6. Handle isPrimary logic (branch-scoped — each branch has its own default)
     if (isPrimary) {
       await cashAccountRepository.setPrimaryCashAccount(
         cashAccount._id,
         companyId,
         workspaceId,
+        branchId || null,
         { session },
       );
       cashAccount.isPrimary = true;
     } else {
-      // If this is the only cash account, automatically make it primary
+      // If this is the FIRST cash account in this branch, automatically make it primary
+      const branchFilter = { companyId, isDeleted: false };
+      if (branchId) branchFilter.branchId = branchId;
+      else branchFilter.branchId = null;
+
       const activeCount = await mongoose
         .model("CashAccount")
-        .countDocuments({ companyId, isDeleted: false })
+        .countDocuments(branchFilter)
         .session(session);
 
       if (activeCount === 1) {
@@ -147,6 +156,7 @@ const createCashAccount = async (workspaceId, companyId, userId, payload) => {
           cashAccount._id,
           companyId,
           workspaceId,
+          branchId || null,
           { session },
         );
       }
@@ -341,6 +351,20 @@ const updateCashAccount = async (
       throw new ApiError(404, "Cash Account not found");
     }
 
+    // Guard: system default account fields are immutable
+    if (cashAccount.isSystemDefault) {
+      const BLOCKED_FIELDS = ["accountName", "status", "isPrimary"];
+      const attemptedBlocked = BLOCKED_FIELDS.filter(
+        (k) => payload[k] !== undefined,
+      );
+      if (attemptedBlocked.length > 0) {
+        throw new ApiError(
+          403,
+          `Cannot modify [${attemptedBlocked.join(", ")}] on the system default cash account. Only description can be updated.`,
+        );
+      }
+    }
+
     const { accountName, description, status, isPrimary } = payload;
 
     if (accountName !== undefined) {
@@ -367,10 +391,31 @@ const updateCashAccount = async (
     await cashAccount.save({ session });
 
     if (isPrimary === true) {
+      // Guard: cannot change primary if a system default exists in this branch
+      const existingSystemDefault = await mongoose
+        .model("CashAccount")
+        .findOne({
+          companyId,
+          workspaceId,
+          branchId: cashAccount.branchId || null,
+          isSystemDefault: true,
+          isDeleted: false,
+        })
+        .session(session);
+
+      if (existingSystemDefault && !cashAccount.isSystemDefault) {
+        throw new ApiError(
+          403,
+          "Cannot change the default cash account. The system default account is permanently set for this branch.",
+        );
+      }
+
+      // Pass branchId so only accounts in the same branch are un-defaulted
       await cashAccountRepository.setPrimaryCashAccount(
         cashAccount._id,
         companyId,
         workspaceId,
+        cashAccount.branchId || null,
         { session },
       );
       cashAccount.isPrimary = true;
@@ -399,6 +444,14 @@ const deleteCashAccount = async (id, companyId, workspaceId, userId) => {
 
     if (!cashAccount) {
       throw new ApiError(404, "Cash Account not found");
+    }
+
+    // Guard: system default cash account cannot be deleted
+    if (cashAccount.isSystemDefault) {
+      throw new ApiError(
+        403,
+        "The system default cash account cannot be deleted. It is permanently linked to the branch operations.",
+      );
     }
 
     // 1. Audit check: Ensure no posted journal entries reference the ledger account
@@ -433,11 +486,16 @@ const deleteCashAccount = async (id, companyId, workspaceId, userId) => {
       },
     ).session(session);
 
-    // 4. Auto-resolve primary if this was primary
+    // 4. Auto-resolve primary if this was primary — find next in SAME branch
     if (cashAccount.isPrimary) {
+      const branchFilter = { companyId, isDeleted: false };
+      // Match the deleted account's branch scope for the replacement
+      if (cashAccount.branchId) branchFilter.branchId = cashAccount.branchId;
+      else branchFilter.branchId = null;
+
       const nextCashAccount = await mongoose
         .model("CashAccount")
-        .findOne({ companyId, isDeleted: false })
+        .findOne(branchFilter)
         .session(session);
 
       if (nextCashAccount) {
@@ -445,6 +503,7 @@ const deleteCashAccount = async (id, companyId, workspaceId, userId) => {
           nextCashAccount._id,
           companyId,
           workspaceId,
+          cashAccount.branchId || null,
           { session },
         );
       }

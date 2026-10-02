@@ -3,11 +3,14 @@ import ApiResponse from "../../../../../../utils/ApiResponse.js";
 import cashAccountService from "../services/cashAccount.service.js";
 
 export const createCashAccount = asyncHandler(async (req, res) => {
+  const branchId = req.headers["x-branch-id"] || req.branchId || req.query.branchId || req.body.branchId || null;
+  const payload = { ...req.body, branchId };
+
   const cashAccount = await cashAccountService.createCashAccount(
     req.workspaceId,
     req.companyId,
     req.user._id,
-    req.body,
+    payload,
   );
   return res
     .status(201)

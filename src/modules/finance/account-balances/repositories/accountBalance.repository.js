@@ -130,6 +130,41 @@ const getBalances = async (workspaceId, companyId, filters = {}, options = {}) =
     query.accountId = { $in: matchingAccountIds };
   }
 
+  // Branch isolation for Cash Accounts: STRICT whitelist approach
+  if (filters.branchId) {
+    const Account = mongoose.model("Account");
+    const allCashAccounts = await Account.find({
+      companyId,
+      isDeleted: false,
+      accountCategory: "CASH"
+    }).select("_id");
+    const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
+
+    const CashAccount = mongoose.model("CashAccount");
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+    const validBranchCashAccounts = await CashAccount.find({
+      companyId,
+      isDeleted: false,
+      branchId: targetBranchId
+    }).select("ledgerAccountId");
+    const validLedgerIds = validBranchCashAccounts
+      .map(c => c.ledgerAccountId?.toString())
+      .filter(Boolean);
+
+    const invalidLedgerIds = allCashAccountIds
+      .filter(id => !validLedgerIds.includes(id))
+      .map(id => new mongoose.Types.ObjectId(id));
+
+    if (invalidLedgerIds.length > 0) {
+      if (query.accountId) {
+        // if accountId is already constrained by $in from search
+        query.accountId = { ...query.accountId, $nin: invalidLedgerIds };
+      } else {
+        query.accountId = { $nin: invalidLedgerIds };
+      }
+    }
+  }
+
   const sort = options.sort || { lastTransactionAt: -1, createdAt: -1 };
 
   if (options.all === true) {

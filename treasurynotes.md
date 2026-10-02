@@ -57,7 +57,6 @@ src/modules/finance/treasury/
 │
 ├── bank-management/
 │   ├── bank-accounts/
-│   ├── bank-slips/
 │   └── bank-transactions/
 │
 ├── cash-management/
@@ -316,31 +315,6 @@ Manages physical cheque lifecycle (both issued to suppliers and received from cu
     bankName: String,
     partyId: ObjectId,
     status: String // PENDING, DEPOSITED, CLEARED, BOUNCED, CANCELLED
-  }
-  ```
-
----
-
-## 10. Bank Slips
-
-Manages bank slips (deposit slips / withdrawal slips). Confirming a bank slip updates the bank balance by posting a Bank Transaction and generating a corresponding Journal Voucher.
-
-- **Location**: `bank-management/bank-slips/`
-- **Bank Slip Model**:
-  ```js
-  {
-    workspaceId: ObjectId,
-    companyId: ObjectId,
-    slipNumber: String, // BS-YYYY-NNNNN
-    bankAccountId: ObjectId,
-    slipType: String, // DEPOSIT, WITHDRAWAL
-    bankSlipReference: String,
-    slipDate: Date,
-    amount: Number,
-    narration: String,
-    status: String, // PENDING, CONFIRMED, REJECTED, CANCELLED
-    bankTransactionId: ObjectId,
-    journalVoucherId: ObjectId
   }
   ```
 

@@ -11,6 +11,7 @@ import {
   updatePaymentQr,
   deletePaymentQr,
   setPrimary,
+  getStats,
 } from "../controllers/paymentQr.controller.js";
 
 import {
@@ -54,6 +55,13 @@ router.post(
   "/:paymentQrId/set-primary",
   validate(paymentQrIdParamSchema, "params"),
   setPrimary,
+);
+
+// GET stats for a specific Payment QR (per-UPI transaction breakdown)
+router.get(
+  "/:paymentQrId/stats",
+  validate(paymentQrIdParamSchema, "params"),
+  getStats,
 );
 
 export default router;

@@ -113,6 +113,7 @@ const createBankTransaction = async (
   companyId,
   userId,
   payload,
+  options = {},
 ) => {
   const {
     transactionDate,
@@ -125,8 +126,12 @@ const createBankTransaction = async (
     counterpartyAccountId,
   } = payload;
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const providedSession = options.session;
+  const session = providedSession || await mongoose.startSession();
+  
+  if (!providedSession) {
+    session.startTransaction();
+  }
 
   try {
     // 1. Verify BankAccount exists and is active
@@ -318,13 +323,17 @@ const createBankTransaction = async (
         session,
       });
 
-    await session.commitTransaction();
-    session.endSession();
+    if (!providedSession) {
+      await session.commitTransaction();
+      session.endSession();
+    }
 
     return getBankTransactionById(bankTransaction._id, companyId, workspaceId);
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    if (!providedSession) {
+      await session.abortTransaction();
+      session.endSession();
+    }
     throw error;
   }
 };

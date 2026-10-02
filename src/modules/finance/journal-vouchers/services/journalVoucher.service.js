@@ -15,12 +15,15 @@ import { validateVoucherDate } from "../helpers/validateVoucherDate.js";
 import { VOUCHER_TYPE } from "../constants/voucherType.constant.js";
 import { VOUCHER_STATUS } from "../constants/voucherStatus.constant.js";
 
-const createJournalVoucher = async (workspaceId, companyId, userId, payload) => {
-  const { lines, voucherDate, voucherType, referenceNumber, narration, status } =
-    payload;
-
-  const session = await mongoose.startSession();
-  session.startTransaction();
+const createJournalVoucher = async (workspaceId, companyId, userId, payload, options = {}) => {
+  const { lines, voucherDate, voucherType, referenceNumber, narration, status } = payload;
+  
+  const providedSession = options.session;
+  const session = providedSession || await mongoose.startSession();
+  
+  if (!providedSession) {
+    session.startTransaction();
+  }
 
   try {
     // 1. Normalize and round line amounts
@@ -37,8 +40,8 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload) => 
       parsedDate
     );
 
-    // 4. Generate sequential voucher number atomically
-    const voucherNumber = await voucherNumberService.generateVoucherNumber(
+    // 4. Generate sequential voucher number atomically (or use provided)
+    const voucherNumber = payload.voucherNumber || await voucherNumberService.generateVoucherNumber(
       companyId,
       workspaceId,
       voucherType,
@@ -90,20 +93,24 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload) => 
         companyId,
         workspaceId,
         userId,
-        { session }
+        { session, preLoadedVoucher: voucher, preLoadedLines: createdLines }
       );
       voucher.status = VOUCHER_STATUS.POSTED;
     }
 
-    await session.commitTransaction();
-    session.endSession();
+    if (!providedSession) {
+      await session.commitTransaction();
+      session.endSession();
+    }
 
     const voucherObj = voucher.toSafeObject();
     voucherObj.lines = createdLines.map((l) => l.toSafeObject());
     return voucherObj;
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
+    if (!providedSession) {
+      await session.abortTransaction();
+      session.endSession();
+    }
     throw error;
   }
 };

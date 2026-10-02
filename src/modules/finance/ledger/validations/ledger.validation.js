@@ -14,6 +14,8 @@ export const getLedgerQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1).optional(),
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),
   all: Joi.boolean().default(false).optional(),
+  sort: Joi.string().trim().optional(),
+  branchId: objectId.optional(),
 });
 
 export const recalculateLedgerSchema = Joi.object({

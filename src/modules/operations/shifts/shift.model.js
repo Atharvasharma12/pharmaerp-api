@@ -42,6 +42,16 @@ const shiftSchema = new mongoose.Schema(
       trim: true,
       default: "",
     },
+    openPeriod: {
+      type: String,
+      enum: ["morning", "afternoon", "evening", "night"],
+      default: null,
+    },
+    closePeriod: {
+      type: String,
+      enum: ["morning", "afternoon", "evening", "night"],
+      default: null,
+    },
     status: {
       type: String,
       enum: ["open", "closed", "cancelled"],
@@ -70,6 +80,13 @@ const shiftSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
+    },
+    // Reference to the branch's system default cash account being reconciled in this shift
+    cashAccountId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CashAccount",
+      default: null,
+      index: true,
     },
     openingFloatAmount: {
       type: Number,
@@ -108,6 +125,16 @@ const shiftSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: "",
+    },
+
+    // Fund transfer totals — snapshot persisted at shift close
+    totalFundWithdrawals: {
+      type: Number,
+      default: 0,
+    },
+    totalFundDeposits: {
+      type: Number,
+      default: 0,
     },
   },
   { timestamps: true }

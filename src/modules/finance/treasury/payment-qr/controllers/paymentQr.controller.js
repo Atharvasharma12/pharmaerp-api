@@ -1,6 +1,7 @@
 import asyncHandler from "../../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../../utils/ApiResponse.js";
 import paymentQrService from "../services/paymentQr.service.js";
+import paymentQrStatsService from "../services/paymentQrStats.service.js";
 
 export const createPaymentQr = asyncHandler(async (req, res) => {
   const paymentQr = await paymentQrService.createPaymentQr(
@@ -70,4 +71,16 @@ export const setPrimary = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, "Payment QR set as primary successfully", paymentQr));
+});
+
+export const getStats = asyncHandler(async (req, res) => {
+  const stats = await paymentQrStatsService.getPaymentQrStats(
+    req.params.paymentQrId,
+    req.companyId,
+    req.workspaceId,
+    req.query,
+  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Payment QR stats fetched successfully", stats));
 });
