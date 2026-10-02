@@ -10,10 +10,10 @@ import {
 } from "../constants/bankDepositSlip.constant.js";
 
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
-import CashAccount from "../../cash-management/cash-accounts/models/cashAccount.model.js";
+import branchCashRepository from "../../cash-management/branch-cash/repositories/branchCash.repository.js";
+import branchCashService from "../../cash-management/branch-cash/services/branchCash.service.js";
 import cashDenominationRepository from "../../cash-management/cash-denominations/repositories/cashDenomination.repository.js";
 import { CASH_DENOMINATION_STATUS } from "../../cash-management/cash-denominations/constants/cashDenomination.constant.js";
-import cashDenominationBalanceRepository from "../../cash-management/cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
 
 import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
 import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
@@ -29,18 +29,22 @@ import findOrCreateSystemAccount from "../../shared/findOrCreateSystemAccount.js
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Resolve the active CashAccount document and return it.
+ * Resolve the BranchCash for a branch and return it.
+ * Bank deposit slips only source from the FROZEN partition.
  */
-const resolveCashAccount = async (cashAccountId, session) => {
-  const cashAccount = await CashAccount.findOne({
-    _id: cashAccountId,
-    isDeleted: false,
-    status: "active",
-  }).session(session);
-  if (!cashAccount) {
-    throw new ApiError(400, "Cash account not found or inactive");
+const resolveBranchCash = async (branchId, companyId, session) => {
+  const branchCash = await branchCashRepository.findByBranchId(
+    branchId,
+    companyId,
+    { session }
+  );
+  if (!branchCash) {
+    throw new ApiError(
+      400,
+      "Branch cash not found. Cannot create deposit slip — branch cash not initialized."
+    );
   }
-  return cashAccount;
+  return branchCash;
 };
 
 /**
@@ -167,10 +171,10 @@ const createBankDepositSlip = async (
 ) => {
   const {
     slipDate,
-    fromCashAccountId,
+    branchId,              // NEW: branch identifies the source (frozen cash)
     toBankAccountId,
     amount,
-    denominations,       // required: breakdown of notes in the bag
+    denominations,         // required: breakdown of notes in the bag
     depositBagReference,
     bankBranchName,
     narration,
@@ -180,22 +184,33 @@ const createBankDepositSlip = async (
   session.startTransaction();
 
   try {
-    // ── 1. Resolve accounts ────────────────────────────────────────────────
-    const cashAccount = await resolveCashAccount(fromCashAccountId, session);
+    // ── 1. Resolve branch cash (frozen partition) and bank account ─────────
+    const branchCash = await resolveBranchCash(branchId, companyId, session);
     await resolveBankAccount(toBankAccountId, session);
 
-    // ── 2. PRE-FLIGHT: validate denomination sufficiency ───────────────────
-    const processedDenominations = denominations.map((d) => ({
+    // ── 2. PRE-FLIGHT: validate denomination sufficiency in FROZEN partition ─
+    const processedDenominations = (denominations || []).map((d) => ({
       denomination: d.denomination,
       quantity: d.quantity || 0,
       subtotal: d.denomination * (d.quantity || 0),
     }));
 
-    await cashDenominationBalanceRepository.validateSufficientDenominations(
-      fromCashAccountId,
-      processedDenominations,
-      { session },
-    );
+    if (processedDenominations.length > 0) {
+      await branchCashRepository.validateSufficientFrozenDenominations(
+        branchId,
+        companyId,
+        processedDenominations,
+        { session },
+      );
+    } else {
+      // Scalar check: ensure enough frozen cash
+      if (branchCash.frozenCash < amount) {
+        throw new ApiError(
+          400,
+          `Insufficient frozen cash. Available: ₹${branchCash.frozenCash}, Requested: ₹${amount}`
+        );
+      }
+    }
 
     // ── 3. Get / auto-create Cash In Transit system account ────────────────
     const cashInTransitAccount = await getCashInTransitAccount(
@@ -228,8 +243,9 @@ const createBankDepositSlip = async (
       {
         workspaceId,
         companyId,
-        cashAccountId: fromCashAccountId,
-        branchId: cashAccount.branchId || null,
+        branchId,             // NEW: branchId is required; cashAccountId deprecated
+        cashAccountId: null,  // deprecated — not set for new slips
+        partition: "frozen",  // deposit slips always from frozen
         countNumber,
         countDate: new Date(slipDate),
         denominations: processedDenominations,
@@ -245,18 +261,20 @@ const createBankDepositSlip = async (
       { session },
     );
 
-    // ── 6. Deduct denominations from cash account balance ──────────────────
-    await cashDenominationBalanceRepository.subtractDenominations(
-      fromCashAccountId,
-      processedDenominations,
+    // ── 6. Deduct from FROZEN cash partition ───────────────────────────────
+    await branchCashService.deductFromFrozen(
+      branchId,
+      companyId,
       userId,
+      amount,
+      processedDenominations,
       { session },
     );
 
-    // ── 7. Step-1 Journal: Cash A/c Cr → Cash In Transit A/c Dr ──────────
+    // ── 7. Step-1 Journal: Frozen Cash Ledger Cr → Cash In Transit Dr ──────
     const voucherNarration =
       narration ||
-      `Bank Deposit Slip ${slipNumber}: Cash → Bank (In Transit)`;
+      `Bank Deposit Slip ${slipNumber}: Frozen Cash → Bank (In Transit)`;
 
     const preparationVoucher = await createAndPostContraVoucher(
       workspaceId,
@@ -267,13 +285,14 @@ const createBankDepositSlip = async (
       slipNumber,
       [
         {
-          accountId: cashInTransitAccount.ledgerAccountId || cashInTransitAccount._id,
+          accountId: cashInTransitAccount._id,
           debit: amount,
           credit: 0,
           narration: voucherNarration,
         },
         {
-          accountId: cashAccount.ledgerAccountId,
+          // Use BranchCash.ledgerAccountId (the branch-level cash account)
+          accountId: branchCash.ledgerAccountId,
           debit: 0,
           credit: amount,
           narration: voucherNarration,
@@ -285,7 +304,7 @@ const createBankDepositSlip = async (
     // ── 8. Auto-link open day closing ────────────────────────────────────
     let resolvedDayClosingId = payload.dayClosingId || null;
 
-    if (!resolvedDayClosingId && cashAccount.branchId) {
+    if (!resolvedDayClosingId && branchId) {
       try {
         const { DayClosing } = await import(
           "../../../../operations/day-closings/dayClosing.model.js"
@@ -293,14 +312,13 @@ const createBankDepositSlip = async (
         const activeDayClosing = await DayClosing.findOne({
           companyId,
           workspaceId,
-          branchId: cashAccount.branchId,
+          branchId,
           status: { $in: ["draft", "open"] },
         })
           .select("_id")
           .session(session);
         if (activeDayClosing) resolvedDayClosingId = activeDayClosing._id;
       } catch (dcErr) {
-        // Non-fatal: slip saves without dayClosingId if day closing lookup fails
         console.warn(
           "[BankDepositSlip] Could not auto-link day closing:",
           dcErr.message,
@@ -313,11 +331,11 @@ const createBankDepositSlip = async (
       {
         workspaceId,
         companyId,
-        branchId: cashAccount.branchId || null,
+        branchId,
         dayClosingId: resolvedDayClosingId,
         slipNumber,
         slipDate: new Date(slipDate),
-        fromCashAccountId,
+        fromCashAccountId: null,      // deprecated — not set for new slips
         toBankAccountId,
         amount,
         depositBagReference: depositBagReference || null,
@@ -515,8 +533,12 @@ const cancelBankDepositSlip = async (
         .session(session);
 
       if (denomDoc && denomDoc.denominations && denomDoc.denominations.length > 0) {
-        await cashDenominationBalanceRepository.addDenominations(
-          slip.fromCashAccountId,
+        // Return denominations to the branch cash frozen partition.
+        // addFrozenDenominations recomputes frozenTotal from denomination sums — no scalar increment needed.
+        const branchCashRepository = (await import("../../cash-management/branch-cash/repositories/branchCash.repository.js")).default;
+        await branchCashRepository.addFrozenDenominations(
+          slip.branchId,
+          slip.companyId,
           denomDoc.denominations,
           userId,
           { session },

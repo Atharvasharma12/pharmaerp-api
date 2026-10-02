@@ -33,13 +33,22 @@ const cashTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
-    // The cash account (physical cash register / petty cash box)
-    cashAccountId: {
+    // Branch this cash transaction belongs to
+    branchId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      required: [true, "Cash Account is required"],
+      ref: "Branch",
+      required: [true, "Branch is required"],
       index: true,
     },
+
+    // Which cash partition this transaction affects
+    cashPartition: {
+      type: String,
+      enum: ["running", "frozen"],
+      required: [true, "Cash partition is required"],
+      index: true,
+    },
+
 
     transactionType: {
       type: String,
@@ -177,7 +186,8 @@ cashTransactionSchema.index(
 cashTransactionSchema.index({
   workspaceId: 1,
   companyId: 1,
-  cashAccountId: 1,
+  branchId: 1,
+  cashPartition: 1,
   isDeleted: 1,
   transactionDate: -1,
 });

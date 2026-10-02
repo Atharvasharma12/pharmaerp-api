@@ -1,7 +1,8 @@
 import { Router } from "express";
 import bankAccountModule from "./bank-management/bank-accounts/bankAccount.module.js";
 import bankTransactionModule from "./bank-management/bank-transactions/bankTransaction.module.js";
-import cashAccountModule from "./cash-management/cash-accounts/cashAccount.module.js";
+// cashAccountModule deprecated — replaced by branchCashModule
+import branchCashModule from "./cash-management/branch-cash/branchCash.module.js";
 import cashTransactionModule from "./cash-management/cash-transactions/cashTransaction.module.js";
 import cashDenominationModule from "./cash-management/cash-denominations/cashDenomination.module.js";
 import cashExchangeModule from "./cash-management/exchange-cash/cashExchange.module.js";
@@ -15,7 +16,7 @@ const router = Router();
 // Mount submodules
 router.use(bankAccountModule.path, bankAccountModule.router);
 router.use(bankTransactionModule.path, bankTransactionModule.router);
-router.use(cashAccountModule.path, cashAccountModule.router);
+router.use(branchCashModule.path, branchCashModule.router);
 router.use(cashTransactionModule.path, cashTransactionModule.router);
 router.use(cashDenominationModule.path, cashDenominationModule.router);
 router.use(cashExchangeModule.path, cashExchangeModule.router);

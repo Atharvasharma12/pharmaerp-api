@@ -5,7 +5,6 @@ import { Shift } from "../shifts/shift.model.js";
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
 import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTransfer.model.js";
 import { FUND_TRANSFER_STATUS } from "../../finance/treasury/fund-transfers/constants/fundTransfer.constant.js";
-import CashAccount from "../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
 import PaymentQr from "../../finance/treasury/payment-qr/models/paymentQr.model.js";
 import { createDayClosing as createDayClosingService, closeDayClosing, cancelDayClosing as cancelDayClosingService } from "./dayClosing.service.js";
 import { getBusinessDateRange } from "../../../utils/businessDate.js";
@@ -143,7 +142,7 @@ const fetchFundTransfers = async ({ shiftIds = [], dayClosingId = null, cashAcco
   let totalWithdrawals = 0;
   let totalDeposits = 0;
 
-  const targetCaId = cashAccountId ? String(cashAccountId) : null;
+  const targetCaId = null;
 
   for (const ft of fundTransfers) {
     const fromId = ft.fromCashAccountId ? String(ft.fromCashAccountId._id || ft.fromCashAccountId) : null;
@@ -347,7 +346,7 @@ export const getDayClosingSummary = asyncHandler(async (req, res, next) => {
   const ftData = await fetchFundTransfers({
     shiftIds,
     dayClosingId: dayClosing._id,
-    cashAccountId: dayClosing.cashAccountId,
+    cashDifferenceAmount: dayClosing.cashDifferenceAmount,
   });
 
   const summary = {

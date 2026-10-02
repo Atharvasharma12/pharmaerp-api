@@ -39,16 +39,4 @@ export const setBankAccountOpeningBalanceSchema = Joi.object({
   }),
 });
 
-export const setCashAccountOpeningBalanceSchema = Joi.object({
-  cashAccountId: objectId.required().messages({
-    "any.required": "Cash Account ID is required",
-  }),
-  amount: Joi.number().min(0).required().messages({
-    "any.required": "Amount is required",
-    "number.min": "Amount cannot be negative",
-  }),
-  balanceType: Joi.string().valid("dr").lowercase().required().messages({
-    "any.required": "Balance type is required",
-    "any.only": "Balance type must be 'dr' (debit) for Cash Accounts",
-  }),
-});
+

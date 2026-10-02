@@ -23,9 +23,7 @@ const denominationLineSchema = Joi.object({
 });
 
 export const createCashDenominationSchema = Joi.object({
-  cashAccountId: objectId.required().messages({
-    "any.required": "Cash Account ID is required",
-  }),
+
   countDate: Joi.date().iso().required().messages({
     "any.required": "Count date is required",
     "date.format": "Count date must be a valid ISO date",
@@ -60,7 +58,7 @@ export const cashDenominationIdParamSchema = Joi.object({
 });
 
 export const getCashDenominationsQuerySchema = Joi.object({
-  cashAccountId: objectId.optional(),
+
   branchId: objectId.optional(),
   status: Joi.string().valid("DRAFT", "CONFIRMED", "CANCELLED").optional(),
   startDate: Joi.date().iso().optional(),

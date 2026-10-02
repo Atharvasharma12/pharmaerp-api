@@ -39,9 +39,10 @@ export const createCashTransactionSchema = Joi.object({
     "any.required": "Transaction date is required",
     "date.format": "Transaction date must be a valid ISO date",
   }),
-  cashAccountId: objectId.required().messages({
-    "any.required": "Cash Account ID is required",
+  branchId: objectId.required().messages({
+    "any.required": "Branch ID is required",
   }),
+  partition: Joi.string().valid("running", "frozen").default("running"),
   transactionType: Joi.string()
     .valid(...VALID_TRANSACTION_TYPES)
     .required()
@@ -88,7 +89,8 @@ export const cashTransactionIdParamSchema = Joi.object({
 });
 
 export const getCashTransactionsQuerySchema = Joi.object({
-  cashAccountId: objectId.optional(),
+  branchId: objectId.optional(),
+  partition: Joi.string().valid("running", "frozen").optional(),
   transactionType: Joi.string().valid(...VALID_TRANSACTION_TYPES).optional(),
   direction: Joi.string().valid(...VALID_DIRECTIONS).optional(),
   status: Joi.string().valid("DRAFT", "POSTED", "CANCELLED").optional(),

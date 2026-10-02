@@ -3,12 +3,10 @@ import FundTransfer from "../models/fundTransfer.model.js";
 
 const POPULATE_FROM = [
   { path: "fromBankAccountId", select: "accountName accountNumber bankMasterId" },
-  { path: "fromCashAccountId", select: "accountName" },
 ];
 
 const POPULATE_TO = [
   { path: "toBankAccountId", select: "accountName accountNumber bankMasterId" },
-  { path: "toCashAccountId", select: "accountName" },
 ];
 
 const POPULATE_META = [

@@ -26,13 +26,7 @@ const dayClosingSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
-    // Reference to the branch's system default cash account used in this day closing
-    cashAccountId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      default: null,
-      index: true,
-    },
+
     date: {
       type: Date,
       required: true,

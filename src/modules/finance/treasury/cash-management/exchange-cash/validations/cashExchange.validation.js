@@ -38,10 +38,6 @@ export const createCashExchangeSchema = Joi.object({
     "date.base": "Exchange date must be a valid date",
   }),
 
-  cashAccountId: objectId.required().messages({
-    "any.required": "Cash account ID is required",
-  }),
-
   // Denominations received FROM the customer (what they handed you)
   denominationsReceived: Joi.array()
     .items(denominationLineSchema)
@@ -101,7 +97,7 @@ export const cashExchangeIdParamSchema = Joi.object({
 export const getCashExchangesQuerySchema = Joi.object({
   search: Joi.string().trim().allow("").optional(),
   status: Joi.string().valid("COMPLETED", "CANCELLED").optional(),
-  cashAccountId: objectId.optional(),
+
   branchId: objectId.optional(),
   shiftId: objectId.optional(),
   startDate: Joi.date().optional(),

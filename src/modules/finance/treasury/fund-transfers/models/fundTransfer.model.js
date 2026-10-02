@@ -62,10 +62,10 @@ const fundTransferSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Source account — either BankAccount or CashAccount
+    // Source account — only bank accounts (cash-to-bank now via BankDepositSlip)
     fromAccountType: {
       type: String,
-      enum: ["BANK", "CASH"],
+      enum: ["BANK"],
       required: [true, "Source account type is required"],
     },
 
@@ -76,14 +76,8 @@ const fundTransferSchema = new mongoose.Schema(
       index: true,
     },
 
-    fromCashAccountId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      default: null,
-      index: true,
-    },
 
-    // Destination account — either BankAccount or CashAccount
+    // Destination account — BANK only (BANK_TO_CASH: bank replenishes running cash)
     toAccountType: {
       type: String,
       enum: ["BANK", "CASH"],
@@ -97,12 +91,6 @@ const fundTransferSchema = new mongoose.Schema(
       index: true,
     },
 
-    toCashAccountId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      default: null,
-      index: true,
-    },
 
     amount: {
       type: Number,

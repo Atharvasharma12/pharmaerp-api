@@ -30,10 +30,12 @@ const bankDepositSlipSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Source: always the branch's FROZEN cash reserve
+    // (no cash account selection needed — each branch has exactly one frozen reserve)
     branchId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Branch",
-      default: null,
+      required: [true, "Branch is required"],
       index: true,
     },
 
@@ -59,11 +61,11 @@ const bankDepositSlipSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Source: always a cash account (the counter/safe being emptied)
+    // DEPRECATED: fromCashAccountId — kept for backward compat with existing records only
+    // ref intentionally removed: CashAccount model was deleted in treasury refactor
     fromCashAccountId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      required: [true, "Source cash account is required"],
+      default: null,
       index: true,
     },
 

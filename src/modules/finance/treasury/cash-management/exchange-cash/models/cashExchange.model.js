@@ -39,7 +39,7 @@ const cashExchangeSchema = new mongoose.Schema(
     branchId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Branch",
-      default: null,
+      required: [true, "Branch is required"],
       index: true,
     },
 
@@ -64,13 +64,14 @@ const cashExchangeSchema = new mongoose.Schema(
       index: true,
     },
 
-    // The cash account (drawer/safe) in which the denomination swap happens
-    cashAccountId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      required: [true, "Cash account is required"],
+    // Which partition the denomination swap occurs in (running or frozen)
+    cashPartition: {
+      type: String,
+      enum: ["running", "frozen"],
+      required: [true, "Cash partition is required"],
       index: true,
     },
+
 
     // Denominations received FROM the customer (e.g. one ₹500 note)
     denominationsReceived: {
@@ -194,14 +195,6 @@ cashExchangeSchema.index({
   exchangeDate: -1,
 });
 
-// Cash account + status lookup (used by cash account reports)
-cashExchangeSchema.index({
-  cashAccountId: 1,
-  workspaceId: 1,
-  companyId: 1,
-  status: 1,
-  isDeleted: 1,
-});
 
 // Shift-linked exchange lookup (used by shift summary)
 cashExchangeSchema.index({ shiftId: 1, status: 1, isDeleted: 1 });
