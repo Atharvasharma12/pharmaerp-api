@@ -1,0 +1,7 @@
+export const PURCHASE_BILL_STATUS = {
+  DRAFT: "DRAFT",
+  CONFIRMED: "CONFIRMED",
+  CANCELLED: "CANCELLED",
+};
+
+export default PURCHASE_BILL_STATUS;
