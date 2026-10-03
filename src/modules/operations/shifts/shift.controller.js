@@ -7,6 +7,7 @@ import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
 import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTransfer.model.js";
 import { FUND_TRANSFER_STATUS } from "../../finance/treasury/fund-transfers/constants/fundTransfer.constant.js";
 import PaymentQr from "../../finance/treasury/payment-qr/models/paymentQr.model.js";
+import BranchCash from "../../finance/treasury/cash-management/branch-cash/models/branchCash.model.js";
 import { getTimePeriod } from "../../../utils/timePeriod.js";
 import { getBusinessDateRange } from "../../../utils/businessDate.js";
 
@@ -19,6 +20,12 @@ export const createShift = asyncHandler(async (req, res, next) => {
   const existingOpenShift = await Shift.findOne({ branchId, status: "open" });
   if (existingOpenShift) {
     return next(new ApiError(400, "A shift is already open for this branch. Please close it first."));
+  }
+
+  // Check if branch cash is initialized
+  const branchCash = await BranchCash.findOne({ branchId });
+  if (!branchCash) {
+    return next(new ApiError(400, "Branch cash must be initialized before opening a shift. Please go to Treasury > Branch Cash to initialize it."));
   }
 
   // Handle date selection: default today, optionally tomorrow
@@ -95,7 +102,11 @@ export const getShiftById = asyncHandler(async (req, res, next) => {
 export const getShiftSummary = asyncHandler(async (req, res, next) => {
   const { id } = req.params;
   
-  const shift = await Shift.findById(id).populate("openedBy").populate("closedBy");
+  const shift = await Shift.findById(id)
+    .populate("openedBy")
+    .populate("closedBy")
+    .populate("manualDeposits.createdBy")
+    .populate("manualWithdrawals.createdBy");
   if (!shift) return next(new ApiError(404, "Shift not found"));
 
   const shiftEndTime = shift.status === "closed" ? shift.closedAt : new Date();
@@ -206,16 +217,47 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
   let totalWithdrawals = 0;
   let totalDeposits = 0;
 
-  const shiftCashAccountId = shift.cashAccountId ? String(shift.cashAccountId) : null;
+  if (shift.manualDeposits && shift.manualDeposits.length > 0) {
+    for (const dep of shift.manualDeposits) {
+      deposits.push({
+        _id: dep._id,
+        amount: dep.amount,
+        narration: dep.narration,
+        transferDate: dep.date,
+        createdBy: dep.createdBy?.fullName || "System",
+        fromAccountName: "External",
+      });
+      totalDeposits += dep.amount;
+    }
+  }
 
+  if (shift.manualWithdrawals && shift.manualWithdrawals.length > 0) {
+    for (const w of shift.manualWithdrawals) {
+      withdrawals.push({
+        _id: w._id,
+        amount: w.amount,
+        narration: w.narration,
+        transferDate: w.date,
+        createdBy: w.createdBy?.fullName || "System",
+        toAccountName: w.source === "running" ? "External (from Running)" : w.source === "frozen" ? "External (from Frozen)" : "External",
+        source: w.source
+      });
+      
+      // ONLY deduct from expected cash if it was taken from the running shift drawer!
+      if (w.source === "running") {
+        totalWithdrawals += w.amount;
+      }
+    }
+  }
+
+  // Fallback for older records that used FundTransfer for cash withdrawals/deposits
+  const shiftCashAccountId = shift.cashAccountId ? String(shift.cashAccountId) : null;
   if (shift._id) {
     const fundTransfers = await FundTransfer.find({
       shiftId: shift._id,
       status: FUND_TRANSFER_STATUS.POSTED,
       isDeleted: false,
     })
-      .populate("fromCashAccountId", "accountName")
-      .populate("toCashAccountId",   "accountName")
       .populate("fromBankAccountId", "accountName")
       .populate("toBankAccountId",   "accountName")
       .populate("createdBy",         "fullName");
@@ -234,13 +276,14 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
       };
 
       if (shiftCashAccountId && fromId === shiftCashAccountId) {
-        // Money LEAVING the shift's cash account → Withdrawal
+        // Money LEAVING the shift's cash account → Withdrawal (assumed from running in the old system)
         withdrawals.push({
           ...ftData,
           toAccountType: ft.toAccountType,
           toAccountName: ft.toCashAccountId?.accountName
             || ft.toBankAccountId?.accountName
             || "External",
+          source: "running"
         });
         totalWithdrawals += ft.amount;
       } else if (shiftCashAccountId && toId === shiftCashAccountId) {

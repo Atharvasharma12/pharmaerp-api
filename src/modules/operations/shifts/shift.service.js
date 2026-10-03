@@ -24,18 +24,16 @@ export const openShift = async (data) => {
     throw new ApiError(400, "An open shift already exists for this branch. Please close it first.");
   }
 
-  // Ensure BranchCash is initialized for this branch (idempotent)
+  // Guard: BranchCash must be initialized before a shift can be opened.
+  // This prevents phantom shifts on uninitialized branches.
   if (branchId) {
-    try {
-      await branchCashService.initializeBranchCash(
-        workspaceId,
-        companyId,
-        data.openedBy || data.createdBy,
-        branchId,
-        null // branch name not required for idempotent init
+    const existingBranchCash = await branchCashRepository.findByBranchId(branchId, companyId);
+    if (!existingBranchCash) {
+      throw new ApiError(
+        400,
+        "Branch cash is not initialized for this branch. " +
+        "Please go to Finance \u2192 Treasury \u2192 Branch Cash and set up the opening balance before opening a shift."
       );
-    } catch (err) {
-      console.warn("[Shift] Could not ensure BranchCash for branch:", err.message);
     }
   }
 
@@ -155,7 +153,16 @@ export const closeShift = async (
     }
   }, 0);
 
-  const expectedCash = shift.openingFloatAmount + totalCashSales;
+  // Compute manual deposit / withdrawal totals already recorded on the shift
+  // (these are populated by branchCash.service when deposit/withdraw APIs are called
+  //  during the open shift — we now include them in the expected-cash formula)
+  const totalManualDeposits = (shift.manualDeposits || []).reduce((s, d) => s + (d.amount || 0), 0);
+  const totalManualWithdrawalsFromRunning = (shift.manualWithdrawals || [])
+    .filter((w) => w.source === "running")
+    .reduce((s, w) => s + (w.amount || 0), 0);
+
+  // Expected = Opening + Cash Sales + Deposits into Running − Withdrawals from Running
+  const expectedCash = shift.openingFloatAmount + totalCashSales + totalManualDeposits - totalManualWithdrawalsFromRunning;
 
   // ── Freeze excess cash into frozen reserve ───────────────────────────────
   if (frozenAmount > 0 && shift.branchId) {
@@ -167,6 +174,12 @@ export const closeShift = async (
         frozenAmount,
         frozenDenominations,
         closingDenominations  // full counted denominations for carry-forward calculation
+      );
+      // Log freeze event to frozenLedger for day-closing timeline
+      await branchCashService.pushFreezeAuditEntry(
+        shift.branchId.toString(),
+        shift.companyId.toString(),
+        { frozenAmount, shiftId: shift._id, userId },
       );
     } catch (freezeErr) {
       console.warn("[Shift] freezeAtShiftClose warning:", freezeErr.message);
@@ -181,6 +194,7 @@ export const closeShift = async (
   shift.cashDifferenceAmount = totalCash - expectedCash;
   shift.carryForwardAmount = safeCarry;
   shift.frozenAtClose = frozenAmount;
+  shift.cashSalesTotal = totalCashSales; // persisted for day-closing aggregation
   // Kept for backward compat, zeroed since fund transfers are deprecated
   shift.totalFundWithdrawals = 0;
   shift.totalFundDeposits = 0;

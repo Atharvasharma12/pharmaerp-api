@@ -225,98 +225,10 @@ const getCashExchangeById = async (id, companyId, workspaceId) => {
   return cashExchange.toSafeObject();
 };
 
-// ---------------------------------------------------------------------------
-// CANCEL CASH EXCHANGE
-// ---------------------------------------------------------------------------
-const cancelCashExchange = async (
-  id,
-  companyId,
-  workspaceId,
-  userId,
-  payload,
-) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
 
-  try {
-    const cashExchange = await mongoose
-      .model("CashExchange")
-      .findOne({ _id: id, companyId, workspaceId, isDeleted: false })
-      .session(session);
-
-    if (!cashExchange) {
-      throw new ApiError(404, "Cash Exchange not found");
-    }
-
-    if (cashExchange.status === CASH_EXCHANGE_STATUS.CANCELLED) {
-      throw new ApiError(400, "Cash Exchange is already cancelled");
-    }
-
-    // PRE-FLIGHT: validate we have enough of what was originally received
-    if (cashExchange.cashPartition === "running") {
-      await branchCashRepository.validateSufficientRunningDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        { session },
-      );
-      await branchCashRepository.subtractRunningDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        userId,
-        { session },
-      );
-      await branchCashRepository.addRunningDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsGiven,
-        userId,
-        { session },
-      );
-    } else {
-      await branchCashRepository.validateSufficientFrozenDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        { session },
-      );
-      await branchCashRepository.subtractFrozenDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        userId,
-        { session },
-      );
-      await branchCashRepository.addFrozenDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsGiven,
-        userId,
-        { session },
-      );
-    }
-
-    cashExchange.status = CASH_EXCHANGE_STATUS.CANCELLED;
-    cashExchange.cancelledAt = new Date();
-    cashExchange.cancelledBy = userId;
-    cashExchange.cancellationReason = payload?.reason || null;
-    await cashExchange.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return getCashExchangeById(cashExchange._id, companyId, workspaceId);
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
-  }
-};
 
 export default {
   createCashExchange,
   getCashExchanges,
   getCashExchangeById,
-  cancelCashExchange,
 };

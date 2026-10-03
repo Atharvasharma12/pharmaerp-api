@@ -79,3 +79,34 @@ export const cancelBankDepositSlip = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Bank deposit slip cancelled successfully", slip));
 });
+
+// ── Partial Withdraw from Slip ────────────────────────────────────────────────
+
+export const withdrawFromBankDepositSlip = asyncHandler(async (req, res) => {
+  const { workspaceId, companyId, user } = req;
+  const { slipId } = req.params;
+  const slip = await bankDepositSlipService.withdrawFromBankDepositSlip(
+    workspaceId,
+    companyId,
+    user._id,
+    { slipId, ...req.body },
+  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Cash withdrawn from bank deposit slip successfully", slip));
+});
+
+// ── Cash In Transit (company-scope read) ──────────────────────────────────────
+
+export const getCashInTransit = asyncHandler(async (req, res) => {
+  const { workspaceId, companyId } = req;
+  const result = await bankDepositSlipService.getCashInTransit(
+    workspaceId,
+    companyId,
+    req.query,
+  );
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Cash in transit retrieved successfully", result));
+});
+

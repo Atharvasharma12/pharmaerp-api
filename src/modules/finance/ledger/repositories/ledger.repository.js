@@ -97,11 +97,11 @@ const getLedgerEntries = async (
     }).select("_id");
     const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
 
-    const CashAccount = mongoose.model("CashAccount");
+    const BranchCash = mongoose.model("BranchCash");
     const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
-    const validBranchCashAccounts = await CashAccount.find({
+    const validBranchCashAccounts = await BranchCash.find({
       companyId: new mongoose.Types.ObjectId(companyId),
-      isDeleted: false,
+      isActive: true,
       branchId: targetBranchId
     }).select("ledgerAccountId");
     const validLedgerIds = validBranchCashAccounts

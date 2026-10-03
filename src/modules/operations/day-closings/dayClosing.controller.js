@@ -131,8 +131,6 @@ const fetchFundTransfers = async ({ shiftIds = [], dayClosingId = null, cashAcco
     status: FUND_TRANSFER_STATUS.POSTED,
     isDeleted: false,
   })
-    .populate("fromCashAccountId", "accountName")
-    .populate("toCashAccountId",   "accountName")
     .populate("fromBankAccountId", "accountName")
     .populate("toBankAccountId",   "accountName")
     .populate("createdBy",         "fullName");

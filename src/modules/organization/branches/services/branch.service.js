@@ -113,23 +113,10 @@ const createBranch = async (workspaceId, companyId, userId, payload) => {
     createdBy: userId,
   });
 
-  // Auto-initialize BranchCash (running + frozen) for the new branch
-  try {
-    await branchCashService.initializeBranchCash(
-      workspaceId,
-      companyId,
-      userId,
-      branch._id.toString(),
-      payload.name,
-    );
-  } catch (seedErr) {
-    // Non-fatal: BranchCash can be initialized manually if branch creation succeeds
-    console.warn(
-      `[Branch] Could not auto-initialize branch cash for "${payload.name}":`,
-      seedErr.message,
-    );
-  }
-
+  // BranchCash is NOT auto-created here.
+  // After creating a branch, the user must go to Finance → Treasury → Branch Cash
+  // and set up the opening balance via POST /treasury/branch-cash/initialize
+  // This ensures denominations and opening amounts are recorded intentionally.
   return branch.toSafeObject();
 };
 

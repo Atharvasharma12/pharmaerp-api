@@ -46,13 +46,33 @@ const findOrCreateSystemAccount = async (
   groupName,
   session,
 ) => {
-  // Fast path: account already exists
+  // Fast path: account already exists by code
   let account = await accountRepository.findAccountByCode(
     companyId,
     accountCode,
     { session },
   );
   if (account) return account;
+
+  // Defensive check: does an account with this name already exist for this company?
+  const existingByName = await accountRepository.findAccountByName(
+    companyId,
+    accountName,
+    { session },
+  );
+
+  let finalAccountName = accountName;
+  if (existingByName) {
+    if (accountCode && accountCode.startsWith("BCASH-")) {
+      // Disambiguate for branch cash so it doesn't collide with another branch's account
+      const disambiguator = accountCode.slice(-4);
+      finalAccountName = `${accountName} (${disambiguator})`;
+    } else {
+      // For general singleton system accounts (e.g. Opening Balances, Cash in Transit),
+      // reuse the existing account
+      return existingByName;
+    }
+  }
 
   // Defensive normalization: map legacy "debit"/"credit" or lowercase inputs to valid enum values
   let normalizedNature = accountNature;
@@ -73,6 +93,14 @@ const findOrCreateSystemAccount = async (
     groupCode,
     { session },
   );
+  if (!group) {
+    // Also check if groupName already exists for this company
+    group = await accountGroupRepository.findGroupByName(
+      companyId,
+      groupName,
+      { session },
+    );
+  }
   if (!group) {
     group = await accountGroupRepository.createGroup(
       {
@@ -95,7 +123,7 @@ const findOrCreateSystemAccount = async (
       workspaceId,
       companyId,
       accountCode,
-      accountName,
+      accountName: finalAccountName,
       accountGroupId: group._id,
       accountNature: normalizedNature,
       accountCategory,

@@ -8,12 +8,10 @@ import {
   createCashExchange,
   getCashExchanges,
   getCashExchangeById,
-  cancelCashExchange,
 } from "../controllers/cashExchange.controller.js";
 
 import {
   createCashExchangeSchema,
-  cancelCashExchangeSchema,
   cashExchangeIdParamSchema,
   getCashExchangesQuerySchema,
 } from "../validations/cashExchange.validation.js";
@@ -35,11 +33,5 @@ router.get(
   getCashExchangeById,
 );
 
-router.post(
-  "/:cashExchangeId/cancel",
-  validate(cashExchangeIdParamSchema, "params"),
-  validate(cancelCashExchangeSchema),
-  cancelCashExchange,
-);
 
 export default router;

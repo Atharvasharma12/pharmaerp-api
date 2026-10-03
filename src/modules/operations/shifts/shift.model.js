@@ -128,6 +128,25 @@ const shiftSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    
+    // Arrays to store explicit breakdown of manual deposits/withdrawals during the shift
+    manualDeposits: [
+      {
+        amount: { type: Number, required: true },
+        narration: { type: String, trim: true },
+        date: { type: Date, default: Date.now },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" }
+      }
+    ],
+    manualWithdrawals: [
+      {
+        amount: { type: Number, required: true },
+        narration: { type: String, trim: true },
+        date: { type: Date, default: Date.now },
+        createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        source: { type: String, enum: ["running", "frozen", "bankslip"] } // optional source context
+      }
+    ],
 
     // ── Shift-close carry-forward ─────────────────────────────────────────
     // Amount the pharmacist chose to keep as running cash for the next shift
@@ -138,6 +157,13 @@ const shiftSchema = new mongoose.Schema(
     },
     // Amount moved to frozen reserve at shift close (totalCash - carryForwardAmount)
     frozenAtClose: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Total cash-collected from sales during this shift.
+    // Populated at shift-close so day-closing can sum per-shift without re-querying invoices.
+    cashSalesTotal: {
       type: Number,
       default: 0,
       min: 0,
