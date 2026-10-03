@@ -1,0 +1,1636 @@
+erp-backend/
+│
+├── src/
+│   │
+│   ├── app.js
+│   ├── server.js
+│   │
+│   ├── config/
+│   │   ├── env.js
+│   │   ├── database.js
+│   │   ├── cors.js
+│   │   └── logger.js
+│   │
+│   ├── routes/
+│   │   └── index.routes.js        # central route loader
+│   │
+│   ├── modules/
+│   │   └── core/
+│   │       │
+│   │       ├── core.routes.js     # combines all core module routes
+│   │       ├── core.module.js     # registers core modules
+│   │       │
+│   │       └── health/
+│   │           │
+│   │           ├── models/
+│   │           │   └── health.model.js
+│   │           │
+│   │           ├── controllers/
+│   │           │   └── health.controller.js
+│   │           │
+│   │           ├── services/
+│   │           │   └── health.service.js
+│   │           │
+│   │           ├── repositories/
+│   │           │   └── health.repository.js
+│   │           │
+│   │           ├── routes/
+│   │           │   └── health.routes.js
+│   │           │
+│   │           ├── validations/
+│   │           │   └── health.validation.js
+│   │           │
+│   │           ├── constants/
+│   │           │   └── health.constant.js
+│   │           │
+│   │           └── health.module.js
+│   │
+│   ├── middlewares/
+│   │   ├── auth.middleware.js
+│   │   ├── error.middleware.js
+│   │   ├── notFound.middleware.js
+│   │   ├── validate.middleware.js
+│   │   └── rateLimiter.middleware.js
+│   │
+│   ├── utils/
+│   │   ├── asyncHandler.js
+│   │   ├── ApiError.js
+│   │   ├── ApiResponse.js
+│   │   ├── jwt.js
+│   │   ├── hash.js
+│   │   └── helpers.js
+│   │
+│   ├── constants/
+│   │   ├── app.constant.js
+│   │   ├── http.constant.js
+│   │   ├── status.constant.js
+│   │   └── roles.constant.js
+│   │
+│   ├── jobs/
+│   │   └── .gitkeep
+│   │
+│   └── docs/
+│       └── .gitkeep
+│
+├── tests/
+│   ├── api/
+│   │   └── health.test.js
+│   └── unit/
+│       └── .gitkeep
+│
+├── logs/
+│   └── .gitkeep
+│
+├── uploads/
+│   └── .gitkeep
+│
+├── public/
+│   └── .gitkeep
+│
+├── scripts/
+│   └── .gitkeep
+│
+├── .env.example
+├── .gitignore
+├── package.json
+├── package-lock.json
+├── README.md
+└── nodemon.json
+
+
+
+
+src/
+├── modules/
+│   └── core/
+│       │
+│       ├── auth/
+│       │   ├── controllers/
+│       │   │   └── auth.controller.js
+│       │   ├── services/
+│       │   │   └── auth.service.js
+│       │   ├── repositories/
+│       │   │   └── auth.repository.js
+│       │   ├── routes/
+│       │   │   └── auth.routes.js
+│       │   ├── validations/
+│       │   │   └── auth.validation.js
+│       │   ├── constants/
+│       │   │   └── auth.constant.js
+│       │   └── auth.module.js
+│       │
+│       ├── users/
+│       │   ├── models/
+│       │   │   └── user.model.js
+│       │   ├── controllers/
+│       │   │   └── user.controller.js
+│       │   ├── services/
+│       │   │   └── user.service.js
+│       │   ├── repositories/
+│       │   │   └── user.repository.js
+│       │   ├── routes/
+│       │   │   └── user.routes.js
+│       │   ├── validations/
+│       │   │   └── user.validation.js
+│       │   ├── constants/
+│       │   │   └── user.constant.js
+│       │   └── user.module.js
+│       │
+│       ├── access-control/
+│       │   ├── models/
+│       │   │   ├── role.model.js
+│       │   │   ├── permission.model.js
+│       │   │   └── workspaceMemberRole.model.js
+│       │   ├── controllers/
+│       │   │   ├── role.controller.js
+│       │   │   └── permission.controller.js
+│       │   ├── services/
+│       │   │   ├── role.service.js
+│       │   │   └── permission.service.js
+│       │   ├── repositories/
+│       │   │   ├── role.repository.js
+│       │   │   └── permission.repository.js
+│       │   ├── routes/
+│       │   │   └── access-control.routes.js
+│       │   ├── validations/
+│       │   │   ├── role.validation.js
+│       │   │   └── permission.validation.js
+│       │   ├── constants/
+│       │   │   └── permission.constant.js
+│       │   └── access-control.module.js
+│       │
+│       ├── settings/
+│       │   ├── models/
+│       │   │   ├── app-setting.model.js
+│       │   │   └── user-setting.model.js
+│       │   ├── controllers/
+│       │   │   └── setting.controller.js
+│       │   ├── services/
+│       │   │   └── setting.service.js
+│       │   ├── repositories/
+│       │   │   └── setting.repository.js
+│       │   ├── routes/
+│       │   │   └── setting.routes.js
+│       │   ├── validations/
+│       │   │   └── setting.validation.js
+│       │   └── setting.module.js
+│       │
+│       ├── core.routes.js
+│       └── core.module.js
+│
+├── middlewares/
+│   ├── auth.middleware.js
+│   ├── permission.middleware.js
+│   ├── validate.middleware.js
+│   └── error.middleware.js
+│
+├── utils/
+│   ├── asyncHandler.js
+│   ├── ApiError.js
+│   ├── ApiResponse.js
+│   ├── jwt.js
+│   └── hash.js
+│
+└── constants/
+    ├── status.constant.js
+    └── app.constant.js
+
+
+plans/
+├── models/
+│   └── plan.model.js
+
+├── repositories/
+│   └── plan.repository.js
+
+├── services/
+│   └── plan.service.js
+
+├── controllers/
+│   └── plan.controller.js
+
+├── routes/
+│   └── plan.routes.js
+
+├── validations/
+│   └── plan.validation.js
+
+├── constants/
+│   └── plan.constant.js
+
+
+    subscriptions/
+├── models/
+│   └── subscription.model.js
+
+├── repositories/
+│   └── subscription.repository.js
+
+├── services/
+│   └── subscription.service.js
+
+├── controllers/
+│   └── subscription.controller.js
+
+├── routes/
+│   └── subscription.routes.js
+
+├── validations/
+│   └── subscription.validation.js
+
+├── constants/
+│   └── subscription.constant.js
+
+usage/
+├── models/
+│   └── usage.model.js
+
+├── repositories/
+│   └── usage.repository.js
+
+├── services/
+│   └── usage.service.js
+
+├── controllers/
+│   └── usage.controller.js
+
+├── routes/
+│   └── usage.routes.js
+
+├── validations/
+│   └── usage.validation.js
+
+├── constants/
+│   └── usage.constant.js
+
+
+src/utils/subscription/
+├── calculateSubscriptionExpiry.js
+├── checkPlanLimit.js
+├── calculateUsagePercentage.js
+├── generateSubscriptionCode.js
+├── subscriptionStatus.js
+└── billingCycle.js
+
+
+src/modules/subscription/
+├── subscription.module.js
+├── subscription.routes.js
+
+├── plans/
+│   ├── plan.module.js
+│   ├── models/plan.model.js
+│   ├── repositories/plan.repository.js
+│   ├── services/plan.service.js
+│   ├── controllers/plan.controller.js
+│   ├── routes/plan.routes.js
+│   ├── validations/plan.validation.js
+│   └── constants/plan.constant.js
+
+├── subscriptions/
+│   ├── subscription.module.js
+│   ├── models/subscription.model.js
+│   ├── repositories/subscription.repository.js
+│   ├── services/subscription.service.js
+│   ├── controllers/subscription.controller.js
+│   ├── routes/subscription.routes.js
+│   ├── validations/subscription.validation.js
+│   └── constants/subscription.constant.js
+
+└── usage/
+    ├── usage.module.js
+    ├── models/usage.model.js
+    ├── repositories/usage.repository.js
+    ├── services/usage.service.js
+    ├── controllers/usage.controller.js
+    ├── routes/usage.routes.js
+    ├── validations/usage.validation.js
+    └── constants/usage.constant.js
+
+
+src/
+├── middlewares/
+│   ├── workspaceContext.middleware.js
+│   └── subscriptionGuard.middleware.js
+│
+├── modules/
+│   ├── organization/
+│   │   ├── workspaces/
+│   │   │   ├── models/
+│   │   │   │   ├── workspace.model.js
+│   │   │   │   └── workspaceMember.model.js
+│   │   │   ├── controllers/
+│   │   │   │   └── workspace.controller.js
+│   │   │   ├── services/
+│   │   │   │   └── workspace.service.js
+│   │   │   ├── repositories/
+│   │   │   │   └── workspace.repository.js
+│   │   │   ├── validations/
+│   │   │   │   └── workspace.validation.js
+│   │   │   ├── routes/
+│   │   │   │   └── workspace.routes.js
+│   │   │   └── workspace.module.js
+│   │   │
+│   │   ├── companies/
+│   │   │   ├── models/
+│   │   │   │   └── company.model.js
+│   │   │   ├── controllers/
+│   │   │   │   └── company.controller.js
+│   │   │   ├── services/
+│   │   │   │   └── company.service.js
+│   │   │   ├── repositories/
+│   │   │   │   └── company.repository.js
+│   │   │   ├── validations/
+│   │   │   │   └── company.validation.js
+│   │   │   ├── routes/
+│   │   │   │   └── company.routes.js
+│   │   │   └── company.module.js
+│   │   │
+│   │   └── branches/
+│   │       ├── models/
+│   │       │   └── branch.model.js
+│   │       ├── controllers/
+│   │       │   └── branch.controller.js
+│   │       ├── services/
+│   │       │   └── branch.service.js
+│   │       ├── repositories/
+│   │       │   └── branch.repository.js
+│   │       ├── validations/
+│   │       │   └── branch.validation.js
+│   │       ├── routes/
+│   │       │   └── branch.routes.js
+│   │       └── branch.module.js
+│   │
+│   └── subscription/
+│       ├── plans/
+│       │   ├── models/
+│       │   │   └── plan.model.js
+│       │   ├── controllers/
+│       │   │   └── plan.controller.js
+│       │   ├── services/
+│       │   │   └── plan.service.js
+│       │   ├── repositories/
+│       │   │   └── plan.repository.js
+│       │   ├── validations/
+│       │   │   └── plan.validation.js
+│       │   ├── routes/
+│       │   │   └── plan.routes.js
+│       │   └── plan.module.js
+│       │
+│       ├── subscriptions/
+│       │   ├── models/
+│       │   │   ├── subscription.model.js
+│       │   │   └── subscriptionInvoice.model.js
+│       │   ├── controllers/
+│       │   │   └── subscription.controller.js
+│       │   ├── services/
+│       │   │   └── subscription.service.js
+│       │   ├── repositories/
+│       │   │   └── subscription.repository.js
+│       │   ├── validations/
+│       │   │   └── subscription.validation.js
+│       │   ├── routes/
+│       │   │   └── subscription.routes.js
+│       │   └── subscription.module.js
+│       │
+│       └── usage/
+│           ├── controllers/
+│           │   └── usage.controller.js
+│           ├── services/
+│           │   └── usage.service.js
+│           ├── routes/
+│           │   └── usage.routes.js
+│           └── usage.module.js
+
+
+
+
+src/modules/
+├── core/
+│   ├── auth/
+│   ├── users/
+│   ├── access-control/
+│   ├── settings/
+│
+├── organization/
+│   ├── workspaces/
+│   ├── companies/
+│   ├── branches/
+│
+├── subscription/
+│   ├── plans/
+│   ├── subscriptions/
+│   ├── usage/
+│
+├── catalog/
+│   ├── products/
+│   ├── medicines/
+│   ├── categories/
+│   ├── batches/
+│
+├── inventory/
+│   ├── stock/
+│   ├── stock-movements/
+│   ├── expiry/
+│
+├── parties/
+│   ├── customers/
+│   ├── suppliers/
+│
+├── purchase/
+│   ├── purchases/
+│   ├── purchase-returns/
+│
+├── sales/
+│   ├── sales/
+│   ├── sales-returns/
+│
+├── billing/
+│   ├── pos/
+│   ├── bills/
+│
+├── invoicing/
+│   ├── invoices/
+│
+├── taxation/
+│   ├── gst/
+│   ├── taxes/
+│
+├── finance/
+│   ├── payments/
+│   ├── transactions/
+│   ├── ledger/
+│   ├── expenses/
+│   ├── income/
+│
+├── orders/
+│   ├── orders/
+│   ├── shipping/
+│   ├── delivery/
+│
+├── ecommerce/
+│   ├── cart/
+│   ├── checkout/
+│   ├── wishlist/
+│   ├── coupons/
+│
+├── crm/
+│   ├── leads/
+│   ├── followups/
+│
+├── hrm/
+│   ├── employees/
+│   ├── attendance/
+│   ├── payroll/
+│
+├── reports/
+│
+├── notifications/
+│
+└── system/
+    ├── files/
+    ├── logs/
+    ├── audit/
+
+
+
+
+
+
+    erp/
+└── erp-server/
+    │
+    ├── src/
+    │   │
+    │   ├── app.js
+    │   ├── server.js
+    │   │
+    │   ├── config/
+    │   │   ├── database.js
+    │   │   ├── env.js
+    │   │   └── cors.js
+    │   │
+    │   ├── routes/
+    │   │   └── index.routes.js
+    │   │
+    │   ├── modules/
+    │   │   ├── core/
+    │   │
+    │   ├── middlewares/
+    │   │   ├── auth.middleware.js
+    │   │   ├── permission.middleware.js
+    │   │   ├── validate.middleware.js
+    │   │   ├── error.middleware.js
+    │   │   ├── workspace.middleware.js
+    │   │   ├── company.middleware.js
+    │   │   └── branch.middleware.js
+    │   │
+    │   ├── utils/
+    │   │   ├── asyncHandler.js
+    │   │   ├── ApiError.js
+    │   │   ├── ApiResponse.js
+    │   │   ├── jwt.js
+    │   │   ├── hash.js
+    │   │   ├── logger.js          ⭐ (for logs)
+    │   │   └── helpers.js
+    │   │
+    │   ├── constants/
+    │   │   ├── app.constant.js
+    │   │   ├── status.constant.js
+    │   │   ├── http.constant.js
+    │   │   └── roles.constant.js
+    │   │
+    │   └── jobs/                 ⭐ background jobs
+    │
+    ├── logs/                    ⭐ runtime logs
+    │   ├── error.log
+    │   └── combined.log
+    │
+    ├── tests/                   ⭐ testing
+    │   ├── api/
+    │   │   ├── auth.test.js
+    │   │   ├── user.test.js
+    │   │
+    │   └── unit/
+    │
+    ├── uploads/
+    │
+    ├── .env
+    ├── .env.example
+    ├── .gitignore
+    ├── package.json
+    ├── README.md
+    └── nodemon.json
+
+
+
+
+
+src/
+├── modules/
+│
+│   ├── platform/
+│   │   │
+│   │   ├── platform.routes.js
+│   │   ├── platform.module.js
+│   │   │
+│   │   ├── auth/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformAuth.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformAuth.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformAuth.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformAuth.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformAuth.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformAuth.constant.js
+│   │   │   │
+│   │   │   └── platformAuth.module.js
+│   │   │
+│   │   ├── users/
+│   │   │   ├── models/
+│   │   │   │   └── platformUser.model.js
+│   │   │   │
+│   │   │   ├── controllers/
+│   │   │   │   └── platformUser.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformUser.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformUser.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformUser.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformUser.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformRole.constant.js
+│   │   │   │
+│   │   │   └── platformUser.module.js
+│   │   │
+│   │   ├── dashboard/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformDashboard.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformDashboard.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformDashboard.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformDashboard.routes.js
+│   │   │   │
+│   │   │   └── platformDashboard.module.js
+│   │   │
+│   │   ├── customers/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformCustomer.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformCustomer.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformCustomer.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformCustomer.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformCustomer.validation.js
+│   │   │   │
+│   │   │   └── platformCustomer.module.js
+│   │   │
+│   │   ├── plans/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformPlan.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformPlan.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformPlan.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformPlan.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformPlan.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformPlan.constant.js
+│   │   │   │
+│   │   │   └── platformPlan.module.js
+│   │   │
+│   │   ├── subscriptions/
+│   │   │   ├── controllers/
+│   │   │   │   └── platformSubscription.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformSubscription.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformSubscription.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformSubscription.routes.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   └── platformSubscription.validation.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── platformSubscription.constant.js
+│   │   │   │
+│   │   │   └── platformSubscription.module.js
+│   │   │
+│   │   ├── global-catalog/
+│   │   │   │
+│   │   │   ├── medicines/
+│   │   │   │   ├── models/
+│   │   │   │   │   └── globalMedicine.model.js
+│   │   │   │   │
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── globalMedicine.controller.js
+│   │   │   │   │
+│   │   │   │   ├── services/
+│   │   │   │   │   └── globalMedicine.service.js
+│   │   │   │   │
+│   │   │   │   ├── repositories/
+│   │   │   │   │   └── globalMedicine.repository.js
+│   │   │   │   │
+│   │   │   │   ├── routes/
+│   │   │   │   │   └── globalMedicine.routes.js
+│   │   │   │   │
+│   │   │   │   ├── validations/
+│   │   │   │   │   └── globalMedicine.validation.js
+│   │   │   │   │
+│   │   │   │   └── globalMedicine.module.js
+│   │   │   │
+│   │   │   ├── categories/
+│   │   │   │   ├── models/
+│   │   │   │   │   └── globalCategory.model.js
+│   │   │   │   │
+│   │   │   │   ├── controllers/
+│   │   │   │   │   └── globalCategory.controller.js
+│   │   │   │   │
+│   │   │   │   ├── services/
+│   │   │   │   │   └── globalCategory.service.js
+│   │   │   │   │
+│   │   │   │   ├── repositories/
+│   │   │   │   │   └── globalCategory.repository.js
+│   │   │   │   │
+│   │   │   │   ├── routes/
+│   │   │   │   │   └── globalCategory.routes.js
+│   │   │   │   │
+│   │   │   │   ├── validations/
+│   │   │   │   │   └── globalCategory.validation.js
+│   │   │   │   │
+│   │   │   │   └── globalCategory.module.js
+│   │   │   │
+│   │   │   ├── globalCatalog.routes.js
+│   │   │   └── globalCatalog.module.js
+│   │   │
+│   │   ├── audit-logs/
+│   │   │   ├── models/
+│   │   │   │   └── platformAuditLog.model.js
+│   │   │   │
+│   │   │   ├── controllers/
+│   │   │   │   └── platformAuditLog.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   └── platformAuditLog.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   └── platformAuditLog.repository.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── platformAuditLog.routes.js
+│   │   │   │
+│   │   │   └── platformAuditLog.module.js
+│   │
+│
+├── middlewares/
+│   ├── platformAuth.middleware.js
+│   ├── platformRole.middleware.js
+│   ├── platformAudit.middleware.js
+│   └── platformActivity.middleware.js
+│
+├── constants/
+│   ├── platformRoles.constant.js
+│   ├── platformStatus.constant.js
+│   └── platformPermissions.constant.js
+│
+└── utils/
+    └── platform/
+        ├── platformJwt.js
+        ├── platformLogger.js
+        ├── platformHelpers.js
+        ├── generateWorkspaceReport.js
+        ├── generateSubscriptionAnalytics.js
+        ├── calculatePlatformRevenue.js
+        └── platformCookies.js
+
+
+/api/v1/platform/auth/login
+/api/v1/platform/users
+/api/v1/platform/dashboard
+/api/v1/platform/customers
+/api/v1/platform/plans
+/api/v1/platform/subscriptions
+/api/v1/platform/global-catalog/medicines
+/api/v1/platform/audit-logs
+
+
+
+├── modules/
+│   ├── organization/
+│   │   ├── workspaces/
+│   │   │   ├── models/
+│   │   │   │   ├── workspace.model.js
+│   │   │   │   ├── workspaceMember.model.js
+│   │   │   │   └── workspaceInvitation.model.js
+│   │   │   │
+│   │   │   ├── controllers/
+│   │   │   │   ├── workspace.controller.js
+│   │   │   │   └── workspaceInvitation.controller.js
+│   │   │   │
+│   │   │   ├── services/
+│   │   │   │   ├── workspace.service.js
+│   │   │   │   └── workspaceInvitation.service.js
+│   │   │   │
+│   │   │   ├── repositories/
+│   │   │   │   ├── workspace.repository.js
+│   │   │   │   └── workspaceInvitation.repository.js
+│   │   │   │
+│   │   │   ├── validations/
+│   │   │   │   ├── workspace.validation.js
+│   │   │   │   └── workspaceInvitation.validation.js
+│   │   │   │
+│   │   │   ├── routes/
+│   │   │   │   └── workspace.routes.js
+│   │   │   │
+│   │   │   ├── constants/
+│   │   │   │   └── workspace.constant.js
+│   │   │   │
+│   │   │   └── workspace.module.js
+
+
+src/modules/organization/
+│
+├── companies/
+│   ├── models/
+│   │   └── company.model.js
+│   │
+│   ├── repositories/
+│   │   └── company.repository.js
+│   │
+│   ├── services/
+│   │   └── company.service.js
+│   │
+│   ├── controllers/
+│   │   └── company.controller.js
+│   │
+│   ├── validations/
+│   │   └── company.validation.js
+│   │
+│   ├── routes/
+│   │   └── company.routes.js
+│   │
+│   ├── constants/
+│   │   └── company.constant.js
+│   │
+│   └── company.module.js
+
+
+src/modules/organization/branches/
+│
+├── models/
+│   └── branch.model.js
+│
+├── repositories/
+│   └── branch.repository.js
+│
+├── services/
+│   └── branch.service.js
+│
+├── controllers/
+│   └── branch.controller.js
+│
+├── validations/
+│   └── branch.validation.js
+│
+├── routes/
+│   └── branch.routes.js
+│
+├── constants/
+│   └── branch.constant.js
+│
+└── branch.module.js
+
+
+Access Control folder structure:
+
+src/modules/core/access-control/
+│
+├── models/
+│   ├── role.model.js
+│   └── memberAccess.model.js
+│
+├── repositories/
+│   ├── role.repository.js
+│   └── memberAccess.repository.js
+│
+├── services/
+│   ├── role.service.js
+│   └── memberAccess.service.js
+│
+├── controllers/
+│   ├── role.controller.js
+│   └── memberAccess.controller.js
+│
+├── validations/
+│   ├── role.validation.js
+│   └── memberAccess.validation.js
+│
+├── constants/
+│   ├── role.constant.js
+│   └── permission.constant.js
+│
+├── routes/
+│   └── access-control.routes.js
+│
+└── access-control.module.js
+
+Possible seed/helper for default roles (optional):
+
+6. src/modules/core/access-control/helpers/createDefaultRoles.js
+
+Files you will need later
+1. memberAccess.model.js
+2. memberAccess.repository.js
+3. memberAccess.service.js
+4. memberAccess.controller.js
+5. memberAccess.validation.js
+
+And update:
+
+6. access-control.routes.js
+7. permission.middleware.js
+
+
+src/modules/finance/
+│
+├── finance.routes.js
+├── finance.module.js
+│
+├── chart-of-accounts/
+│   ├── models/
+│   │   └── account.model.js
+│   ├── repositories/
+│   │   └── account.repository.js
+│   ├── services/
+│   │   └── account.service.js
+│   ├── controllers/
+│   │   └── account.controller.js
+│   ├── validations/
+│   │   └── account.validation.js
+│   ├── routes/
+│   │   └── account.routes.js
+│   ├── constants/
+│   │   └── account.constant.js
+│   └── account.module.js
+│
+├── journal-vouchers/
+│   ├── models/
+│   │   ├── journalVoucher.model.js
+│   │   └── journalEntry.model.js
+│   ├── repositories/
+│   │   └── journalVoucher.repository.js
+│   ├── services/
+│   │   └── journalVoucher.service.js
+│   ├── controllers/
+│   │   └── journalVoucher.controller.js
+│   ├── validations/
+│   │   └── journalVoucher.validation.js
+│   ├── routes/
+│   │   └── journalVoucher.routes.js
+│   ├── constants/
+│   │   └── journalVoucher.constant.js
+│   └── journalVoucher.module.js
+│
+├── ledger/
+│   ├── models/
+│   │   └── ledgerEntry.model.js
+│   ├── repositories/
+│   │   └── ledger.repository.js
+│   ├── services/
+│   │   └── ledger.service.js
+│   ├── controllers/
+│   │   └── ledger.controller.js
+│   ├── validations/
+│   │   └── ledger.validation.js
+│   ├── routes/
+│   │   └── ledger.routes.js
+│   ├── constants/
+│   │   └── ledger.constant.js
+│   └── ledger.module.js
+│
+├── financial-periods/
+│   ├── models/
+│   │   ├── financialYear.model.js
+│   │   └── accountingPeriod.model.js
+│   ├── repositories/
+│   │   └── financialPeriod.repository.js
+│   ├── services/
+│   │   └── financialPeriod.service.js
+│   ├── controllers/
+│   │   └── financialPeriod.controller.js
+│   ├── validations/
+│   │   └── financialPeriod.validation.js
+│   ├── routes/
+│   │   └── financialPeriod.routes.js
+│   ├── constants/
+│   │   └── financialPeriod.constant.js
+│   └── financialPeriod.module.js
+│
+├── transactions/
+│   ├── models/
+│   │   └── transaction.model.js
+│   ├── repositories/
+│   │   └── transaction.repository.js
+│   ├── services/
+│   │   └── transaction.service.js
+│   ├── controllers/
+│   │   └── transaction.controller.js
+│   ├── validations/
+│   │   └── transaction.validation.js
+│   ├── routes/
+│   │   └── transaction.routes.js
+│   ├── constants/
+│   │   └── transaction.constant.js
+│   └── transaction.module.js
+│
+├── payments/
+│   ├── models/
+│   │   └── payment.model.js
+│   ├── repositories/
+│   │   └── payment.repository.js
+│   ├── services/
+│   │   └── payment.service.js
+│   ├── controllers/
+│   │   └── payment.controller.js
+│   ├── validations/
+│   │   └── payment.validation.js
+│   ├── routes/
+│   │   └── payment.routes.js
+│   ├── constants/
+│   │   └── payment.constant.js
+│   └── payment.module.js
+│
+├── expenses/
+│   ├── models/
+│   │   └── expense.model.js
+│   ├── repositories/
+│   │   └── expense.repository.js
+│   ├── services/
+│   │   └── expense.service.js
+│   ├── controllers/
+│   │   └── expense.controller.js
+│   ├── validations/
+│   │   └── expense.validation.js
+│   ├── routes/
+│   │   └── expense.routes.js
+│   ├── constants/
+│   │   └── expense.constant.js
+│   └── expense.module.js
+│
+├── income/
+│   ├── models/
+│   │   └── income.model.js
+│   ├── repositories/
+│   │   └── income.repository.js
+│   ├── services/
+│   │   └── income.service.js
+│   ├── controllers/
+│   │   └── income.controller.js
+│   ├── validations/
+│   │   └── income.validation.js
+│   ├── routes/
+│   │   └── income.routes.js
+│   ├── constants/
+│   │   └── income.constant.js
+│   └── income.module.js
+│
+├── cash-management/
+│   ├── models/
+│   │   ├── cashRegister.model.js
+│   │   ├── cashSession.model.js
+│   │   └── cashDenomination.model.js
+│   ├── repositories/
+│   │   └── cashManagement.repository.js
+│   ├── services/
+│   │   └── cashManagement.service.js
+│   ├── controllers/
+│   │   └── cashManagement.controller.js
+│   ├── validations/
+│   │   └── cashManagement.validation.js
+│   ├── routes/
+│   │   └── cashManagement.routes.js
+│   ├── constants/
+│   │   └── cashManagement.constant.js
+│   └── cashManagement.module.js
+│
+├── bank-reconciliation/
+│   ├── models/
+│   │   ├── bankStatement.model.js
+│   │   └── bankReconciliation.model.js
+│   ├── repositories/
+│   │   └── bankReconciliation.repository.js
+│   ├── services/
+│   │   └── bankReconciliation.service.js
+│   ├── controllers/
+│   │   └── bankReconciliation.controller.js
+│   ├── validations/
+│   │   └── bankReconciliation.validation.js
+│   ├── routes/
+│   │   └── bankReconciliation.routes.js
+│   ├── constants/
+│   │   └── bankReconciliation.constant.js
+│   └── bankReconciliation.module.js
+│
+├── gst-accounting/
+│   ├── models/
+│   │   ├── gstLedger.model.js
+│   │   └── gstReturnSummary.model.js
+│   ├── repositories/
+│   │   └── gstAccounting.repository.js
+│   ├── services/
+│   │   └── gstAccounting.service.js
+│   ├── controllers/
+│   │   └── gstAccounting.controller.js
+│   ├── validations/
+│   │   └── gstAccounting.validation.js
+│   ├── routes/
+│   │   └── gstAccounting.routes.js
+│   ├── constants/
+│   │   └── gstAccounting.constant.js
+│   └── gstAccounting.module.js
+│
+├── trial-balance/
+│   ├── controllers/
+│   │   └── trialBalance.controller.js
+│   ├── services/
+│   │   └── trialBalance.service.js
+│   ├── repositories/
+│   │   └── trialBalance.repository.js
+│   ├── routes/
+│   │   └── trialBalance.routes.js
+│   ├── validations/
+│   │   └── trialBalance.validation.js
+│   └── trialBalance.module.js
+│
+├── profit-loss/
+│   ├── controllers/
+│   │   └── profitLoss.controller.js
+│   ├── services/
+│   │   └── profitLoss.service.js
+│   ├── repositories/
+│   │   └── profitLoss.repository.js
+│   ├── routes/
+│   │   └── profitLoss.routes.js
+│   ├── validations/
+│   │   └── profitLoss.validation.js
+│   └── profitLoss.module.js
+│
+├── balance-sheet/
+│   ├── controllers/
+│   │   └── balanceSheet.controller.js
+│   ├── services/
+│   │   └── balanceSheet.service.js
+│   ├── repositories/
+│   │   └── balanceSheet.repository.js
+│   ├── routes/
+│   │   └── balanceSheet.routes.js
+│   ├── validations/
+│   │   └── balanceSheet.validation.js
+│   └── balanceSheet.module.js
+│
+└── reports/
+    ├── controllers/
+    │   └── financeReport.controller.js
+    ├── services/
+    │   └── financeReport.service.js
+    ├── repositories/
+    │   └── financeReport.repository.js
+    ├── routes/
+    │   └── financeReport.routes.js
+    ├── validations/
+    │   └── financeReport.validation.js
+    └── financeReport.module.js
+
+
+src/modules/
+
+├── platform/
+│
+│   └── global-catalog/
+│       │
+│       ├── global-catalog.routes.js
+│       ├── global-catalog.module.js
+│       │
+│       ├── products/
+│       │   │
+│       │   ├── models/
+│       │   │   └── globalProduct.model.js
+│       │   │
+│       │   ├── repositories/
+│       │   │   └── globalProduct.repository.js
+│       │   │
+│       │   ├── services/
+│       │   │   └── globalProduct.service.js
+│       │   │
+│       │   ├── controllers/
+│       │   │   └── globalProduct.controller.js
+│       │   │
+│       │   ├── validations/
+│       │   │   └── globalProduct.validation.js
+│       │   │
+│       │   ├── routes/
+│       │   │   └── globalProduct.routes.js
+│       │   │
+│       │   ├── constants/
+│       │   │   └── globalProduct.constant.js
+│       │   │
+│       │   └── globalProduct.module.js
+│       │
+│       │
+│       ├── hsn-master/
+│       │   │
+│       │   ├── models/
+│       │   │   └── hsnMaster.model.js
+│       │   │
+│       │   ├── repositories/
+│       │   │   └── hsnMaster.repository.js
+│       │   │
+│       │   ├── services/
+│       │   │   └── hsnMaster.service.js
+│       │   │
+│       │   ├── controllers/
+│       │   │   └── hsnMaster.controller.js
+│       │   │
+│       │   ├── validations/
+│       │   │   └── hsnMaster.validation.js
+│       │   │
+│       │   ├── routes/
+│       │   │   └── hsnMaster.routes.js
+│       │   │
+│       │   ├── constants/
+│       │   │   ├── gstRates.constant.js
+│       │   │   └── hsnMaster.constant.js
+│       │   │
+│       │   └── hsnMaster.module.js
+│       │
+│       ├── hsn-mapping/
+│       │   │
+│       │   ├── models/
+│       │   │   ├── hsnCategoryRule.model.js
+│       │   │   ├── hsnKeywordRule.model.js
+│       │   │   └── hsnReviewQueue.model.js
+│       │   │
+│       │   ├── services/
+│       │   │   ├── hsnMapping.service.js
+│       │   │   ├── categoryMapping.service.js
+│       │   │   ├── keywordMapping.service.js
+│       │   │   ├── reviewQueue.service.js
+│       │   │   └── autoMapping.service.js
+│       │   │
+│       │   ├── helpers/
+│       │   │   ├── matchCategoryRule.js
+│       │   │   ├── matchKeywordRule.js
+│       │   │   ├── suggestHsnCode.js
+│       │   │   └── calculateSimilarity.js
+│       │   │
+│       │   ├── jobs/
+│       │   │   ├── runHsnMapping.job.js
+│       │   │   └── reprocessPending.job.js
+│       │   │
+│       │   └── hsnMapping.module.js
+│       │       └── global-catalog.module.js
+
+
+├── catalog/
+│   │
+│   ├── catalog.routes.js
+│   ├── catalog.module.js
+│   │
+│   ├── products/
+│   │   │
+│   │   ├── models/
+│   │   │   └── workspaceProduct.model.js
+│   │   │
+│   │   ├── repositories/
+│   │   │   └── workspaceProduct.repository.js
+│   │   │
+│   │   ├── services/
+│   │   │   └── workspaceProduct.service.js
+│   │   │
+│   │   ├── controllers/
+│   │   │   └── workspaceProduct.controller.js
+│   │   │
+│   │   ├── validations/
+│   │   │   └── workspaceProduct.validation.js
+│   │   │
+│   │   ├── routes/
+│   │   │   └── workspaceProduct.routes.js
+│   │   │
+│   │   ├── constants/
+│   │   │   └── workspaceProduct.constant.js
+│   │   │
+│   │   └── workspaceProduct.module.js
+│   │
+│   │
+│   ├── product-search/
+│   │   │
+│   │   ├── services/
+│   │   │   └── productSearch.service.js
+│   │   │
+│   │   ├── helpers/
+│   │   │   ├── normalizeProductName.js
+│   │   │   ├── generateSearchTokens.js
+│   │   │   ├── productSimilarity.js
+│   │   │   ├── searchGlobalProduct.js
+│   │   │   ├── searchWorkspaceProduct.js
+│   │   │   ├── calculateSimilarity.js
+│   │   │   └── suggestMatches.js
+│   │   │
+│   │   └── productSearch.module.js
+│   │
+│   │
+│   ├── product-resolver/
+│   │   │
+│   │   ├── services/
+│   │   │   └── productResolver.service.js
+│   │   │
+│   │   ├── helpers/
+│   │   │   ├── resolveGlobalProduct.js
+│   │   │   ├── resolveWorkspaceProduct.js
+│   │   │   └── resolveProductReference.js
+│   │   │
+│   │   └── productResolver.module.js
+│   │
+│   │
+│   ├── helpers/
+│   │   ├── buildProductReference.js
+│   │   ├── validateProductSource.js
+│   │   ├── isGlobalProduct.js
+│   │   ├── isWorkspaceProduct.js
+│   │   └── productReference.helper.js
+│   │
+│   │
+│   └── constants/
+│       ├── productSource.constant.js
+│       ├── productType.constant.js
+│       └── productStatus.constant.js
+│
+
+Future Modules That Will Use Products
+
+inventory/
+├── inventory/
+├── batches/
+├── stock-movements/
+
+purchase/
+├── purchases/
+├── purchase-returns/
+
+sales/
+├── sales/
+├── sales-returns/
+
+billing/
+├── pos/
+├── bills/
+
+reports/
+
+All future modules must store product references using:
+
+{
+productSource: "GLOBAL" | "WORKSPACE",
+productId: ObjectId
+}
+
+and retrieve products through:
+
+catalog/product-resolver/
+
+
+
+src/modules/parties/
+│
+├── parties.routes.js
+├── parties.module.js
+│
+├── customers/
+│   ├── models/
+│   ├── repositories/
+│   ├── services/
+│   ├── controllers/
+│   ├── validations/
+│   ├── routes/
+│   ├── constants/
+│   └── customer.module.js
+│
+└── suppliers/
+    ├── models/
+    ├── repositories/
+    ├── services/
+    ├── controllers/
+    ├── validations/
+    ├── routes/
+    ├── constants/
+    └── supplier.module.js
+
+src/modules/parties/customers/
+│
+├── customer.module.js
+│
+├── constants/
+│   └── customer.constant.js
+│
+├── controllers/
+│   └── customer.controller.js
+│
+├── models/
+│   └── customer.model.js
+│
+├── repositories/
+│   └── customer.repository.js
+│
+├── routes/
+│   └── customer.routes.js
+│
+├── services/
+│   └── customer.service.js
+│
+├── validations/
+│   └── customer.validation.js
+
+
+src/modules/parties/suppliers/
+│
+├── supplier.module.js
+│
+├── constants/
+│   └── supplier.constant.js
+│
+├── controllers/
+│   └── supplier.controller.js
+│
+├── models/
+│   └── supplier.model.js
+│
+├── repositories/
+│   └── supplier.repository.js
+│
+├── routes/
+│   └── supplier.routes.js
+│
+├── services/
+│   └── supplier.service.js
+│
+├── validations/
+│   └── supplier.validation.js
+
+
+src/modules/finance/
+│
+├── chart-of-accounts/
+│
+├── journal-vouchers/
+│
+├── ledger/
+│
+├── account-balances/
+│
+├── financial-periods/
+│
+└── reports/
+
+chart-of-accounts/
+│
+├── chartOfAccounts.module.js
+│
+├── constants/
+│   ├── account.constant.js
+│   └── accountGroup.constant.js
+│
+├── controllers/
+│   ├── account.controller.js
+│   └── accountGroup.controller.js
+│
+├── models/
+│   ├── account.model.js
+│   └── accountGroup.model.js
+│
+├── repositories/
+│   ├── account.repository.js
+│   └── accountGroup.repository.js
+│
+├── routes/
+│   ├── account.routes.js
+│   └── accountGroup.routes.js
+│
+├── services/
+│   ├── account.service.js
+│   └── accountGroup.service.js
+│
+└── validations/
+    ├── account.validation.js
+    └── accountGroup.validation.js
+
+
+journal-vouchers/
+│
+├── journalVoucher.module.js
+│
+├── constants/
+│   └── journalVoucher.constant.js
+│
+├── controllers/
+│   └── journalVoucher.controller.js
+│
+├── models/
+│   ├── journalVoucher.model.js
+│   └── journalLine.model.js
+│
+├── repositories/
+│   ├── journalVoucher.repository.js
+│   └── journalLine.repository.js
+│
+├── routes/
+│   └── journalVoucher.routes.js
+│
+├── services/
+│   ├── journalVoucher.service.js
+│   ├── journalPosting.service.js
+│   ├── journalValidation.service.js
+│   ├── journalNumber.service.js
+│   └── openingBalance.service.js
+│
+├── validations/
+│   └── journalVoucher.validation.js
+│
+└── helpers/
+    ├── calculateJournalTotals.js
+    ├── validateDebitCreditBalance.js
+    └── buildJournalReference.js
+
+
+
+ledger/
+│
+├── ledger.module.js
+│
+├── controllers/
+│   └── ledger.controller.js
+│
+├── models/
+│   └── ledger.model.js
+│
+├── repositories/
+│   └── ledger.repository.js
+│
+├── routes/
+│   └── ledger.routes.js
+│
+├── services/
+│   └── ledger.service.js
+│
+└── validations/
+
+
+
+account-balances/
+│
+├── accountBalance.module.js
+│
+├── controllers/
+│   └── accountBalance.controller.js
+│
+├── models/
+│   └── accountBalance.model.js
+│
+├── repositories/
+│   └── accountBalance.repository.js
+│
+├── routes/
+│   └── accountBalance.routes.js
+│
+├── services/
+│   └── accountBalance.service.js
+│
+└── validations/
+
+
+
+financial-periods/
+│
+├── financialPeriod.module.js
+│
+├── constants/
+│   └── financialPeriod.constant.js
+│
+├── controllers/
+│   └── financialPeriod.controller.js
+│
+├── models/
+│   └── financialPeriod.model.js
+│
+├── repositories/
+│   └── financialPeriod.repository.js
+│
+├── routes/
+│   └── financialPeriod.routes.js
+│
+├── services/
+│   └── financialPeriod.service.js
+│
+└── validations/
+    └── financialPeriod.validation.js
+
+
+
+reports/
+│
+├── trial-balance/
+│
+├── profit-loss/
+│
+├── balance-sheet/
+│
+├── customer-ledger/
+│
+├── supplier-ledger/
+│
+├── cash-book/
+│
+└── bank-book/
+
+
+
+The ERP system follows a Workspace → Company → Branch hierarchy. A Workspace represents a customer organization (pharmacy business) and serves as the top-level tenant. Within a workspace, the customer can create one or more Companies, and each company can manage multiple Branches. Users belong to a workspace and can be granted access to specific companies and branches based on their roles and permissions. Company-level data includes business information such as GST number, drug licenses, trade licenses, PAN, tax configurations, billing settings, and other statutory or compliance-related details, since these are shared across all branches of that company. Branch-level data includes inventory, stock, batches, purchases, sales, POS operations, and day-to-day pharmacy activities, as stock and transactions are maintained separately for each branch. We are building a multi-tenant Retail Pharmacy ERP SaaS platform that enables customers to centrally manage companies, branches, users, compliance, inventory, sales, purchases, billing, subscriptions, and reporting within a scalable and secure architecture.
+
+
