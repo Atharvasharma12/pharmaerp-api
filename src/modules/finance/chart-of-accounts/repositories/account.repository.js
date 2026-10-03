@@ -8,7 +8,7 @@ const findAccountById = async (accountId, options = {}) => {
   }
   return Account.findOne({
     _id: accountId,
-    isDeleted: false,
+    isDeleted: { $ne: true },
   }).select(options.select || "");
 };
 
@@ -30,7 +30,7 @@ const findAccountByIdCompanyAndWorkspace = async (
     _id: accountId,
     companyId,
     workspaceId,
-    isDeleted: false,
+    isDeleted: { $ne: true },
   })
     .session(options.session || null)
     .populate("accountGroupId", "groupName groupCode nature")

@@ -379,6 +379,7 @@ const HEADER_ALIASES_BACKEND = {
   rateA: ["ratea", "rate", "sellingprice", "price", "rate1", "salerate"],
   rateB: ["rateb"],
   rateC: ["ratec"],
+  rateCPercentage: ["ratecpercentage", "ratecperc", "cperc", "cpercentage", "ratecpercent"],
   batchNo: ["batchno", "batch", "batchnumber", "lotno", "lotnumber", "lot"],
   expiryDate: ["expiry", "expirydate", "expdate", "exp"],
   batchQty: ["qty", "quantity", "batchqty", "stock", "stockqty", "balance", "currentstock", "openingstock"],
@@ -520,6 +521,12 @@ const parseSpreadsheetBuffer = (buffer) => {
       return Number((mrp * 0.84).toFixed(2));
     })();
 
+    const rateCPercentage = (() => {
+      const rawPerc = safeNumber(getVal("rateCPercentage"));
+      if (rawPerc > 0) return rawPerc;
+      return (mrp > 0 && rateC > 0) ? Number((((mrp - rateC) / mrp) * 100).toFixed(2)) : 16;
+    })();
+
     if (name || batchNo) {
       items.push({
         name,
@@ -530,6 +537,7 @@ const parseSpreadsheetBuffer = (buffer) => {
         rateA,
         rateB,
         rateC,
+        rateCPercentage,
         batchNo,
         expiryDate: getVal("expiryDate"),
         batchQty: Math.abs(safeNumber(getVal("batchQty"))),
@@ -675,6 +683,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       const importedRateA = toNumber(item.rateA);
       const importedRateB = toNumber(item.rateB);
       const importedRateC = toNumber(item.rateC);
+      const importedRateCPercentage = toNumber(item.rateCPercentage);
 
       const batchScheme = toNumber(item.batchScheme || item.deal);
       const freeFromPurchase = toNumber(item.freeFromPurchase || item.free);
@@ -695,6 +704,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       let rateB = importedRateB > 0 ? importedRateB : ptr;
       let rateA = autoCalcRateA ? (importedRateA > 0 ? importedRateA : safeFixed(rateB * 0.90)) : importedRateA;
       let rateC = autoCalcRateC ? (importedRateC > 0 ? importedRateC : (mrp > 0 ? safeFixed(mrp * 0.84) : 0)) : importedRateC;
+      let rateCPercentage = importedRateCPercentage > 0 ? importedRateCPercentage : (mrp > 0 && rateC > 0 ? safeFixed(((mrp - rateC) / mrp) * 100) : 16);
 
       let product = null;
       if (itemCode && productByCode.has(itemCode)) {
@@ -707,7 +717,16 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
       if (product) {
         updatedCount++;
         productId = product._id;
-        importedProducts.push(product); // Just lean object
+        
+        // Update existing product with latest rates
+        productOps.push({
+          updateOne: {
+            filter: { _id: productId },
+            update: { $set: { mrp, ptr, pts, rateA, rateB, rateC, rateCPercentage } }
+          }
+        });
+
+        importedProducts.push(product);
       } else {
         productId = new mongoose.Types.ObjectId();
         
@@ -727,6 +746,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
           rateA,
           rateB,
           rateC,
+          rateCPercentage,
           marketer,
           itemCode,
           rack: item.rack || "",
@@ -807,6 +827,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
             rateA,
             rateB,
             rateC,
+            rateCPercentage,
             freeQty: freeFromPurchase,
             schemeDiscountPercent,
           };
@@ -817,7 +838,7 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
           batchOps.push({
             updateOne: {
               filter: { _id: batch._id },
-              update: { $inc: { batchQty: batchQty } }
+              update: { $inc: { batchQty: batchQty }, $set: { mrp, ptr, pts, rate: rateB, rateA, rateB, rateC, rateCPercentage } }
             }
           });
         }

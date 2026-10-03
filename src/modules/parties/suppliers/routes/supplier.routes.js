@@ -15,6 +15,8 @@ import {
   getSupplierOutstanding,
   getSupplierPurchases,
   getSupplierPayments,
+  previewImport,
+  confirmImport,
 } from "../controllers/supplier.controller.js";
 
 import {
@@ -30,6 +32,12 @@ const router = Router();
 router.use(authMiddleware);
 router.use(workspaceContextMiddleware);
 router.use(companyContextMiddleware);
+
+import uploadFile from "../../../../middlewares/upload.middleware.js";
+
+// Import APIs
+router.post("/import/preview", uploadFile.single("file"), previewImport);
+router.post("/import/confirm", confirmImport);
 
 // CRUD
 router.post("/", validate(createSupplierSchema), createSupplier);
