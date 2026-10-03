@@ -175,10 +175,16 @@ const getCustomers = async (workspaceId, companyId, query = {}) => {
   );
 
   return {
-    customers: result.customers.map((c) => c.toSafeObject()),
+    customers: result.customers.map((c) => {
+      const obj = c.toSafeObject();
+      obj.outstandingAmount = obj.openingBalance || 0;
+      obj.balanceType = obj.openingBalanceType || "dr";
+      return obj;
+    }),
     total: result.total,
     page: result.page,
     limit: result.limit,
+    stats: result.stats,
   };
 };
 

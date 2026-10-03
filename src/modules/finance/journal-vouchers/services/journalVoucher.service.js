@@ -37,7 +37,8 @@ const createJournalVoucher = async (workspaceId, companyId, userId, payload, opt
       companyId,
       workspaceId,
       normalizedLines,
-      parsedDate
+      parsedDate,
+      { session }
     );
 
     // 4. Generate sequential voucher number atomically (or use provided)

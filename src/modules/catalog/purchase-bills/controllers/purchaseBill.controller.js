@@ -1,6 +1,8 @@
 import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
+import ApiError from "../../../../utils/ApiError.js";
 import purchaseBillService from "../services/purchaseBill.service.js";
+import purchaseBillLegacyImportService from "../services/purchaseBillLegacyImport.service.js";
 
 export const createPurchaseBill = asyncHandler(async (req, res) => {
   const payload = { ...req.body };
@@ -68,12 +70,17 @@ export const getPurchaseBillById = asyncHandler(async (req, res) => {
 export const ingestPurchaseBill = asyncHandler(async (req, res) => {
   let branchId = req.headers["x-branch-id"] || req.body.branchId || null;
 
+  console.log(`[Controller] Ingesting Purchase Bill ID: ${req.params.billId}`);
+
   const bill = await purchaseBillService.ingestPurchaseBill(
     req.params.billId,
     req.workspaceId,
     req.companyId,
-    branchId
+    branchId,
+    req.user._id
   );
+
+  console.log(`[Controller] Successfully ingested bill: ${bill.purchaseBillNo}`);
 
   return res
     .status(200)
@@ -91,4 +98,49 @@ export const getPurchaseHistory = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, "Product purchase history fetched successfully", history));
+});
+
+export const payPurchaseBill = asyncHandler(async (req, res) => {
+  const bill = await purchaseBillService.payPurchaseBill(
+    req.params.billId,
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    req.body
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Purchase bill payment recorded successfully", bill));
+});
+
+export const bulkPayPurchaseBills = asyncHandler(async (req, res) => {
+  const result = await purchaseBillService.bulkPayPurchaseBills(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    req.body
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Bulk payment recorded successfully", result));
+});
+
+export const importLegacyBills = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ApiError(400, "Please upload an Excel file");
+  }
+
+  const result = await purchaseBillLegacyImportService.importSupplierBills(
+    req.file.path,
+    req.workspaceId,
+    req.companyId,
+    req.branchId || req.headers["x-branch-id"] || null,
+    req.user._id
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Legacy bills imported successfully", result));
 });

@@ -68,11 +68,15 @@ const getLedgerEntries = async (
     workspaceId: new mongoose.Types.ObjectId(workspaceId),
     companyId: new mongoose.Types.ObjectId(companyId),
   };
+  
+  console.log("getLedgerEntries query:", query);
 
   if (accountId) {
     if (mongoose.Types.ObjectId.isValid(accountId)) {
       query.accountId = new mongoose.Types.ObjectId(accountId);
+      console.log("getLedgerEntries adding accountId:", query.accountId);
     } else {
+      console.log("getLedgerEntries invalid accountId:", accountId);
       return { entries: [], total: 0, page: 1, limit: 20 };
     }
   }
