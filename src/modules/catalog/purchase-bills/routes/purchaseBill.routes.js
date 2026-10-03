@@ -14,7 +14,11 @@ import {
   getPurchaseHistory,
   payPurchaseBill,
   bulkPayPurchaseBills,
+  importLegacyBills,
 } from "../controllers/purchaseBill.controller.js";
+import multer from "multer";
+
+const upload = multer({ dest: "uploads/" });
 
 import {
   createPurchaseBillSchema,
@@ -80,6 +84,13 @@ router.post(
   "/:billId/pay",
   validate(purchaseBillIdParamSchema, "params"),
   payPurchaseBill
+);
+
+// Import legacy bills
+router.post(
+  "/import/legacy-bills",
+  upload.single("file"),
+  importLegacyBills
 );
 
 export default router;

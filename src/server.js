@@ -16,6 +16,9 @@ const startServer = async () => {
     server = app.listen(PORT, "0.0.0.0", () => {
       logger.info(`🚀 Server running on http://localhost:${PORT}`);
     });
+
+    // Increase server timeout to 5 minutes to handle large file imports
+    server.timeout = 300000;
   } catch (error) {
     logger.error(`❌ Failed to start server: ${error.message}`);
     process.exit(1);

@@ -125,7 +125,31 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
     Customer.countDocuments(query),
   ]);
 
-  return { customers, total, page, limit };
+  // Calculate overall stats for the filtered query (ignoring pagination)
+  const allFilteredCustomers = await Customer.find(query).select('status openingBalance openingBalanceType');
+  let totalCr = 0;
+  let totalDr = 0;
+  let active = 0;
+  let inactive = 0;
+  let blocked = 0;
+
+  allFilteredCustomers.forEach((c) => {
+    const amt = Number(c.openingBalance) || 0;
+    if (String(c.openingBalanceType).toLowerCase() === "cr") {
+      totalCr += amt;
+    } else {
+      totalDr += amt;
+    }
+
+    const s = (c.status || "active").toLowerCase();
+    if (s === "active") active++;
+    else if (s === "inactive") inactive++;
+    else if (s === "blocked") blocked++;
+  });
+
+  const stats = { totalCr, totalDr, active, inactive, blocked };
+
+  return { customers, total, page, limit, stats };
 };
 
 const deleteCustomerById = async (customerId, companyId, workspaceId, deletedBy) => {

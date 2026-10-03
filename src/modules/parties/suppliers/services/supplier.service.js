@@ -282,6 +282,16 @@ const getSupplierPayments = async (supplierId, companyId, workspaceId) => {
 
 
 
+const GST_STATE_CODES = {
+  "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
+  "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim",
+  "12": "Arunachal Pradesh", "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura", "17": "Meghalaya",
+  "18": "Assam", "19": "West Bengal", "20": "Jharkhand", "21": "Odisha", "22": "Chhattisgarh", "23": "Madhya Pradesh",
+  "24": "Gujarat", "25": "Daman and Diu", "26": "Dadra and Nagar Haveli", "27": "Maharashtra", "29": "Karnataka",
+  "30": "Goa", "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu", "34": "Puducherry",
+  "35": "Andaman and Nicobar Islands", "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh"
+};
+
 const previewImport = async (workspaceId, companyId, fileBuffer) => {
   const workbook = xlsx.read(fileBuffer, { type: "buffer" });
   const sheetName = workbook.SheetNames[0];
@@ -342,20 +352,26 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
   const existingMobilePhones = new Set(existingSuppliers.suppliers.map(s => s.mobile).filter(Boolean));
   const existingEmails = new Set(existingSuppliers.suppliers.map(s => s.email).filter(Boolean));
   const existingGSTs = new Set(existingSuppliers.suppliers.map(s => s.gstNumber).filter(Boolean));
+  const existingPANs = new Set(existingSuppliers.suppliers.map(s => s.panNumber).filter(Boolean));
+  const existingNames = new Set(existingSuppliers.suppliers.map(s => s.businessName.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
 
   const parsedRows = data.map((lowerRow, index) => {
     const businessName = String(lowerRow["name"] || lowerRow["ledger name"] || lowerRow["party name"] || lowerRow["ledger"] || "").trim();
     
     // Extract mobile from any column that looks like mobile/phone
     let mobile = "";
+    let alternateMobile = "";
     const mobileKeys = Object.keys(lowerRow).filter(k => k.includes("mobile") || k.includes("phone"));
     for (const mk of mobileKeys) {
       const val = String(lowerRow[mk]).replace(/\D/g, ''); // Extract only digits
       if (val.length >= 10) {
         const potentialMobile = val.substring(val.length - 10); // get last 10 digits
         if (/^[6-9][0-9]{9}$/.test(potentialMobile)) {
-          mobile = potentialMobile;
-          break; // Found a valid Indian mobile number
+          if (!mobile) {
+            mobile = potentialMobile;
+          } else if (!alternateMobile && potentialMobile !== mobile) {
+            alternateMobile = potentialMobile;
+          }
         }
       }
     }
@@ -363,15 +379,15 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
     const email = String(lowerRow["email"] || "").trim();
     const gstNumber = String(lowerRow["gstin"] || lowerRow["gstin no."] || lowerRow["gstin no"] || lowerRow["gst"] || lowerRow["tin"] || "").trim();
     const panNumber = String(lowerRow["pan"] || lowerRow["panno"] || "").trim();
+    const contactPerson = String(lowerRow["contact"] || lowerRow["contact person"] || "").trim();
     
-    // Combine addresses
-    const addrParts = [
-      String(lowerRow["address1"] || lowerRow["address"] || lowerRow["address & details"] || ""),
+    const addressLine1 = String(lowerRow["address1"] || lowerRow["address"] || lowerRow["address & details"] || "").trim();
+    const addressLine2 = [
       String(lowerRow["address2"] || ""),
       String(lowerRow["address3"] || "")
-    ].filter(Boolean).map(s => s.trim());
-    
-    const addressLine1 = addrParts.join(", ");
+    ].filter(Boolean).map(s => s.trim()).join(", ");
+    const city = String(lowerRow["city"] || "").trim();
+    const pincode = String(lowerRow["pin"] || lowerRow["pincode"] || "").trim();
     
     // License
     const drugLicenseNumber = String(lowerRow["licence"] || lowerRow["dl no"] || "").trim();
@@ -379,27 +395,30 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
     // Extract balance
     let openingBalance = 0;
     let openingBalanceType = "cr";
-    const rawBalance = String(lowerRow["balance"] || lowerRow["cramount"] || lowerRow["outstanding"] || "").trim().toLowerCase();
     
-    if (rawBalance) {
-      if (rawBalance.includes("dr")) openingBalanceType = "dr";
-      else if (rawBalance.includes("cr")) openingBalanceType = "cr";
-      
-      const numMatch = rawBalance.match(/[\d.]+/);
+
+    let creditDays = 0;
+    const rawCreditDays = String(lowerRow["crdays"] || lowerRow["credit days"] || "").trim();
+    if (rawCreditDays) {
+      const numMatch = rawCreditDays.match(/\d+/);
       if (numMatch) {
-        openingBalance = parseFloat(numMatch[0]) || 0;
+        creditDays = parseInt(numMatch[0], 10) || 0;
       }
     }
 
     const errors = [];
 
     // Skip completely empty rows or rows that are just repeated headers (common in PDF/Excel reports)
-    const normalizedName = businessName.toLowerCase();
+    const normalizedName = businessName.toLowerCase().replace(/\s+/g, ' ').trim();
     if (!businessName || normalizedName === "ledger name" || normalizedName === "name" || normalizedName === "party name" || normalizedName === "ledger") {
       return null;
     }
 
-    if (!businessName) errors.push("Business Name is required");
+    if (!businessName) {
+      errors.push("Business Name is required");
+    } else if (existingNames.has(normalizedName)) {
+      errors.push("Supplier with a similar name already exists");
+    }
     
     if (mobile) {
       if (!/^[6-9][0-9]{9}$/.test(mobile)) errors.push("Invalid mobile number format");
@@ -411,29 +430,45 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
       else if (existingEmails.has(email)) errors.push("Email already exists in workspace");
     }
 
+    let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
       if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) errors.push("Invalid GST Number format");
       else if (existingGSTs.has(gstNumber)) errors.push("GST Number already exists in workspace");
+      else {
+        const stateCode = gstNumber.substring(0, 2);
+        if (GST_STATE_CODES[stateCode]) {
+          state = GST_STATE_CODES[stateCode];
+        }
+      }
     }
 
     if (panNumber) {
       if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) errors.push("Invalid PAN Number format");
+      else if (existingPANs.has(panNumber)) errors.push("PAN Number already exists in workspace");
     }
 
     return {
       rowNumber: index + headerRowIndex + 2, // Accounting for header and 0-indexing
       data: {
         businessName,
+        contactPerson: contactPerson || null,
         mobile: mobile || null,
+        alternateMobile: alternateMobile || null,
         email: email || null,
         gstNumber: gstNumber || null,
         panNumber: panNumber || null,
         drugLicenseNumber: drugLicenseNumber || null,
-        address: { addressLine1 },
+        address: { 
+          addressLine1,
+          addressLine2: addressLine2 || null,
+          city: city || null,
+          state: state || null,
+          pincode: pincode || null
+        },
         openingBalance,
         openingBalanceType,
-        creditDays: 0,
+        creditDays,
       },
       isValid: errors.length === 0,
       errors
@@ -450,13 +485,29 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
     errors: []
   };
 
-  for (const supplierData of suppliersData) {
-    try {
-      await createSupplier(workspaceId, companyId, userId, supplierData);
-      results.successful++;
-    } catch (error) {
-      results.failed++;
-      results.errors.push(`Failed for ${supplierData.businessName}: ${error.message}`);
+  try {
+    const payloads = suppliersData.map(supplierData => ({
+      ...supplierData,
+      workspaceId,
+      companyId,
+      createdBy: userId,
+    }));
+
+    // Use bulk insertion
+    await supplierRepository.insertManySuppliers(payloads);
+    
+    results.successful = payloads.length;
+  } catch (error) {
+    if (error.writeErrors) {
+      // If some failed in unordered bulk op
+      results.successful = suppliersData.length - error.writeErrors.length;
+      results.failed = error.writeErrors.length;
+      error.writeErrors.forEach(err => {
+        results.errors.push(`Failed for index ${err.index}: ${err.errmsg}`);
+      });
+    } else {
+      results.failed = suppliersData.length;
+      results.errors.push(`Bulk import failed: ${error.message}`);
     }
   }
 

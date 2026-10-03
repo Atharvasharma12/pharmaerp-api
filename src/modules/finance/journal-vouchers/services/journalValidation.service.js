@@ -4,7 +4,7 @@ import financialPeriodRepository from "../../financial-periods/repositories/fina
 import { calculateJournalTotals } from "../helpers/calculateJournalTotals.js";
 import { validateDebitCreditBalance } from "../helpers/validateDebitCreditBalance.js";
 
-const validateJournalLines = async (companyId, workspaceId, lines = [], voucherDate = new Date()) => {
+const validateJournalLines = async (companyId, workspaceId, lines = [], voucherDate = new Date(), options = {}) => {
   // Verify that the voucherDate falls within an active, open financial period
   const period = await financialPeriodRepository.findPeriodByDate(
     companyId,
@@ -68,7 +68,7 @@ const validateJournalLines = async (companyId, workspaceId, lines = [], voucherD
   }
 
   const accountIds = lines.map(l => l.accountId);
-  const accounts = await accountRepository.getAccountsByIds(accountIds, companyId, workspaceId);
+  const accounts = await accountRepository.getAccountsByIds(accountIds, companyId, workspaceId, options);
   const accountMap = {};
   if (accounts) {
     accounts.forEach(a => { accountMap[a._id.toString()] = a; });

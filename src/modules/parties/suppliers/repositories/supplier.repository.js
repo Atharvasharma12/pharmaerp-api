@@ -244,7 +244,13 @@ const deleteSupplierById = async (supplierId, companyId, workspaceId, deletedBy)
   );
 };
 
+
+const insertManySuppliers = async (payloads) => {
+  return Supplier.insertMany(payloads, { ordered: false });
+};
+
 export default {
+  insertManySuppliers,
   findSupplierById,
   findSupplierByIdCompanyAndWorkspace,
   findSupplierByCode,

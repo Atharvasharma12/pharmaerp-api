@@ -1,6 +1,8 @@
 import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
+import ApiError from "../../../../utils/ApiError.js";
 import purchaseBillService from "../services/purchaseBill.service.js";
+import purchaseBillLegacyImportService from "../services/purchaseBillLegacyImport.service.js";
 
 export const createPurchaseBill = asyncHandler(async (req, res) => {
   const payload = { ...req.body };
@@ -123,4 +125,22 @@ export const bulkPayPurchaseBills = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .json(new ApiResponse(200, "Bulk payment recorded successfully", result));
+});
+
+export const importLegacyBills = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    throw new ApiError(400, "Please upload an Excel file");
+  }
+
+  const result = await purchaseBillLegacyImportService.importSupplierBills(
+    req.file.path,
+    req.workspaceId,
+    req.companyId,
+    req.branchId || req.headers["x-branch-id"] || null,
+    req.user._id
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Legacy bills imported successfully", result));
 });
