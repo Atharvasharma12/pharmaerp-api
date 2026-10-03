@@ -1,0 +1,114 @@
+/**
+ * Shared Treasury Utility: findOrCreateSystemAccount
+ *
+ * This helper is used across multiple treasury submodules:
+ *   - cheque-management    (Cheques In Transit, Bounce Charges)
+ *   - bank-transactions    (Bank Charges, Interest Income)
+ *   - cash-transactions    (Cash Adjustment, Petty Cash)
+ *   - bank-deposit-slips   (Cash In Transit)
+ *
+ * It finds an account by its unique code, and if not found, auto-creates
+ * both the account group and account. This eliminates the need for manual
+ * system account setup in the Chart of Accounts.
+ *
+ * NOTE: This file is the canonical implementation. The per-service copies
+ * in individual service files are kept for backward compatibility and can
+ * be migrated to import from here in a future cleanup task.
+ */
+
+import accountRepository from "../../chart-of-accounts/repositories/account.repository.js";
+import accountGroupRepository from "../../chart-of-accounts/repositories/accountGroup.repository.js";
+
+/**
+ * Finds a system account by its unique code, or creates it (and its group) if absent.
+ *
+ * @param {string} workspaceId
+ * @param {string} companyId
+ * @param {string} userId           - User creating the account (for audit trail)
+ * @param {string} accountCode      - Unique code, e.g. "SYS-CASH-IN-TRANSIT"
+ * @param {string} accountName      - Human-readable name, e.g. "Cash In Transit"
+ * @param {string} accountNature    - "ASSET" | "LIABILITY" | "INCOME" | "EXPENSE" | "EQUITY"
+ * @param {string} accountCategory  - e.g. "CASH", "EXPENSE", "INCOME"
+ * @param {string} groupCode        - Account group code, e.g. "SYS-TRANSIT-ASSETS"
+ * @param {string} groupName        - Account group name, e.g. "Transit Assets"
+ * @param {object} session          - Mongoose session (for transaction safety)
+ * @returns {Promise<object>}       The account document
+ */
+const findOrCreateSystemAccount = async (
+  workspaceId,
+  companyId,
+  userId,
+  accountCode,
+  accountName,
+  accountNature,
+  accountCategory,
+  groupCode,
+  groupName,
+  session,
+) => {
+  // Fast path: account already exists
+  let account = await accountRepository.findAccountByCode(
+    companyId,
+    accountCode,
+    { session },
+  );
+  if (account) return account;
+
+  // Defensive normalization: map legacy "debit"/"credit" or lowercase inputs to valid enum values
+  let normalizedNature = accountNature;
+  if (typeof accountNature === "string") {
+    const upper = accountNature.trim().toUpperCase();
+    if (upper === "DEBIT") {
+      normalizedNature = "ASSET";
+    } else if (upper === "CREDIT") {
+      normalizedNature = "LIABILITY";
+    } else {
+      normalizedNature = upper;
+    }
+  }
+
+  // Find or create the parent group
+  let group = await accountGroupRepository.findGroupByCode(
+    companyId,
+    groupCode,
+    { session },
+  );
+  if (!group) {
+    group = await accountGroupRepository.createGroup(
+      {
+        workspaceId,
+        companyId,
+        groupCode,
+        groupName,
+        parentGroupId: null,
+        nature: normalizedNature,
+        isSystemGroup: true,
+        createdBy: userId,
+      },
+      { session },
+    );
+  }
+
+  // Create the system account
+  account = await accountRepository.createAccount(
+    {
+      workspaceId,
+      companyId,
+      accountCode,
+      accountName,
+      accountGroupId: group._id,
+      accountNature: normalizedNature,
+      accountCategory,
+      openingBalance: 0,
+      openingBalanceType: "dr",
+      status: "active",
+      isSystemAccount: true,
+      createdBy: userId,
+    },
+    { session },
+  );
+
+  return account;
+};
+
+export default findOrCreateSystemAccount;

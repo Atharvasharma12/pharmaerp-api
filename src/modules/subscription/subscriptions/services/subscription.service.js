@@ -1,0 +1,161 @@
+import ApiError from "../../../../utils/ApiError.js";
+
+import subscriptionRepository from "../repositories/subscription.repository.js";
+
+import workspaceRepository from "../../../organization/workspaces/repositories/workspace.repository.js";
+
+import planRepository from "../../plans/repositories/plan.repository.js";
+
+import {
+  isSubscriptionActive,
+  isSubscriptionExpired,
+} from "../../../../utils/subscription/isSubscriptionActive.js";
+
+import {
+  SUBSCRIPTION_STATUS,
+  SUBSCRIPTION_PAYMENT_STATUS,
+} from "../constants/subscription.constant.js";
+
+const buildPlanSnapshot = (plan) => {
+  return {
+    planCode: plan.planCode,
+    name: plan.name,
+    type: plan.type,
+    pricePerUser: plan.pricePerUser,
+    billingCycle: plan.billingCycle,
+    modules: plan.modules || [],
+    features: plan.features || {},
+  };
+};
+
+const validateWorkspaceAccess = async (workspaceId, userId) => {
+  const workspace = await workspaceRepository.findWorkspaceById(workspaceId);
+
+  if (!workspace) {
+    throw new ApiError(404, "Workspace not found");
+  }
+
+  const member = await workspaceRepository.findWorkspaceMember(
+    workspaceId,
+    userId,
+  );
+
+  if (!member) {
+    throw new ApiError(403, "You do not have access to this workspace");
+  }
+
+  return member;
+};
+
+const validateWorkspaceOwner = async (workspaceId, userId) => {
+  const member = await validateWorkspaceAccess(workspaceId, userId);
+
+  if (!member.isOwner) {
+    throw new ApiError(403, "Only workspace owner can perform this action");
+  }
+
+  return member;
+};
+
+const getSubscriptionById = async (subscriptionId, userId) => {
+  const subscription = await subscriptionRepository.findSubscriptionById(
+    subscriptionId,
+    {
+      populate: "workspaceId planId purchasedBy",
+    },
+  );
+
+  if (!subscription) {
+    throw new ApiError(404, "Subscription not found");
+  }
+
+  await validateWorkspaceAccess(subscription.workspaceId._id, userId);
+
+  return subscription.toSafeObject();
+};
+
+const getWorkspaceCurrentSubscription = async (workspaceId, userId) => {
+  await validateWorkspaceAccess(workspaceId, userId);
+
+  const subscription =
+    await subscriptionRepository.findCurrentSubscriptionByWorkspace(
+      workspaceId,
+      {
+        populate: "workspaceId planId purchasedBy",
+      },
+    );
+
+  if (!subscription) {
+    return null;
+  }
+
+  return subscription.toSafeObject();
+};
+
+const getWorkspaceSubscriptions = async (workspaceId, userId) => {
+  await validateWorkspaceAccess(workspaceId, userId);
+
+  const subscriptions = await subscriptionRepository.getWorkspaceSubscriptions(
+    workspaceId,
+    {
+      populate: "workspaceId planId purchasedBy",
+    },
+  );
+
+  return subscriptions.map((subscription) => subscription.toSafeObject());
+};
+
+const cancelSubscription = async (subscriptionId, userId, reason) => {
+  const subscription =
+    await subscriptionRepository.findSubscriptionById(subscriptionId);
+
+  if (!subscription) {
+    throw new ApiError(404, "Subscription not found");
+  }
+
+  await validateWorkspaceOwner(subscription.workspaceId, userId);
+
+  subscription.status = SUBSCRIPTION_STATUS.CANCELLED;
+
+  subscription.cancelledAt = new Date();
+
+  subscription.cancelledBy = userId;
+
+  subscription.cancelReason = reason || null;
+
+  await subscriptionRepository.saveSubscription(subscription);
+
+  return subscription.toSafeObject();
+};
+
+const markExpiredSubscriptions = async () => {
+  return subscriptionRepository.markExpiredSubscriptions();
+};
+
+const validateWorkspaceSubscriptionAccess = async (workspaceId) => {
+  const subscription =
+    await subscriptionRepository.findActiveSubscriptionByWorkspace(workspaceId);
+
+  if (!subscription) {
+    throw new ApiError(403, "Workspace does not have an active subscription");
+  }
+
+  if (isSubscriptionExpired(subscription)) {
+    throw new ApiError(403, "Workspace subscription has expired");
+  }
+
+  if (!isSubscriptionActive(subscription)) {
+    throw new ApiError(403, "Workspace subscription is inactive");
+  }
+
+  return subscription;
+};
+
+export default {
+  getSubscriptionById,
+  getWorkspaceCurrentSubscription,
+  getWorkspaceSubscriptions,
+  cancelSubscription,
+  markExpiredSubscriptions,
+  validateWorkspaceSubscriptionAccess,
+};
