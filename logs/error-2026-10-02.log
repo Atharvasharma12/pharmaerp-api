@@ -1,0 +1,7 @@
+2026-10-02T14:04:21.271Z [error]: Uncaught Exception: listen EADDRINUSE: address already in use 0.0.0.0:5000
+2026-10-02T14:04:54.061Z [error]: Uncaught Exception: listen EADDRINUSE: address already in use 0.0.0.0:5000
+2026-10-02T14:10:27.383Z [error]: Uncaught Exception: listen EADDRINUSE: address already in use 0.0.0.0:5000
+2026-10-02T14:31:55.110Z [error]: POST /api/v1/core/auth/login - Invalid credentials
+2026-10-02T18:19:27.043Z [error]: GET /api/v1/parties/customers - Authentication token missing
+2026-10-02T18:21:10.834Z [error]: Uncaught Exception: listen EADDRINUSE: address already in use 0.0.0.0:5001
+2026-10-02T18:23:15.862Z [error]: Uncaught Exception: listen EADDRINUSE: address already in use 0.0.0.0:5001

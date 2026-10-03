@@ -1,0 +1,33 @@
+export const ACCOUNT_NATURE = {
+  ASSET: "ASSET",
+  LIABILITY: "LIABILITY",
+  INCOME: "INCOME",
+  EXPENSE: "EXPENSE",
+  EQUITY: "EQUITY",
+};
+
+export const ACCOUNT_CATEGORY = {
+  CUSTOMER: "CUSTOMER",
+  SUPPLIER: "SUPPLIER",
+  BANK: "BANK",
+  CASH: "CASH",
+  INVENTORY: "INVENTORY",
+  PURCHASE: "PURCHASE",
+  SALES: "SALES",
+  GST: "GST",
+  EXPENSE: "EXPENSE",
+  INCOME: "INCOME",
+  FIXED_ASSET: "FIXED_ASSET",
+  LIABILITY: "LIABILITY",
+  EQUITY: "EQUITY",
+};
+
+export const ACCOUNT_OPENING_BALANCE_TYPE = {
+  DR: "dr",
+  CR: "cr",
+};
+
+export const ACCOUNT_STATUS = {
+  ACTIVE: "active",
+  INACTIVE: "inactive",
+};
