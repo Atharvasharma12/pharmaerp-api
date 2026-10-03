@@ -41,20 +41,20 @@ const cashDenominationSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Which cash account / counter this count belongs to
-    cashAccountId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      required: [true, "Cash Account is required"],
-      index: true,
-    },
 
-    // Denormalized branch reference — copied from the CashAccount on creation
-    // for fast direct filtering without joining through CashAccount
+    // Branch this denomination count belongs to (required)
     branchId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Branch",
-      default: null,
+      required: [true, "Branch is required"],
+      index: true,
+    },
+
+    // Which partition this count relates to
+    partition: {
+      type: String,
+      enum: ["running", "frozen"],
+      required: [true, "Partition is required"],
       index: true,
     },
 
@@ -193,7 +193,6 @@ cashDenominationSchema.index(
 cashDenominationSchema.index({
   workspaceId: 1,
   companyId: 1,
-  cashAccountId: 1,
   countDate: -1,
   isDeleted: 1,
 });

@@ -11,7 +11,7 @@ import Company from "../../../organization/companies/models/company.model.js";
 import journalVoucherService from "../../../finance/journal-vouchers/services/journalVoucher.service.js";
 import accountRepository from "../../../finance/chart-of-accounts/repositories/account.repository.js";
 import cashTransactionService from "../../../finance/treasury/cash-management/cash-transactions/services/cashTransaction.service.js";
-import CashAccount from "../../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
+
 import bankTransactionService from "../../../finance/treasury/bank-management/bank-transactions/services/bankTransaction.service.js";
 import BankAccount from "../../../finance/treasury/bank-management/bank-accounts/models/bankAccount.model.js";
 import PaymentQr from "../../../finance/treasury/payment-qr/models/paymentQr.model.js";
@@ -156,8 +156,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       cashAccountsResult,
       bankAccountsResult,
       primaryBankAccount,
-      defaultBankAccount,
-      defaultCashAccount
+      defaultBankAccount
     ] = await Promise.all([
       customerRepository.findCustomerById(customerId, companyId, workspaceId),
       branchRepository.getCompanyBranches(companyId),
@@ -169,22 +168,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "BANK" }),
       BankAccount.findOne({ companyId, workspaceId, isDeleted: false, isActive: true, isPrimary: true }),
       BankAccount.findOne({ companyId, workspaceId, isDeleted: false, isActive: true }),
-      // Fetch branch-primary cash account — prefer isPrimary:true in the branch
-      CashAccount.findOne({
-        companyId,
-        workspaceId,
-        ...(saleData.branchId ? { branchId: saleData.branchId } : {}),
-        isPrimary: true,
-        isDeleted: false,
-      }).then(acc =>
-        // Fallback: any active cash account in this branch
-        acc || CashAccount.findOne({
-          companyId,
-          workspaceId,
-          ...(saleData.branchId ? { branchId: saleData.branchId } : {}),
-          isDeleted: false,
-        })
-      )
     ]);
 
   if (!customer) {
@@ -503,26 +486,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
         if (paymentType === "cash") {
           // --- CASH RECEIPT ---
-          // Always use the branch's system default cash account.
-          // User selection (payment.cashAccountId) is intentionally ignored.
-          let treasuryCashAccount = null;
-
-          if (saleData.branchId) {
-            // First try: system default (the immutable branch operating cash drawer)
-            treasuryCashAccount = await CashAccount.findOne({
-              companyId,
-              workspaceId,
-              branchId: saleData.branchId,
-              isSystemDefault: true,
-              isDeleted: false,
-            }).session(session);
-          }
-
-          // Fallback: branch primary (for legacy branches without isSystemDefault)
-          if (!treasuryCashAccount) {
-            treasuryCashAccount = defaultCashAccount;
-          }
-
+          // Transactions are routed directly to BranchCash (running partition)
           let cashLedgerAccountId = null;
             if (cashAccountsResult.accounts && cashAccountsResult.accounts.length > 0) {
               const accounts = cashAccountsResult.accounts;
@@ -534,7 +498,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
           if (cashLedgerAccountId) {
             let txSuccess = false;
-            if (treasuryCashAccount) {
+            if (true) { // removed treasuryCashAccount check
               try {
                 // Determine received vs returned based on validated denominations payload
                 let receivedDenoms = Array.isArray(payment.denominations) && payment.denominations.length > 0
@@ -544,6 +508,11 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                   ? payment.returnedDenominations
                   : [];
                 let receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+
+                if (receivedAmount === 0 && receivedDenoms.length === 0) {
+                  throw new ApiError(400, "Cash denominations are required for cash payments.");
+                }
+
                 let changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
 
                 // 1. Process CASH_IN for exact received amount
@@ -552,8 +521,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                   voucherNumber: nextReceiptJv(),
                   countNumber: nextCount(),
                   transactionDate: newSale.date || new Date(),
-                  cashAccountId: treasuryCashAccount._id,
-                  preLoadedCashAccount: treasuryCashAccount,
+                  branchId: resolvedBranchId,
+                  partition: "running",
                   transactionType: "CASH_IN",
                   direction: "CREDIT",
                   amount: receivedAmount,
@@ -580,8 +549,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
                     voucherNumber: nextReceiptJv(),
                     countNumber: nextCount(),
                     transactionDate: newSale.date || new Date(),
-                    cashAccountId: treasuryCashAccount._id,
-                    preLoadedCashAccount: treasuryCashAccount,
+                    branchId: resolvedBranchId,
+                    partition: "running",
                     transactionType: "CASH_OUT",
                     direction: "DEBIT",
                     amount: changeAmount,

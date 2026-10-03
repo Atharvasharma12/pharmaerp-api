@@ -6,9 +6,8 @@ import {
   CASH_TRANSACTION_STATUS,
 } from "../constants/cashTransaction.constant.js";
 
-import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
-import cashAccountRepository from "../../cash-accounts/repositories/cashAccount.repository.js";
-import cashDenominationBalanceRepository from "../../cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
+import BranchCash from "../../branch-cash/models/branchCash.model.js";
+import branchCashRepository from "../../branch-cash/repositories/branchCash.repository.js";
 import Account from "../../../../chart-of-accounts/models/account.model.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
@@ -82,7 +81,6 @@ const findOrCreateSystemAccount = async (
 const createCashTransaction = async (workspaceId, companyId, userId, payload, options = {}) => {
   const {
     transactionDate,
-    cashAccountId,
     transactionType,
     direction,
     amount,
@@ -90,6 +88,8 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
     narration,
     counterpartyAccountId,
     denominations,
+    branchId,
+    partition = "running",
   } = payload;
 
   const providedSession = options.session;
@@ -100,20 +100,19 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
   }
 
   try {
-    // 1. Verify CashAccount exists and is active
-    const cashAccount = payload.preLoadedCashAccount || await CashAccount.findOne({
-      _id: cashAccountId,
+    // 1. Verify BranchCash exists
+    const branchCash = payload.preLoadedBranchCash || await BranchCash.findOne({
+      branchId,
       companyId,
       workspaceId,
-      isDeleted: false,
-      status: "active",
+      isActive: true,
     }).session(session);
 
-    if (!cashAccount) {
-      throw new ApiError(400, "Cash Account not found or inactive");
+    if (!branchCash) {
+      throw new ApiError(400, "Branch Cash not found or inactive");
     }
 
-    const cashLedgerAccountId = cashAccount.ledgerAccountId;
+    const cashLedgerAccountId = branchCash.ledgerAccountId;
 
     // 2a. PRE-FLIGHT: For DEBIT (cash going OUT), validate denomination sufficiency
     //     This check runs BEFORE any journal posting to prevent partial writes.
@@ -124,11 +123,21 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
     }));
 
     if (direction === CASH_TRANSACTION_DIRECTION.DEBIT) {
-      await cashDenominationBalanceRepository.validateSufficientDenominations(
-        cashAccountId,
-        processedDenominations,
-        { session },
-      );
+      if (partition === "running") {
+        await branchCashRepository.validateSufficientRunningDenominations(
+          branchId,
+          companyId,
+          processedDenominations,
+          { session }
+        );
+      } else {
+        await branchCashRepository.validateSufficientFrozenDenominations(
+          branchId,
+          companyId,
+          processedDenominations,
+          { session }
+        );
+      }
     }
 
     // 2. Resolve the counterparty (offset) ledger account
@@ -269,7 +278,8 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
       companyId,
       transactionNumber,
       transactionDate: new Date(transactionDate),
-      cashAccountId,
+      branchId,
+      cashPartition: partition,
       transactionType,
       direction,
       amount,
@@ -297,19 +307,13 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
         { session },
       );
 
-      // Look up the cash account's branch for denormalization
-      const cashAccountDoc = await mongoose
-        .model("CashAccount")
-        .findOne({ _id: cashAccountId })
-        .select("branchId")
-        .session(session);
-
       const denomRecord = await cashDenominationRepository.createCashDenomination(
         {
           workspaceId,
           companyId,
-          cashAccountId,
-          branchId: cashAccountDoc?.branchId || null,
+          cashAccountId: null,
+          branchId,
+          partition,
           countNumber,
           countDate: new Date(transactionDate),
           denominations: processedDenominations,
@@ -326,23 +330,22 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
       );
       cashDenominationId = denomRecord._id;
 
-      // Update CashDenominationBalance running totals
-      // CREDIT = cash IN → add denominations
-      // DEBIT  = cash OUT → subtract denominations (already validated above)
       if (direction === CASH_TRANSACTION_DIRECTION.CREDIT) {
-        await cashDenominationBalanceRepository.addDenominations(
-          cashAccountId,
-          processedDenominations,
-          userId,
-          { session },
-        );
+        if (partition === "running") {
+          // addRunningDenominations recomputes runningTotal from sums — no scalar increment needed
+          await branchCashRepository.addRunningDenominations(branchId, companyId, processedDenominations, userId, { session });
+        } else {
+          // addFrozenDenominations recomputes frozenTotal from sums — no scalar increment needed
+          await branchCashRepository.addFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
+        }
       } else {
-        await cashDenominationBalanceRepository.subtractDenominations(
-          cashAccountId,
-          processedDenominations,
-          userId,
-          { session },
-        );
+        if (partition === "running") {
+          // subtractRunningDenominations recomputes runningTotal from sums — no scalar decrement needed
+          await branchCashRepository.subtractRunningDenominations(branchId, companyId, processedDenominations, userId, { session });
+        } else {
+          // subtractFrozenDenominations recomputes frozenTotal from sums — no scalar decrement needed
+          await branchCashRepository.subtractFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
+        }
       }
     }
 

@@ -3,8 +3,8 @@ import ApiError from "../../../../../../utils/ApiError.js";
 import cashDenominationRepository from "../repositories/cashDenomination.repository.js";
 import { CASH_DENOMINATION_STATUS } from "../constants/cashDenomination.constant.js";
 
-import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
-import cashDenominationBalanceRepository from "../../cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
+import BranchCash from "../../branch-cash/models/branchCash.model.js";
+import BranchCashBalance from "../../branch-cash/models/branchCashBalance.model.js";
 import accountRepository from "../../../../chart-of-accounts/repositories/account.repository.js";
 import accountGroupRepository from "../../../../chart-of-accounts/repositories/accountGroup.repository.js";
 import journalVoucherRepository from "../../../../journal-vouchers/repositories/journalVoucher.repository.js";
@@ -87,7 +87,8 @@ const findOrCreateVarianceAccount = async (
 // ---------------------------------------------------------------------------
 const createCashDenomination = async (workspaceId, companyId, userId, payload) => {
   const {
-    cashAccountId,
+    branchId,
+    partition = "running",
     countDate,
     denominations,
     expectedBalance,
@@ -98,17 +99,16 @@ const createCashDenomination = async (workspaceId, companyId, userId, payload) =
   session.startTransaction();
 
   try {
-    // 1. Verify cash account
-    const cashAccount = await CashAccount.findOne({
-      _id: cashAccountId,
+    // 1. Verify branch cash
+    const branchCash = await BranchCash.findOne({
+      branchId,
       companyId,
       workspaceId,
-      isDeleted: false,
-      status: "active",
+      isActive: true,
     }).session(session);
 
-    if (!cashAccount) {
-      throw new ApiError(400, "Cash Account not found or inactive");
+    if (!branchCash) {
+      throw new ApiError(400, "Branch Cash not found or inactive");
     }
 
     // 2. Calculate subtotals and physicalTotal from denominations array
@@ -139,9 +139,8 @@ const createCashDenomination = async (workspaceId, companyId, userId, payload) =
       {
         workspaceId,
         companyId,
-        cashAccountId,
-        // Denormalize branchId from the cash account for direct branch-level queries
-        branchId: cashAccount.branchId || null,
+        branchId,
+        partition,
         countNumber,
         countDate: new Date(countDate),
         denominations: processedDenominations,
@@ -202,12 +201,13 @@ const confirmCashDenomination = async (id, companyId, workspaceId, userId, paylo
 
     if (adjustVariance && variance !== 0) {
       // Get the cash ledger account
-      const cashAccount = await CashAccount.findOne({
-        _id: cashDenomination.cashAccountId,
+      const branchCash = await BranchCash.findOne({
+        branchId: cashDenomination.branchId,
+        companyId,
       }).session(session);
-      if (!cashAccount) throw new ApiError(400, "Linked cash account not found");
+      if (!branchCash) throw new ApiError(400, "Linked branch cash not found");
 
-      const cashLedgerAccountId = cashAccount.ledgerAccountId;
+      const cashLedgerAccountId = branchCash.ledgerAccountId;
       const absVariance = Math.abs(variance);
       const isShortage = variance < 0;
 
@@ -304,37 +304,23 @@ const confirmCashDenomination = async (id, companyId, workspaceId, userId, paylo
     }));
     const physicalTotal = physicalDenoms.reduce((sum, d) => sum + d.subtotal, 0);
 
-    const existingBalance = await cashDenominationBalanceRepository.findByCashAccountId(
-      cashDenomination.cashAccountId,
-      { session },
-    );
+    const existingBalance = await BranchCashBalance.findOne({
+      branchId: cashDenomination.branchId,
+      companyId,
+    }).session(session);
 
     if (existingBalance) {
       // Full reconciliation — replace with physical count
-      existingBalance.denominations = physicalDenoms;
-      existingBalance.totalBalance = physicalTotal;
+      if (cashDenomination.partition === "running") {
+        existingBalance.runningDenominations = physicalDenoms;
+        existingBalance.runningTotal = physicalTotal;
+      } else {
+        existingBalance.frozenDenominations = physicalDenoms;
+        existingBalance.frozenTotal = physicalTotal;
+      }
       existingBalance.lastUpdatedAt = new Date();
       existingBalance.lastUpdatedBy = userId;
       await existingBalance.save({ session });
-    } else {
-      // Create balance document if missing (edge case for accounts created before this module)
-      const cashAcct = await CashAccount.findOne({ _id: cashDenomination.cashAccountId })
-        .select("workspaceId companyId")
-        .session(session);
-      if (cashAcct) {
-        await cashDenominationBalanceRepository.createBalance(
-          {
-            workspaceId: cashAcct.workspaceId,
-            companyId: cashAcct.companyId,
-            cashAccountId: cashDenomination.cashAccountId,
-            totalBalance: physicalTotal,
-            denominations: physicalDenoms,
-            lastUpdatedAt: new Date(),
-            lastUpdatedBy: userId,
-          },
-          { session },
-        );
-      }
     }
 
     await session.commitTransaction();

@@ -4,7 +4,7 @@ import branchRepository from "../repositories/branch.repository.js";
 import companyRepository from "../../companies/repositories/company.repository.js";
 import workspaceRepository from "../../workspaces/repositories/workspace.repository.js";
 import memberAccessRepository from "../../../core/access-control/repositories/memberAccess.repository.js";
-import cashAccountService from "../../../finance/treasury/cash-management/cash-accounts/services/cashAccount.service.js";
+import branchCashService from "../../../finance/treasury/cash-management/branch-cash/services/branchCash.service.js";
 
 import { BRANCH_STATUS } from "../constants/branch.constant.js";
 
@@ -113,22 +113,19 @@ const createBranch = async (workspaceId, companyId, userId, payload) => {
     createdBy: userId,
   });
 
-  // Auto-seed a default cash account for the new branch so users can
-  // immediately start shifts and billing without manual setup
+  // Auto-initialize BranchCash (running + frozen) for the new branch
   try {
-    await cashAccountService.createCashAccount(workspaceId, companyId, userId, {
-      accountName: `Main Cash Counter - ${payload.name}`,
-      description: `Default cash account for ${payload.name}`,
-      openingBalance: 0,
-      openingBalanceType: "dr",
-      isPrimary: true,
-      isSystemDefault: true,
-      branchId: branch._id.toString(),
-    });
+    await branchCashService.initializeBranchCash(
+      workspaceId,
+      companyId,
+      userId,
+      branch._id.toString(),
+      payload.name,
+    );
   } catch (seedErr) {
-    // Log but do NOT fail branch creation — the account can be created manually
+    // Non-fatal: BranchCash can be initialized manually if branch creation succeeds
     console.warn(
-      `[Branch] Could not auto-seed default cash account for branch "${payload.name}":`,
+      `[Branch] Could not auto-initialize branch cash for "${payload.name}":`,
       seedErr.message,
     );
   }

@@ -1,6 +1,5 @@
 import { DayClosing } from "./dayClosing.model.js";
 import { Shift } from "../shifts/shift.model.js";
-import CashAccount from "../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
 import ApiError from "../../../utils/ApiError.js";
 import { getBusinessDateRange } from "../../../utils/businessDate.js";
 
@@ -47,35 +46,9 @@ export const createDayClosing = async (data) => {
     totalFundDeposits = shifts.reduce((sum, s) => sum + (s.totalFundDeposits || 0), 0);
   }
 
-  // Resolve the branch's system default cash account for traceability
-  let resolvedCashAccountId = null;
-  if (branchId) {
-    try {
-      const systemDefaultCA = await CashAccount.findOne({
-        branchId,
-        isSystemDefault: true,
-        isDeleted: false,
-      });
-      if (systemDefaultCA) {
-        resolvedCashAccountId = systemDefaultCA._id;
-      } else {
-        // Fallback: branch primary (legacy)
-        const primaryCA = await CashAccount.findOne({
-          branchId,
-          isPrimary: true,
-          isDeleted: false,
-        });
-        if (primaryCA) resolvedCashAccountId = primaryCA._id;
-      }
-    } catch (caErr) {
-      console.warn("[DayClosing] Could not resolve cash account:", caErr.message);
-    }
-  }
-
   const dayClosing = await DayClosing.create({
     ...data,
     date: canonicalDate,
-    cashAccountId: resolvedCashAccountId,
     shifts: shifts.map(s => s._id),
     openingFloatAmount: openingTotal,
     openingDenominations,

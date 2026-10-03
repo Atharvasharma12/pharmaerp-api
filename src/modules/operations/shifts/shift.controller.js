@@ -313,11 +313,19 @@ export const updateShift = asyncHandler(async (req, res, next) => {
 });
 
 export const updateShiftStatus = asyncHandler(async (req, res, next) => {
-  const { status, actualClosingCashAmount, closingDenominations, note } = req.body;
+  const { status, actualClosingCashAmount, closingDenominations, note, carryForwardAmount, frozenDenominations } = req.body;
   const userId = req.user?._id;
   
   if (status === "closed") {
-    const shift = await closeShift(req.params.id, userId, actualClosingCashAmount, closingDenominations, note);
+    const shift = await closeShift(
+      req.params.id,
+      userId,
+      actualClosingCashAmount,
+      closingDenominations,
+      note,
+      carryForwardAmount ?? 0,
+      frozenDenominations ?? []
+    );
     return res.status(200).json({ success: true, data: shift });
   }
 

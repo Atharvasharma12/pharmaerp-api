@@ -7,7 +7,6 @@ import {
 // ── Populate helpers ──────────────────────────────────────────────────────────
 
 const POPULATE_ACCOUNTS = [
-  { path: "fromCashAccountId", select: "accountName" },
   {
     path: "toBankAccountId",
     select: "accountName accountNumber bankMasterId",
@@ -34,8 +33,13 @@ const POPULATE_USERS = [
   { path: "cancelledBy", select: "name email" },
 ];
 
+const POPULATE_BRANCH = [
+  { path: "branchId", select: "name code" },
+];
+
 const buildPopulate = () => [
   ...POPULATE_ACCOUNTS,
+  ...POPULATE_BRANCH,
   ...POPULATE_DAY_CLOSING,
   ...POPULATE_DENOMINATION,
   ...POPULATE_JOURNALS,

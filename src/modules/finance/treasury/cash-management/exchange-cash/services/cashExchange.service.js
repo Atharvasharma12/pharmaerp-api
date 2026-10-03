@@ -2,8 +2,8 @@ import mongoose from "mongoose";
 import ApiError from "../../../../../../utils/ApiError.js";
 import cashExchangeRepository from "../repositories/cashExchange.repository.js";
 import { CASH_EXCHANGE_STATUS } from "../constants/cashExchange.constant.js";
-import CashAccount from "../../cash-accounts/models/cashAccount.model.js";
-import cashDenominationBalanceRepository from "../../cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
+import BranchCash from "../../branch-cash/models/branchCash.model.js";
+import branchCashRepository from "../../branch-cash/repositories/branchCash.repository.js";
 
 // ---------------------------------------------------------------------------
 // HELPERS
@@ -32,7 +32,8 @@ const normalizeDenominations = (denominations) =>
 const createCashExchange = async (workspaceId, companyId, userId, payload) => {
   const {
     exchangeDate,
-    cashAccountId,
+    branchId,
+    cashPartition = "running",
     denominationsReceived,
     denominationsGiven,
     narration,
@@ -58,26 +59,34 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
       );
     }
 
-    // 3. Validate cash account exists and is active
-    const cashAccount = await CashAccount.findOne({
-      _id: cashAccountId,
+    // 3. Validate BranchCash exists and is active
+    const branchCash = await BranchCash.findOne({
+      branchId,
       workspaceId,
       companyId,
-      isDeleted: false,
-      status: "active",
+      isActive: true,
     }).session(session);
 
-    if (!cashAccount) {
-      throw new ApiError(400, "Cash account not found or inactive");
+    if (!branchCash) {
+      throw new ApiError(400, "Branch Cash not found or inactive");
     }
 
     // 4. PRE-FLIGHT: validate sufficient denominations for what we give OUT
-    //    (we must have the change in the drawer before we hand it over)
-    await cashDenominationBalanceRepository.validateSufficientDenominations(
-      cashAccountId,
-      normGiven,
-      { session },
-    );
+    if (cashPartition === "running") {
+      await branchCashRepository.validateSufficientRunningDenominations(
+        branchId,
+        companyId,
+        normGiven,
+        { session },
+      );
+    } else {
+      await branchCashRepository.validateSufficientFrozenDenominations(
+        branchId,
+        companyId,
+        normGiven,
+        { session },
+      );
+    }
 
     // 5. Generate sequential exchange number: EX-YYYY-NNNNN
     const exchangeNumber = await cashExchangeRepository.getNextExchangeNumber(
@@ -86,8 +95,7 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
       { session },
     );
 
-    // 6. Resolve branchId from cash account
-    const branchId = cashAccount.branchId || null;
+
 
     // 7. Auto-detect open shift for this branch
     let shiftId = null;
@@ -115,21 +123,37 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
     }
 
     // 8. Update denomination balance:
-    //    SUBTRACT the denominations we are GIVING to the customer
-    await cashDenominationBalanceRepository.subtractDenominations(
-      cashAccountId,
-      normGiven,
-      userId,
-      { session },
-    );
-
-    //    ADD the denominations we are RECEIVING from the customer
-    await cashDenominationBalanceRepository.addDenominations(
-      cashAccountId,
-      normReceived,
-      userId,
-      { session },
-    );
+    if (cashPartition === "running") {
+      await branchCashRepository.subtractRunningDenominations(
+        branchId,
+        companyId,
+        normGiven,
+        userId,
+        { session },
+      );
+      await branchCashRepository.addRunningDenominations(
+        branchId,
+        companyId,
+        normReceived,
+        userId,
+        { session },
+      );
+    } else {
+      await branchCashRepository.subtractFrozenDenominations(
+        branchId,
+        companyId,
+        normGiven,
+        userId,
+        { session },
+      );
+      await branchCashRepository.addFrozenDenominations(
+        branchId,
+        companyId,
+        normReceived,
+        userId,
+        { session },
+      );
+    }
 
     // 9. Persist the CashExchange record
     const cashExchange = await cashExchangeRepository.createCashExchange(
@@ -140,7 +164,7 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
         shiftId,
         exchangeNumber,
         exchangeDate: new Date(exchangeDate),
-        cashAccountId,
+        cashPartition,
         denominationsReceived: normReceived,
         totalReceived,
         denominationsGiven: normGiven,
@@ -229,29 +253,49 @@ const cancelCashExchange = async (
     }
 
     // PRE-FLIGHT: validate we have enough of what was originally received
-    // (on cancellation the "given" side is reversed — we must have the change back)
-    await cashDenominationBalanceRepository.validateSufficientDenominations(
-      cashExchange.cashAccountId,
-      cashExchange.denominationsReceived,
-      { session },
-    );
-
-    // Reverse the denomination changes:
-    //   SUBTRACT denominations we RECEIVED (they go back to customer)
-    await cashDenominationBalanceRepository.subtractDenominations(
-      cashExchange.cashAccountId,
-      cashExchange.denominationsReceived,
-      userId,
-      { session },
-    );
-
-    //   ADD denominations we GAVE (they come back to us)
-    await cashDenominationBalanceRepository.addDenominations(
-      cashExchange.cashAccountId,
-      cashExchange.denominationsGiven,
-      userId,
-      { session },
-    );
+    if (cashExchange.cashPartition === "running") {
+      await branchCashRepository.validateSufficientRunningDenominations(
+        cashExchange.branchId,
+        companyId,
+        cashExchange.denominationsReceived,
+        { session },
+      );
+      await branchCashRepository.subtractRunningDenominations(
+        cashExchange.branchId,
+        companyId,
+        cashExchange.denominationsReceived,
+        userId,
+        { session },
+      );
+      await branchCashRepository.addRunningDenominations(
+        cashExchange.branchId,
+        companyId,
+        cashExchange.denominationsGiven,
+        userId,
+        { session },
+      );
+    } else {
+      await branchCashRepository.validateSufficientFrozenDenominations(
+        cashExchange.branchId,
+        companyId,
+        cashExchange.denominationsReceived,
+        { session },
+      );
+      await branchCashRepository.subtractFrozenDenominations(
+        cashExchange.branchId,
+        companyId,
+        cashExchange.denominationsReceived,
+        userId,
+        { session },
+      );
+      await branchCashRepository.addFrozenDenominations(
+        cashExchange.branchId,
+        companyId,
+        cashExchange.denominationsGiven,
+        userId,
+        { session },
+      );
+    }
 
     cashExchange.status = CASH_EXCHANGE_STATUS.CANCELLED;
     cashExchange.cancelledAt = new Date();

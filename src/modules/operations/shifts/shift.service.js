@@ -1,12 +1,12 @@
 import { Shift } from "./shift.model.js";
 import { DayClosing } from "../day-closings/dayClosing.model.js";
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
-import CashAccount from "../../finance/treasury/cash-management/cash-accounts/models/cashAccount.model.js";
-import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTransfer.model.js";
-import { FUND_TRANSFER_STATUS } from "../../finance/treasury/fund-transfers/constants/fundTransfer.constant.js";
+import branchCashService from "../../finance/treasury/cash-management/branch-cash/services/branchCash.service.js";
 import ApiError from "../../../utils/ApiError.js";
 import { getTimePeriod, periodIdToLabel } from "../../../utils/timePeriod.js";
 import { getBusinessDateRange } from "../../../utils/businessDate.js";
+
+import branchCashRepository from "../../finance/treasury/cash-management/branch-cash/repositories/branchCash.repository.js";
 
 export const openShift = async (data) => {
   const { workspaceId, companyId, branchId, date } = data;
@@ -24,69 +24,122 @@ export const openShift = async (data) => {
     throw new ApiError(400, "An open shift already exists for this branch. Please close it first.");
   }
 
-  const shift = await Shift.create({
-    ...data,
-    cashAccountId: null,
-    openingDenominations: data.openingDenominations || []
-  });
-
-  // Auto-link the branch's system default cash account to this shift for traceability
+  // Ensure BranchCash is initialized for this branch (idempotent)
   if (branchId) {
     try {
-      const systemDefaultCA = await CashAccount.findOne({
+      await branchCashService.initializeBranchCash(
         workspaceId,
         companyId,
+        data.openedBy || data.createdBy,
         branchId,
-        isSystemDefault: true,
-        isDeleted: false,
-      });
-      if (systemDefaultCA) {
-        shift.cashAccountId = systemDefaultCA._id;
-        await shift.save();
-      } else {
-        // Fallback: use branch primary (for legacy data)
-        const primaryCA = await CashAccount.findOne({
-          workspaceId,
-          companyId,
-          branchId,
-          isPrimary: true,
-          isDeleted: false,
-        });
-        if (primaryCA) {
-          shift.cashAccountId = primaryCA._id;
-          await shift.save();
-        }
-      }
-    } catch (caErr) {
-      console.warn("[Shift] Could not auto-link cash account:", caErr.message);
+        null // branch name not required for idempotent init
+      );
+    } catch (err) {
+      console.warn("[Shift] Could not ensure BranchCash for branch:", err.message);
     }
   }
+
+  // Resolve opening denominations and ensure openingFloatAmount is exact denomination sum
+  let openingDenominations = data.openingDenominations || [];
+  let openingFloatAmount = Number(data.openingFloatAmount) || 0;
+
+  if (openingDenominations.length > 0) {
+    openingFloatAmount = openingDenominations.reduce(
+      (sum, d) => sum + (Number(d.denomination) || 0) * (Number(d.count || d.quantity) || 0),
+      0
+    );
+  } else if (branchId) {
+    try {
+      const branchBalance = await branchCashRepository.findBalanceByBranchId(branchId, companyId);
+      if (branchBalance?.runningDenominations?.length > 0) {
+        openingDenominations = branchBalance.runningDenominations.map((d) => ({
+          denomination: d.denomination,
+          count: d.quantity,
+          amount: d.subtotal || (d.denomination * d.quantity),
+        }));
+        openingFloatAmount = openingDenominations.reduce((sum, d) => sum + (d.amount || 0), 0);
+      }
+    } catch (e) {
+      console.warn("[Shift] Could not fetch runningDenominations for openShift:", e.message);
+    }
+  }
+
+  const shift = await Shift.create({
+    ...data,
+    openingFloatAmount,
+    openingDenominations,
+  });
 
   return shift;
 };
 
-export const closeShift = async (shiftId, userId, actualClosingCashAmount, closingDenominations = [], note) => {
+/**
+ * Close a shift.
+ *
+ * New behaviour:
+ *   1. Calculate totalCash = openingFloat + cashSalesThisShift
+ *   2. carryForwardAmount = how much the pharmacist wants in running for next shift
+ *   3. frozenAtClose = totalCash - carryForwardAmount → moves to frozen reserve
+ *   4. BranchCash is updated atomically via branchCashService.freezeAtShiftClose
+ *
+ * @param {string} shiftId
+ * @param {string} userId
+ * @param {number} actualClosingCashAmount   - physical cash counted at close
+ * @param {Array}  closingDenominations      - denomination breakdown of physical cash
+ * @param {string} note
+ * @param {number} carryForwardAmount        - how much to keep as running (rest becomes frozen)
+ * @param {Array}  frozenDenominations       - denomination breakdown of frozen portion
+ */
+export const closeShift = async (
+  shiftId,
+  userId,
+  actualClosingCashAmount,
+  closingDenominations = [],
+  note,
+  carryForwardAmount = 0,
+  frozenDenominations = []
+) => {
   const shift = await Shift.findById(shiftId);
   if (!shift) throw new ApiError(404, "Shift not found");
   if (shift.status !== "open") throw new ApiError(400, "Shift is not open");
 
-  // Calculate expected cash dynamically
+  // Validate carryForwardAmount
+  const safeCarry = Math.max(0, Number(carryForwardAmount) || 0);
+  const totalCash = Math.max(0, Number(actualClosingCashAmount) || 0);
+
+  if (safeCarry > totalCash) {
+    throw new ApiError(
+      400,
+      `Carry-forward amount (₹${safeCarry}) cannot exceed actual closing cash (₹${totalCash})`
+    );
+  }
+
+  const frozenAmount = totalCash - safeCarry;
+
+  // ── Calculate expected cash dynamically ──────────────────────────────────
   const query = {
     workspaceId: shift.workspaceId,
     companyId: shift.companyId,
     createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: new Date() },
     isDeleted: false,
   };
-  
+
   if (shift.branchId) query.branchId = shift.branchId;
 
   const invoices = await SalesInvoice.find(query);
 
   const totalCashSales = invoices.reduce((sum, inv) => {
     if (inv.paymentMethod === "Split" && Array.isArray(inv.payments)) {
-      const cashPayments = inv.payments.filter(p => {
+      const cashPayments = inv.payments.filter((p) => {
         const pt = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
-        return pt.includes("CASH") || (!pt.includes("UPI") && !pt.includes("QR") && !pt.includes("CARD") && !pt.includes("WALLET") && !pt.includes("CREDIT"));
+        return (
+          pt.includes("CASH") ||
+          (!pt.includes("UPI") &&
+            !pt.includes("QR") &&
+            !pt.includes("CARD") &&
+            !pt.includes("WALLET") &&
+            !pt.includes("CREDIT"))
+        );
       });
       return sum + cashPayments.reduce((s, p) => s + (p.amount || 0), 0);
     } else {
@@ -94,42 +147,45 @@ export const closeShift = async (shiftId, userId, actualClosingCashAmount, closi
       if (pMethod.includes("UPI") || pMethod.includes("QR")) {
         return sum;
       }
-      // Default cash behavior
-      const cashCollected = (inv.cashTendered - inv.changeDue > 0) ? (inv.cashTendered - inv.changeDue) : (inv.grandTotal || 0);
+      const cashCollected =
+        inv.cashTendered - inv.changeDue > 0
+          ? inv.cashTendered - inv.changeDue
+          : inv.grandTotal || 0;
       return sum + cashCollected;
     }
   }, 0);
-  const expectedCash_raw = shift.openingFloatAmount + totalCashSales;
 
-  // Factor in fund transfers (withdrawals from / deposits into shift's cash account)
-  let totalFundWithdrawals = 0;
-  let totalFundDeposits = 0;
+  const expectedCash = shift.openingFloatAmount + totalCashSales;
 
-  if (shift.cashAccountId && shift._id) {
-    const fundTransfers = await FundTransfer.find({
-      shiftId: shift._id,
-      status: FUND_TRANSFER_STATUS.POSTED,
-      isDeleted: false,
-    }).select("amount fromCashAccountId toCashAccountId");
-
-    const shiftCaId = String(shift.cashAccountId);
-    for (const ft of fundTransfers) {
-      if (ft.fromCashAccountId && String(ft.fromCashAccountId) === shiftCaId) totalFundWithdrawals += ft.amount;
-      if (ft.toCashAccountId   && String(ft.toCashAccountId)   === shiftCaId) totalFundDeposits   += ft.amount;
+  // ── Freeze excess cash into frozen reserve ───────────────────────────────
+  if (frozenAmount > 0 && shift.branchId) {
+    try {
+      await branchCashService.freezeAtShiftClose(
+        shift.branchId.toString(),
+        shift.companyId.toString(),
+        userId,
+        frozenAmount,
+        frozenDenominations,
+        closingDenominations  // full counted denominations for carry-forward calculation
+      );
+    } catch (freezeErr) {
+      console.warn("[Shift] freezeAtShiftClose warning:", freezeErr.message);
+      // Non-fatal if BranchCash hasn't been initialised yet (legacy data)
     }
   }
 
-  // Correct formula: Opening + Cash Sales − Withdrawals + Deposits
-  const expectedCash = expectedCash_raw - totalFundWithdrawals + totalFundDeposits;
-
+  // ── Update shift record ──────────────────────────────────────────────────
   shift.expectedClosingCashAmount = expectedCash;
-  shift.actualClosingCashAmount = actualClosingCashAmount;
+  shift.actualClosingCashAmount = totalCash;
   shift.closingDenominations = closingDenominations;
-  shift.cashDifferenceAmount = actualClosingCashAmount - expectedCash;
-  shift.totalFundWithdrawals = totalFundWithdrawals;
-  shift.totalFundDeposits = totalFundDeposits;
+  shift.cashDifferenceAmount = totalCash - expectedCash;
+  shift.carryForwardAmount = safeCarry;
+  shift.frozenAtClose = frozenAmount;
+  // Kept for backward compat, zeroed since fund transfers are deprecated
+  shift.totalFundWithdrawals = 0;
+  shift.totalFundDeposits = 0;
   shift.status = "closed";
-  
+
   const now = new Date();
   shift.closedAt = now;
   shift.closedBy = userId;
@@ -146,7 +202,6 @@ export const closeShift = async (shiftId, userId, actualClosingCashAmount, closi
     baseName = `${openLabel} - ${closeLabel} Shift`;
   }
 
-  // Count existing closed shifts today with same name pattern
   const { dateFilter } = getBusinessDateRange(shift.date);
 
   const sameNameCount = await Shift.countDocuments({

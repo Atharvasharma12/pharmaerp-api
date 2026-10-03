@@ -2,7 +2,6 @@ import mongoose from "mongoose";
 import CashExchange from "../models/cashExchange.model.js";
 
 const POPULATE_CONFIG = [
-  { path: "cashAccountId", select: "accountName" },
   { path: "createdBy", select: "name email" },
   { path: "cancelledBy", select: "name email" },
 ];
@@ -69,7 +68,6 @@ const getCashExchanges = async (
   };
 
   if (filters.status) query.status = filters.status;
-  if (filters.cashAccountId) query.cashAccountId = filters.cashAccountId;
   if (filters.shiftId) query.shiftId = filters.shiftId;
   if (filters.branchId) query.branchId = filters.branchId;
 

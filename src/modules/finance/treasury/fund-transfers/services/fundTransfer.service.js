@@ -7,8 +7,7 @@ import {
 } from "../constants/fundTransfer.constant.js";
 
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
-import CashAccount from "../../cash-management/cash-accounts/models/cashAccount.model.js";
-import cashAccountRepository from "../../cash-management/cash-accounts/repositories/cashAccount.repository.js";
+import BranchCash from "../../cash-management/branch-cash/models/branchCash.model.js";
 
 import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
 import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
@@ -18,7 +17,7 @@ import voucherNumberService from "../../../journal-vouchers/services/voucherNumb
 import journalVoucherRepository from "../../../journal-vouchers/repositories/journalVoucher.repository.js";
 import cashDenominationRepository from "../../cash-management/cash-denominations/repositories/cashDenomination.repository.js";
 import { CASH_DENOMINATION_STATUS } from "../../cash-management/cash-denominations/constants/cashDenomination.constant.js";
-import cashDenominationBalanceRepository from "../../cash-management/cash-denomination-balances/repositories/cashDenominationBalance.repository.js";
+import branchCashRepository from "../../cash-management/branch-cash/repositories/branchCash.repository.js";
 
 /**
  * Resolve the ledger Account ID from either a BankAccount or CashAccount.
@@ -36,14 +35,14 @@ const resolveLedgerAccountId = async (accountType, accountId, session) => {
   }
 
   if (accountType === "CASH") {
-    const cashAccount = await CashAccount.findOne({
-      _id: accountId,
+    const branchCash = await BranchCash.findOne({
+      branchId: accountId,
       isDeleted: false,
-      status: "active",
+      isActive: true,
     }).session(session);
-    if (!cashAccount)
-      throw new ApiError(400, `Cash Account not found or inactive`);
-    return cashAccount.ledgerAccountId;
+    if (!branchCash)
+      throw new ApiError(400, `Branch Cash not found or inactive`);
+    return branchCash.ledgerAccountId;
   }
 
   throw new ApiError(400, "Invalid account type. Must be BANK or CASH");
@@ -107,8 +106,9 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
         quantity: d.quantity || 0,
         subtotal: d.denomination * (d.quantity || 0),
       }));
-      await cashDenominationBalanceRepository.validateSufficientDenominations(
+      await branchCashRepository.validateSufficientRunningDenominations(
         fromAccountId,
+        companyId,
         processedFrom,
         { session },
       );
@@ -207,19 +207,13 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
     let resolvedDayClosingId = payload.dayClosingId || null;
     let resolvedBranchId = null;
 
-    const primaryCashAccountId =
+    const primaryBranchId =
       fromAccountType === "CASH" ? fromAccountId
       : toAccountType === "CASH" ? toAccountId
       : null;
 
-    if (primaryCashAccountId) {
-      const cashAccDoc = await CashAccount
-        .findOne({ _id: primaryCashAccountId })
-        .select("branchId")
-        .session(session);
-      if (cashAccDoc?.branchId) {
-        resolvedBranchId = cashAccDoc.branchId;
-      }
+    if (primaryBranchId) {
+      resolvedBranchId = primaryBranchId;
     }
 
     // If shiftId not explicitly provided, auto-detect the currently open shift for this branch
@@ -267,10 +261,8 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       transferType,
       fromAccountType,
       fromBankAccountId: fromAccountType === "BANK" ? fromAccountId : null,
-      fromCashAccountId: fromAccountType === "CASH" ? fromAccountId : null,
       toAccountType,
       toBankAccountId: toAccountType === "BANK" ? toAccountId : null,
-      toCashAccountId: toAccountType === "CASH" ? toAccountId : null,
       amount,
       referenceNumber: referenceNumber || null,
       narration: narration || null,
@@ -298,11 +290,6 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
         0,
       );
 
-      const cashAccountDoc = await mongoose
-        .model("CashAccount")
-        .findOne({ _id: cashAccountId })
-        .select("branchId")
-        .session(session);
 
       const countNumber = await cashDenominationRepository.getNextCountNumber(
         companyId,
@@ -314,8 +301,8 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
         {
           workspaceId,
           companyId,
-          cashAccountId,
-          branchId: cashAccountDoc?.branchId || null,
+          cashAccountId: null,
+          branchId: cashAccountId,
           countNumber,
           countDate: new Date(transferDate),
           denominations: processedDenominations,
@@ -347,9 +334,10 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       const result = await buildDenomRecord(fromDenominations, fromAccountId);
       if (result) {
         fundTransferPayload.fromCashDenominationId = result.id;
-        // Subtract denominations from the FROM cash account running balance
-        await cashDenominationBalanceRepository.subtractDenominations(
+        // subtractRunningDenominations recomputes runningTotal from denomination sums
+        await branchCashRepository.subtractRunningDenominations(
           fromAccountId,
+          companyId,
           result.denominations,
           userId,
           { session },
@@ -364,9 +352,10 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       const result = await buildDenomRecord(toDenominations, toAccountId);
       if (result) {
         fundTransferPayload.toCashDenominationId = result.id;
-        // Add denominations to the TO cash account running balance
-        await cashDenominationBalanceRepository.addDenominations(
+        // addRunningDenominations recomputes runningTotal from denomination sums
+        await branchCashRepository.addRunningDenominations(
           toAccountId,
+          companyId,
           result.denominations,
           userId,
           { session },

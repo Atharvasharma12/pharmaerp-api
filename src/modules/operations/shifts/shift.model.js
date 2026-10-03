@@ -76,18 +76,9 @@ const shiftSchema = new mongoose.Schema(
       ref: "User",
       default: null,
     },
-    cashierId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      default: null,
-    },
-    // Reference to the branch's system default cash account being reconciled in this shift
-    cashAccountId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashAccount",
-      default: null,
-      index: true,
-    },
+    // cashAccountId removed — branch cash is now tracked via BranchCash (one per branch)
+    // branchId already identifies the cash context
+
     openingFloatAmount: {
       type: Number,
       default: 0,
@@ -127,7 +118,8 @@ const shiftSchema = new mongoose.Schema(
       default: "",
     },
 
-    // Fund transfer totals — snapshot persisted at shift close
+    // Fund transfer totals — kept for backward compat but no longer updated
+    // (fund transfers between cash accounts are deprecated)
     totalFundWithdrawals: {
       type: Number,
       default: 0,
@@ -135,6 +127,20 @@ const shiftSchema = new mongoose.Schema(
     totalFundDeposits: {
       type: Number,
       default: 0,
+    },
+
+    // ── Shift-close carry-forward ─────────────────────────────────────────
+    // Amount the pharmacist chose to keep as running cash for the next shift
+    carryForwardAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Amount moved to frozen reserve at shift close (totalCash - carryForwardAmount)
+    frozenAtClose: {
+      type: Number,
+      default: 0,
+      min: 0,
     },
   },
   { timestamps: true }

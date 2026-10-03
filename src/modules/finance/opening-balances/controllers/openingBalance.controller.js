@@ -66,21 +66,4 @@ export const setBankAccountOpeningBalance = asyncHandler(async (req, res) => {
     );
 });
 
-export const setCashAccountOpeningBalance = asyncHandler(async (req, res) => {
-  const result = await openingBalanceService.setCashAccountOpeningBalance(
-    req.workspaceId,
-    req.companyId,
-    req.user._id,
-    req.body,
-  );
 
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        "Cash Account opening balance set successfully",
-        result,
-      ),
-    );
-});
