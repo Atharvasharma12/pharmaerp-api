@@ -84,8 +84,23 @@ export const parseB2BOutstandingExcel = (buffer) => {
         }
       }
     } else {
-      if (!fullRowText.includes("DEBTORS OUTSTANDING AS ON") && !fullRowText.includes("PAGE NO")) {
-        currentCustomer = fullRowText;
+      const upperText = fullRowText.toUpperCase();
+      if (!upperText.includes("DEBTORS OUTSTANDING AS ON")) {
+        let name = fullRowText;
+        
+        // Remove 'Page No..' and anything after it
+        const pageIdx = upperText.indexOf("PAGE NO");
+        if (pageIdx !== -1) {
+          name = name.substring(0, pageIdx).trim();
+        }
+
+        // Clean up trailing hyphens or random dashes
+        name = name.replace(/[-_]+$/g, '').trim();
+
+        // Only set as customer if it's a real name (ignore pure hyphen lines or empty lines)
+        if (name.replace(/[-_\s]/g, '').length > 2) {
+          currentCustomer = name;
+        }
       }
     }
   }
