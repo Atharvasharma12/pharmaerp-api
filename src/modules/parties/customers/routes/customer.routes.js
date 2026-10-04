@@ -15,6 +15,8 @@ import {
   getCustomerOutstanding,
   getCustomerPayments,
   getCustomerSales,
+  previewImport,
+  confirmImport,
 } from "../controllers/customer.controller.js";
 
 import {
@@ -31,7 +33,15 @@ router.use(authMiddleware);
 router.use(workspaceContextMiddleware);
 router.use(companyContextMiddleware);
 
+
+import uploadFile from "../../../../middlewares/upload.middleware.js";
+
+// Import APIs
+router.post("/import/preview", uploadFile.single("file"), previewImport);
+router.post("/import/confirm", confirmImport);
+
 // CRUD
+
 router.post("/", validate(createCustomerSchema), createCustomer);
 
 router.get("/", validate(getCustomersQuerySchema, "query"), getCustomers);
