@@ -2,19 +2,10 @@ name: Deploy PharmaERP to Render
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Select environment to deploy"
-        required: true
-        type: choice
-        options:
-          - development
-          - uat
-          - production
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.environment }} to Render
+    name: Deploy to Render
     runs-on: ubuntu-latest
 
     steps:
@@ -24,23 +15,25 @@ jobs:
           UAT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_UAT }}
           PRODUCTION_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION }}
         run: |
-          set -e
-
-          case "${{ inputs.environment }}" in
-            development)
+          case "${GITHUB_REF_NAME}" in
+            develop)
+              echo "🚀 Deploying Development..."
               HOOK="$DEVELOPMENT_HOOK"
               ;;
 
             uat)
+              echo "🚀 Deploying UAT..."
               HOOK="$UAT_HOOK"
               ;;
 
-            production)
+            main)
+              echo "🚀 Deploying Production..."
               HOOK="$PRODUCTION_HOOK"
               ;;
 
             *)
-              echo "❌ Invalid environment"
+              echo "❌ Unsupported branch: ${GITHUB_REF_NAME}"
+              echo "Allowed branches: develop, uat, main"
               exit 1
               ;;
           esac
@@ -50,8 +43,6 @@ jobs:
             exit 1
           fi
 
-          echo "🚀 Deploying ${{ inputs.environment }}..."
-
           curl \
             --fail \
             --silent \
@@ -60,4 +51,4 @@ jobs:
             "$HOOK"
 
           echo ""
-          echo "✅ ${{ inputs.environment }} deployment triggered successfully"
+          echo "✅ Render deployment triggered successfully"
