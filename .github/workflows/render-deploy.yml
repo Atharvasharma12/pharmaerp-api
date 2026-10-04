@@ -1,0 +1,68 @@
+name: PharmaERP Render Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - development
+          - uat
+          - production
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Render
+        env:
+          DEVELOPMENT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEVELOPMENT }}
+          UAT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_UAT }}
+          PRODUCTION_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION }}
+        run: |
+          case "${{ inputs.environment }}" in
+            development)
+              HOOK="$DEVELOPMENT_HOOK"
+              BRANCH="develop"
+              ;;
+
+            uat)
+              HOOK="$UAT_HOOK"
+              BRANCH="uat"
+              ;;
+
+            production)
+              HOOK="$PRODUCTION_HOOK"
+              BRANCH="main"
+              ;;
+
+            *)
+              echo "Invalid environment"
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$HOOK" ]; then
+            echo "Render deploy hook is not configured."
+            exit 1
+          fi
+
+          echo "======================================"
+          echo "PharmaERP Render Deployment"
+          echo "Environment: ${{ inputs.environment }}"
+          echo "Branch:      $BRANCH"
+          echo "======================================"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --request POST \
+            "$HOOK"
+
+          echo ""
+          echo "Render deployment triggered successfully."
