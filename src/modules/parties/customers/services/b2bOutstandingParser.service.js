@@ -92,3 +92,4 @@ export const parseB2BOutstandingExcel = (buffer) => {
 
   return { reportDate, invoices };
 };
+
