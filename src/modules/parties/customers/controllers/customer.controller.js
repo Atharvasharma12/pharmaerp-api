@@ -124,20 +124,48 @@ export const previewImport = asyncHandler(async (req, res) => {
   if (!req.file) {
     return res.status(400).json(new ApiResponse(400, "Excel file is required"));
   }
-  const result = await customerService.previewImport(
-    req.workspaceId,
-    req.companyId,
-    req.file.buffer
-  );
+  
+  const importType = req.body.importType || "b2b";
+  let result;
+  
+  if (importType === "b2b-outstanding") {
+    // We will inject the new parser service later
+    result = await customerService.previewB2BOutstandingImport(
+      req.workspaceId,
+      req.companyId,
+      req.file.buffer
+    );
+  } else {
+    // Default to B2B/B2C logic
+    result = await customerService.previewImport(
+      req.workspaceId,
+      req.companyId,
+      req.file.buffer
+    );
+  }
+  
   return res.status(200).json(new ApiResponse(200, "Preview generated successfully", result));
 });
 
 export const confirmImport = asyncHandler(async (req, res) => {
-  const result = await customerService.confirmImport(
-    req.workspaceId,
-    req.companyId,
-    req.user._id,
-    req.body.customers
-  );
+  const importType = req.body.importType || "b2b";
+  let result;
+  
+  if (importType === "b2b-outstanding") {
+    result = await customerService.confirmB2BOutstandingImport(
+      req.workspaceId,
+      req.companyId,
+      req.user._id,
+      req.body.customers
+    );
+  } else {
+    result = await customerService.confirmImport(
+      req.workspaceId,
+      req.companyId,
+      req.user._id,
+      req.body.customers
+    );
+  }
+  
   return res.status(200).json(new ApiResponse(200, "Customers imported successfully", result));
 });
