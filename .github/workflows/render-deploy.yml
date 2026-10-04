@@ -1,68 +1,31 @@
-name: PharmaERP Render Deploy
+name: Deploy Development
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Select environment"
-        required: true
-        type: choice
-        options:
-          - development
-          - uat
-          - production
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.environment }}
+    name: Deploy Development to Render
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to Render
+      - name: Trigger Render deployment
         env:
-          DEVELOPMENT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEVELOPMENT }}
-          UAT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_UAT }}
-          PRODUCTION_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION }}
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEVELOPMENT }}
         run: |
-          case "${{ inputs.environment }}" in
-            development)
-              HOOK="$DEVELOPMENT_HOOK"
-              BRANCH="develop"
-              ;;
-
-            uat)
-              HOOK="$UAT_HOOK"
-              BRANCH="uat"
-              ;;
-
-            production)
-              HOOK="$PRODUCTION_HOOK"
-              BRANCH="main"
-              ;;
-
-            *)
-              echo "Invalid environment"
-              exit 1
-              ;;
-          esac
-
-          if [ -z "$HOOK" ]; then
-            echo "Render deploy hook is not configured."
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "❌ Development Render deploy hook is not configured"
             exit 1
           fi
 
-          echo "======================================"
-          echo "PharmaERP Render Deployment"
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Branch:      $BRANCH"
-          echo "======================================"
+          echo "🚀 Triggering Development deployment..."
 
           curl \
             --fail \
             --silent \
             --show-error \
             --request POST \
-            "$HOOK"
+            "$RENDER_DEPLOY_HOOK"
 
           echo ""
-          echo "Render deployment triggered successfully."
+          echo "✅ Development deployment triggered successfully"
