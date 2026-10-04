@@ -612,7 +612,7 @@ const previewB2BOutstandingImport = async (workspaceId, companyId, fileBuffer) =
     };
   });
 
-  return previewData.slice(0, 100);
+  return previewData;
 };
 
 const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, customersData) => {
@@ -634,21 +634,21 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
           name: { $regex: new RegExp("^" + data.name + "$", "i") },
           customerType: "b2b",
           isDeleted: false
-        }, { session });
+        }).session(session);
 
         if (!customer) {
           
-          const [newCustomer] = await Customer.create([{ 
+          const newCustomer = new Customer({
             workspaceId,
             companyId,
             customerType: "b2b",
             name: data.name,
-            
             status: CUSTOMER_STATUS.ACTIVE,
             createdBy: userId,
             openingBalance: 0,
             openingBalanceType: "dr"
-           }], { session });
+          });
+          await newCustomer.save({ session });
           customer = newCustomer;
         }
 
