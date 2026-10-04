@@ -119,3 +119,25 @@ export const getCustomerSales = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Customer sales fetched successfully", salesResult));
 });
+
+export const previewImport = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json(new ApiResponse(400, "Excel file is required"));
+  }
+  const result = await customerService.previewImport(
+    req.workspaceId,
+    req.companyId,
+    req.file.buffer
+  );
+  return res.status(200).json(new ApiResponse(200, "Preview generated successfully", result));
+});
+
+export const confirmImport = asyncHandler(async (req, res) => {
+  const result = await customerService.confirmImport(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    req.body.customers
+  );
+  return res.status(200).json(new ApiResponse(200, "Customers imported successfully", result));
+});
