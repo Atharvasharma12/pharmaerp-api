@@ -181,7 +181,12 @@ const deleteCustomerById = async (customerId, companyId, workspaceId, deletedBy)
   );
 };
 
+const insertManyCustomers = async (payloads) => {
+  return Customer.insertMany(payloads, { ordered: false });
+};
+
 export default {
+  insertManyCustomers,
   findCustomerById,
   findCustomerByIdCompanyAndWorkspace,
   findCustomerByCode,
