@@ -1,61 +1,47 @@
-name: PharmaERP Render Deploy
+name: Deploy PharmaERP to Render
 
 on:
   workflow_dispatch:
-    inputs:
-      environment:
-        description: "Select environment"
-        required: true
-        type: choice
-        options:
-          - development
-          - uat
-          - production
 
 jobs:
   deploy:
-    name: Deploy ${{ inputs.environment }}
+    name: Deploy to Render
     runs-on: ubuntu-latest
 
     steps:
-      - name: Deploy to Render
+      - name: Trigger Render deployment
         env:
           DEVELOPMENT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEVELOPMENT }}
           UAT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_UAT }}
           PRODUCTION_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION }}
         run: |
-          case "${{ inputs.environment }}" in
-            development)
+          case "${GITHUB_REF_NAME}" in
+            develop)
+              echo "🚀 Deploying Development..."
               HOOK="$DEVELOPMENT_HOOK"
-              BRANCH="develop"
               ;;
 
             uat)
+              echo "🚀 Deploying UAT..."
               HOOK="$UAT_HOOK"
-              BRANCH="uat"
               ;;
 
-            production)
+            main)
+              echo "🚀 Deploying Production..."
               HOOK="$PRODUCTION_HOOK"
-              BRANCH="main"
               ;;
 
             *)
-              echo "Invalid environment"
+              echo "❌ Unsupported branch: ${GITHUB_REF_NAME}"
+              echo "Allowed branches: develop, uat, main"
               exit 1
               ;;
           esac
 
           if [ -z "$HOOK" ]; then
-            echo "Render deploy hook is not configured."
+            echo "❌ Render deploy hook is not configured"
             exit 1
           fi
-
-          echo "======================================"
-          echo "PharmaERP Render Deployment"
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Branch:      $BRANCH"
-          echo "======================================"
 
           curl \
             --fail \
@@ -65,4 +51,4 @@ jobs:
             "$HOOK"
 
           echo ""
-          echo "Render deployment triggered successfully."
+          echo "✅ Render deployment triggered successfully"
