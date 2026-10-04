@@ -10,6 +10,7 @@ import branchRepository from "../../../organization/branches/repositories/branch
 import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
 import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
+import Customer from "../models/customer.model.js";
 import Batch from "../../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
 import accountRepository from "../../../finance/chart-of-accounts/repositories/account.repository.js";
@@ -611,7 +612,7 @@ const previewB2BOutstandingImport = async (workspaceId, companyId, fileBuffer) =
     };
   });
 
-  return previewData;
+  return previewData.slice(0, 100);
 };
 
 const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, customersData) => {
@@ -627,27 +628,28 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
     for (const data of customersData) {
       try {
         // 1. Find or create customer
-        let customer = await customerRepository.findOne({
+        let customer = await Customer.findOne({
           workspaceId,
           companyId,
-          displayName: { $regex: new RegExp("^" + data.name + "$", "i") },
+          name: { $regex: new RegExp("^" + data.name + "$", "i") },
           customerType: "b2b",
           isDeleted: false
         }, { session });
 
         if (!customer) {
-          const newCode = await customerRepository.generateNextCustomerCode(companyId, workspaceId);
-          customer = await customerRepository.create({
+          
+          const [newCustomer] = await Customer.create([{ 
             workspaceId,
             companyId,
             customerType: "b2b",
-            displayName: data.name,
-            customerCode: newCode,
+            name: data.name,
+            
             status: CUSTOMER_STATUS.ACTIVE,
             createdBy: userId,
             openingBalance: 0,
             openingBalanceType: "dr"
-          }, { session });
+           }], { session });
+          customer = newCustomer;
         }
 
         // 2. Accumulate outstanding balance on the customer
