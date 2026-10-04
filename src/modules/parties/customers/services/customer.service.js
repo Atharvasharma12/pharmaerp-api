@@ -622,42 +622,67 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
   let errors = [];
 
   try {
-    // We will do customer creation / lookup and invoice creation one by one for simplicity and correctness
-    for (const data of customersData) {
-      session.startTransaction();
-      try {
-        // 1. Find or create customer
-        let customer = await Customer.findOne({
+    session.startTransaction();
+
+    // 1. Get unique customer names from input
+    const uniqueNames = [...new Set(customersData.map(d => (d.name || "").trim()))].filter(Boolean);
+    
+    // 2. Fetch all existing wholesale customers for this company to avoid N+1 queries
+    const existingCustomers = await Customer.find({
+      workspaceId,
+      companyId,
+      customerType: "wholesale",
+      isDeleted: false
+    }).session(session);
+
+    const existingNamesMap = new Map();
+    for (const c of existingCustomers) {
+      existingNamesMap.set(c.name.toLowerCase(), c);
+    }
+
+    // 3. Prepare new customers that don't exist
+    const newCustomersToInsert = [];
+    for (const name of uniqueNames) {
+      if (!existingNamesMap.has(name.toLowerCase())) {
+        newCustomersToInsert.push({
           workspaceId,
           companyId,
-          name: { $regex: new RegExp("^" + data.name + "$", "i") },
           customerType: "wholesale",
-          isDeleted: false
-        }).session(session);
+          name: name,
+          status: CUSTOMER_STATUS.ACTIVE,
+          createdBy: userId,
+          openingBalance: 0,
+          openingBalanceType: "dr"
+        });
+      }
+    }
 
-        if (!customer) {
-          
-          const newCustomer = new Customer({
-            workspaceId,
-            companyId,
-            customerType: "wholesale",
-            name: data.name,
-            status: CUSTOMER_STATUS.ACTIVE,
-            createdBy: userId,
-            openingBalance: 0,
-            openingBalanceType: "dr"
-          });
-          await newCustomer.save({ session });
-          customer = newCustomer;
-        }
+    // 4. Bulk insert new customers
+    if (newCustomersToInsert.length > 0) {
+      const insertedCustomers = await Customer.insertMany(newCustomersToInsert, { session });
+      for (const c of insertedCustomers) {
+        existingNamesMap.set(c.name.toLowerCase(), c);
+      }
+    }
 
-        // 2. Accumulate outstanding balance on the customer
-        customer.openingBalance = (customer.openingBalance || 0) + data.openingBalance;
-        customer.openingBalanceType = "dr";
-        await customer.save({ session });
+    // 5. Prepare bulk operations for invoices and balance updates
+    const invoicesToInsert = [];
+    const customerUpdatesMap = new Map(); // customerId -> additional balance
 
-        // 3. Create historical Sale Bill (Credit)
-        const invoiceData = {
+    for (const data of customersData) {
+      const customerName = (data.name || "").trim().toLowerCase();
+      const customer = existingNamesMap.get(customerName);
+      
+      if (!customer) {
+         failed++;
+         errors.push(`Row with Invoice ${data.invoiceNumber}: Customer not found`);
+         continue;
+      }
+
+      const cid = customer._id.toString();
+      customerUpdatesMap.set(cid, (customerUpdatesMap.get(cid) || 0) + (data.openingBalance || 0));
+
+      invoicesToInsert.push({
           workspaceId,
           companyId,
           customerId: customer._id,
@@ -665,35 +690,44 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
           date: new Date(data.invoiceDate),
           paymentMethod: "Credit",
           status: data.openingBalance > 0 && data.openingBalance < data.billAmount ? "Partial" : (data.openingBalance > 0 ? "Credit" : "Paid"),
-          grandTotal: data.billAmount,
-          subtotal: data.billAmount, // adding subtotal for completeness
+          grandTotal: data.billAmount || 0,
+          subtotal: data.billAmount || 0,
           createdBy: userId,
           items: [{
              itemName: "Historical Outstanding",
              qty: 1,
-             rate: data.billAmount,
-             amount: data.billAmount
+             rate: data.billAmount || 0,
+             amount: data.billAmount || 0
           }]
-        };
-        
-        const invoice = new SalesInvoice(invoiceData);
-        await invoice.save({ session });
-        
-        await session.commitTransaction();
-        successful++;
-      } catch (err) {
-        await session.abortTransaction();
-        failed++;
-        errors.push(`Row with Invoice ${data.invoiceNumber}: ${err.message}`);
+      });
+    }
+
+    // 6. Execute bulk operations
+    if (customerUpdatesMap.size > 0) {
+      const bulkOps = [];
+      for (const [cid, additionalBalance] of customerUpdatesMap.entries()) {
+        bulkOps.push({
+          updateOne: {
+            filter: { _id: cid },
+            update: { 
+              $inc: { openingBalance: additionalBalance },
+              $set: { openingBalanceType: "dr" }
+            }
+          }
+        });
       }
+      await Customer.bulkWrite(bulkOps, { session });
     }
 
-    if (failed > 0 && successful === 0) {
-      throw new Error("All rows failed to import: " + errors.join("; "));
+    if (invoicesToInsert.length > 0) {
+      await SalesInvoice.insertMany(invoicesToInsert, { session });
+      successful = invoicesToInsert.length;
     }
 
+    await session.commitTransaction();
     return { successful, failed, errors };
   } catch (error) {
+    await session.abortTransaction();
     throw new ApiError(500, "Import confirmation failed: " + error.message);
   } finally {
     session.endSession();
