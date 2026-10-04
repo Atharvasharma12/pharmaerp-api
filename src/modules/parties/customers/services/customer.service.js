@@ -1,4 +1,7 @@
 import xlsx from "xlsx";
+import { parseB2BOutstandingExcel } from "./b2bOutstandingParser.service.js";
+import SalesInvoice from "../../../sales/invoices/models/invoice.model.js";
+
 
 import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
@@ -562,9 +565,145 @@ const confirmImport = async (workspaceId, companyId, userId, customersData) => {
   return results;
 };
 
+
+const previewB2BOutstandingImport = async (workspaceId, companyId, fileBuffer) => {
+  const { reportDate, invoices } = parseB2BOutstandingExcel(fileBuffer);
+  
+  if (!invoices || invoices.length === 0) {
+    throw new ApiError(400, "No valid invoices found in the Excel file.");
+  }
+
+  // To check duplicates efficiently, fetch all existing invoice numbers for this company
+  const existingInvoices = await SalesInvoice.find({
+    workspaceId,
+    companyId,
+    isDeleted: false
+  }).select('invoiceNo').lean();
+  
+  const existingInvoiceSet = new Set(existingInvoices.map(i => i.invoiceNo));
+
+  const previewData = invoices.map((inv) => {
+    const errors = [];
+    
+    if (!inv.invoiceNumber) errors.push("Invoice number is missing");
+    if (!inv.invoiceDate) errors.push("Invoice date is missing/invalid");
+    if (isNaN(inv.billAmount)) errors.push("Bill amount is invalid");
+    if (isNaN(inv.outstandingAmount)) errors.push("Outstanding amount is invalid");
+    if (!inv.customerName) errors.push("Customer name is missing");
+
+    if (existingInvoiceSet.has(inv.invoiceNumber)) {
+      errors.push("Invoice number already exists in the system (Already Imported)");
+    }
+
+    return {
+      rowNumber: inv.rowNumber,
+      isValid: errors.length === 0,
+      errors,
+      data: {
+        name: inv.customerName,
+        invoiceNumber: inv.invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        billAmount: inv.billAmount,
+        openingBalance: inv.outstandingAmount,
+        openingBalanceType: "dr",
+        dueDays: inv.dueDays
+      }
+    };
+  });
+
+  return previewData;
+};
+
+const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, customersData) => {
+  const session = await mongoose.startSession();
+  let successful = 0;
+  let failed = 0;
+  let errors = [];
+
+  try {
+    session.startTransaction();
+    
+    // We will do customer creation / lookup and invoice creation one by one for simplicity and correctness
+    for (const data of customersData) {
+      try {
+        // 1. Find or create customer
+        let customer = await customerRepository.findOne({
+          workspaceId,
+          companyId,
+          displayName: { $regex: new RegExp("^" + data.name + "$", "i") },
+          customerType: "b2b",
+          isDeleted: false
+        }, { session });
+
+        if (!customer) {
+          const newCode = await customerRepository.generateNextCustomerCode(companyId, workspaceId);
+          customer = await customerRepository.create({
+            workspaceId,
+            companyId,
+            customerType: "b2b",
+            displayName: data.name,
+            customerCode: newCode,
+            status: CUSTOMER_STATUS.ACTIVE,
+            createdBy: userId,
+            openingBalance: 0,
+            openingBalanceType: "dr"
+          }, { session });
+        }
+
+        // 2. Accumulate outstanding balance on the customer
+        customer.openingBalance = (customer.openingBalance || 0) + data.openingBalance;
+        customer.openingBalanceType = "dr";
+        await customer.save({ session });
+
+        // 3. Create historical Sale Bill (Credit)
+        const invoiceData = {
+          workspaceId,
+          companyId,
+          customerId: customer._id,
+          invoiceNo: data.invoiceNumber,
+          date: new Date(data.invoiceDate),
+          paymentMethod: "Credit",
+          status: data.openingBalance > 0 && data.openingBalance < data.billAmount ? "Partial" : (data.openingBalance > 0 ? "Credit" : "Paid"),
+          grandTotal: data.billAmount,
+          subtotal: data.billAmount, // adding subtotal for completeness
+          createdBy: userId,
+          items: [{
+             itemName: "Historical Outstanding",
+             qty: 1,
+             rate: data.billAmount,
+             amount: data.billAmount
+          }]
+        };
+        
+        const invoice = new SalesInvoice(invoiceData);
+        await invoice.save({ session });
+        
+        successful++;
+      } catch (err) {
+        failed++;
+        errors.push(`Row with Invoice ${data.invoiceNumber}: ${err.message}`);
+      }
+    }
+
+    if (failed > 0 && successful === 0) {
+      throw new Error("All rows failed to import: " + errors.join("; "));
+    }
+
+    await session.commitTransaction();
+    return { successful, failed, errors };
+  } catch (error) {
+    await session.abortTransaction();
+    throw new ApiError(500, "Import confirmation failed: " + error.message);
+  } finally {
+    session.endSession();
+  }
+};
+
 export default {
   previewImport,
   confirmImport,
+  previewB2BOutstandingImport,
+  confirmB2BOutstandingImport,
   createCustomer,
   getCustomers,
   getCustomerById,
