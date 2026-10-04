@@ -622,17 +622,16 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
   let errors = [];
 
   try {
-    session.startTransaction();
-    
     // We will do customer creation / lookup and invoice creation one by one for simplicity and correctness
     for (const data of customersData) {
+      session.startTransaction();
       try {
         // 1. Find or create customer
         let customer = await Customer.findOne({
           workspaceId,
           companyId,
           name: { $regex: new RegExp("^" + data.name + "$", "i") },
-          customerType: "b2b",
+          customerType: "wholesale",
           isDeleted: false
         }).session(session);
 
@@ -641,7 +640,7 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
           const newCustomer = new Customer({
             workspaceId,
             companyId,
-            customerType: "b2b",
+            customerType: "wholesale",
             name: data.name,
             status: CUSTOMER_STATUS.ACTIVE,
             createdBy: userId,
@@ -680,8 +679,10 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
         const invoice = new SalesInvoice(invoiceData);
         await invoice.save({ session });
         
+        await session.commitTransaction();
         successful++;
       } catch (err) {
+        await session.abortTransaction();
         failed++;
         errors.push(`Row with Invoice ${data.invoiceNumber}: ${err.message}`);
       }
@@ -691,10 +692,8 @@ const confirmB2BOutstandingImport = async (workspaceId, companyId, userId, custo
       throw new Error("All rows failed to import: " + errors.join("; "));
     }
 
-    await session.commitTransaction();
     return { successful, failed, errors };
   } catch (error) {
-    await session.abortTransaction();
     throw new ApiError(500, "Import confirmation failed: " + error.message);
   } finally {
     session.endSession();
