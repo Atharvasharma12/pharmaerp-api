@@ -1,0 +1,54 @@
+name: Deploy PharmaERP to Render
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Render
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render deployment
+        env:
+          DEVELOPMENT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_DEVELOPMENT }}
+          UAT_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_UAT }}
+          PRODUCTION_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_PRODUCTION }}
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            develop)
+              echo "🚀 Deploying Development..."
+              HOOK="$DEVELOPMENT_HOOK"
+              ;;
+
+            uat)
+              echo "🚀 Deploying UAT..."
+              HOOK="$UAT_HOOK"
+              ;;
+
+            main)
+              echo "🚀 Deploying Production..."
+              HOOK="$PRODUCTION_HOOK"
+              ;;
+
+            *)
+              echo "❌ Unsupported branch: ${GITHUB_REF_NAME}"
+              echo "Allowed branches: develop, uat, main"
+              exit 1
+              ;;
+          esac
+
+          if [ -z "$HOOK" ]; then
+            echo "❌ Render deploy hook is not configured"
+            exit 1
+          fi
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --request POST \
+            "$HOOK"
+
+          echo ""
+          echo "✅ Render deployment triggered successfully"
