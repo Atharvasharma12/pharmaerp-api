@@ -537,6 +537,7 @@ const confirmImport = async (workspaceId, companyId, userId, customersData) => {
     errors: []
   };
 
+  console.log(customersData);
   try {
     const payloads = customersData.map(customerData => ({
       ...customerData,

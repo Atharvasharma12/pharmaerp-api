@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import supplierRepository from "../repositories/supplier.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
@@ -45,6 +46,44 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
     }
   }
 
+  
+  const mongoose = (await import('mongoose')).default;
+  const AccountGroup = mongoose.model("AccountGroup");
+  const Account = mongoose.model("Account");
+
+  let creditorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_CREDITORS" }) 
+                    || await AccountGroup.findOne({ workspaceId, companyId, groupName: "Sundry Creditors" });
+  if (!creditorsGroup) {
+      const currentLiabilities = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "CURRENT_LIABILITIES" }) || await AccountGroup.findOne({ workspaceId, companyId, groupName: /Current Liabilit/i });
+      if (currentLiabilities) {
+          creditorsGroup = await AccountGroup.create({
+              workspaceId,
+              companyId,
+              groupName: "Sundry Creditors",
+              groupCode: "SUNDRY_CREDITORS",
+              parentGroupId: currentLiabilities._id,
+              isSystemGroup: true,
+              createdBy: userId,
+          });
+      }
+  }
+
+  const accCode = supplierCode ? `SUP-${supplierCode}` : `SUP-${Date.now()}`;
+  const ledgerAccount = await Account.create({
+    workspaceId,
+    companyId,
+    accountCode: accCode,
+    accountName: `${businessName} - Supplier`,
+    accountGroupId: creditorsGroup?._id,
+    accountNature: "LIABILITY",
+    accountCategory: "SUPPLIER",
+    openingBalance: openingBalance || 0,
+    openingBalanceType: openingBalanceType || "cr",
+    status: "active",
+    isSystemAccount: false,
+    createdBy: userId,
+  });
+
   const supplier = await supplierRepository.createSupplier({
     workspaceId,
     companyId,
@@ -65,8 +104,10 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
     openingBalanceType,
     notes,
     status,
+    ledgerAccountId: ledgerAccount._id,
     createdBy: userId,
   });
+
 
   return supplier.toSafeObject();
 };
@@ -234,6 +275,8 @@ const getSupplierLedger = async (supplierId, companyId, workspaceId, query = {})
   return ledgerData;
 };
 
+import Ledger from "../../../finance/ledger/models/ledger.model.js";
+
 const getSupplierOutstanding = async (supplierId, companyId, workspaceId) => {
   const supplier = await getSupplierById(supplierId, companyId, workspaceId);
 
@@ -244,18 +287,46 @@ const getSupplierOutstanding = async (supplierId, companyId, workspaceId) => {
     };
   }
 
-  const lastEntry = await ledgerRepository.findLastLedgerEntry(workspaceId, companyId, supplier.ledgerAccountId);
+  const aggregate = await Ledger.aggregate([
+    {
+      $match: {
+        accountId: supplier.ledgerAccountId,
+        companyId: new mongoose.Types.ObjectId(companyId),
+        workspaceId: new mongoose.Types.ObjectId(workspaceId),
+      },
+    },
+    {
+      $group: {
+        _id: null,
+        totalDebit: { $sum: "$debit" },
+        totalCredit: { $sum: "$credit" },
+      },
+    },
+  ]);
 
-  if (lastEntry) {
-    return {
-      outstandingAmount: Math.abs(lastEntry.runningBalance || 0),
-      balanceType: (lastEntry.runningBalance >= 0) ? "cr" : "dr", // for liability (supplier), >0 is CR
-    };
+  const transDebit = aggregate[0]?.totalDebit || 0;
+  const transCredit = aggregate[0]?.totalCredit || 0;
+
+  const opDebit = supplier.openingBalanceType === "dr" ? (supplier.openingBalance || 0) : 0;
+  const opCredit = supplier.openingBalanceType === "cr" ? (supplier.openingBalance || 0) : 0;
+
+  const totalDebit = transDebit + opDebit;
+  const totalCredit = transCredit + opCredit;
+
+  let amt = 0;
+  let type = "cr";
+
+  if (totalCredit >= totalDebit) {
+    amt = totalCredit - totalDebit;
+    type = "cr";
+  } else {
+    amt = totalDebit - totalCredit;
+    type = "dr";
   }
 
   return {
-    outstandingAmount: supplier.openingBalance || 0,
-    balanceType: supplier.openingBalanceType || "cr",
+    outstandingAmount: amt,
+    balanceType: type,
   };
 };
 

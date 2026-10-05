@@ -57,7 +57,11 @@ const postJournalVoucher = async (voucherId, companyId, workspaceId, userId, opt
       }).session(session),
       
       Ledger.aggregate([
-        { $match: { accountId: { $in: accountIds }, companyId, workspaceId } },
+        { $match: { 
+          accountId: { $in: accountIds.map(id => new mongoose.Types.ObjectId(id)) }, 
+          companyId: new mongoose.Types.ObjectId(companyId), 
+          workspaceId: new mongoose.Types.ObjectId(workspaceId) 
+        } },
         { $sort: { voucherDate: -1, createdAt: -1 } },
         {
           $group: {
