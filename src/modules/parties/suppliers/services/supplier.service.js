@@ -413,18 +413,18 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
     return obj;
   }).filter(row => Object.keys(row).length > 0);
 
-  const existingSuppliers = await supplierRepository.getSuppliers(
+  const Supplier = mongoose.model("Supplier");
+  const existingSuppliers = await Supplier.find({
     workspaceId,
     companyId,
-    {},
-    { limit: 100000 }
-  );
+    isDeleted: false
+  }).select("mobile email gstNumber panNumber businessName").lean();
   
-  const existingMobilePhones = new Set(existingSuppliers.suppliers.map(s => s.mobile).filter(Boolean));
-  const existingEmails = new Set(existingSuppliers.suppliers.map(s => s.email).filter(Boolean));
-  const existingGSTs = new Set(existingSuppliers.suppliers.map(s => s.gstNumber).filter(Boolean));
-  const existingPANs = new Set(existingSuppliers.suppliers.map(s => s.panNumber).filter(Boolean));
-  const existingNames = new Set(existingSuppliers.suppliers.map(s => s.businessName.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
+  const existingMobilePhones = new Set(existingSuppliers.map(s => s.mobile).filter(Boolean));
+  const existingEmails = new Set(existingSuppliers.map(s => s.email).filter(Boolean));
+  const existingGSTs = new Set(existingSuppliers.map(s => s.gstNumber).filter(Boolean));
+  const existingPANs = new Set(existingSuppliers.map(s => s.panNumber).filter(Boolean));
+  const existingNames = new Set(existingSuppliers.map(s => s.businessName?.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
 
   const parsedRows = data.map((lowerRow, index) => {
     const businessName = String(lowerRow["name"] || lowerRow["ledger name"] || lowerRow["party name"] || lowerRow["ledger"] || "").trim();
@@ -489,34 +489,54 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
       errors.push("Business Name is required");
     } else if (existingNames.has(normalizedName)) {
       errors.push("Supplier with a similar name already exists");
+    } else {
+      existingNames.add(normalizedName);
     }
     
     if (mobile) {
-      if (!/^[6-9][0-9]{9}$/.test(mobile)) errors.push("Invalid mobile number format");
-      else if (existingMobilePhones.has(mobile)) errors.push("Mobile number already exists in workspace");
+      if (!/^[6-9][0-9]{9}$/.test(mobile)) {
+        errors.push("Invalid mobile number format");
+      } else if (existingMobilePhones.has(mobile)) {
+        errors.push("Mobile number already exists in workspace");
+      } else {
+        existingMobilePhones.add(mobile);
+      }
     }
 
     if (email) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Invalid email format");
-      else if (existingEmails.has(email)) errors.push("Email already exists in workspace");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errors.push("Invalid email format");
+      } else if (existingEmails.has(email)) {
+        errors.push("Email already exists in workspace");
+      } else {
+        existingEmails.add(email);
+      }
     }
 
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) errors.push("Invalid GST Number format");
-      else if (existingGSTs.has(gstNumber)) errors.push("GST Number already exists in workspace");
-      else {
+      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) {
+        errors.push("Invalid GST Number format");
+      } else if (existingGSTs.has(gstNumber)) {
+        errors.push("GST Number already exists in workspace");
+      } else {
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
           state = GST_STATE_CODES[stateCode];
         }
+        existingGSTs.add(gstNumber);
       }
     }
 
     if (panNumber) {
-      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) errors.push("Invalid PAN Number format");
-      else if (existingPANs.has(panNumber)) errors.push("PAN Number already exists in workspace");
+      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) {
+        errors.push("Invalid PAN Number format");
+      } else if (existingPANs.has(panNumber)) {
+        errors.push("PAN Number already exists in workspace");
+      } else {
+        existingPANs.add(panNumber);
+      }
     }
 
     return {
