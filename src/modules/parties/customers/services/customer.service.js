@@ -392,18 +392,18 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
     return obj;
   }).filter(row => Object.keys(row).length > 0);
 
-  const existingCustomers = await customerRepository.getCustomers(
+  const Customer = mongoose.model("Customer");
+  const existingCustomers = await Customer.find({
     workspaceId,
     companyId,
-    {},
-    { limit: 100000 }
-  );
+    isDeleted: false
+  }).select("mobile email gstNumber panNumber name").lean();
   
-  const existingMobilePhones = new Set(existingCustomers.customers.map(s => s.mobile).filter(Boolean));
-  const existingEmails = new Set(existingCustomers.customers.map(s => s.email).filter(Boolean));
-  const existingGSTs = new Set(existingCustomers.customers.map(s => s.gstNumber).filter(Boolean));
-  const existingPANs = new Set(existingCustomers.customers.map(s => s.panNumber).filter(Boolean));
-  const existingNames = new Set(existingCustomers.customers.map(s => s.name.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
+  const existingMobilePhones = new Set(existingCustomers.map(s => s.mobile).filter(Boolean));
+  const existingEmails = new Set(existingCustomers.map(s => s.email).filter(Boolean));
+  const existingGSTs = new Set(existingCustomers.map(s => s.gstNumber).filter(Boolean));
+  const existingPANs = new Set(existingCustomers.map(s => s.panNumber).filter(Boolean));
+  const existingNames = new Set(existingCustomers.map(s => s.name?.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
 
   const parsedRows = data.map((lowerRow, index) => {
     const businessName = String(lowerRow["name"] || lowerRow["customer name"] || lowerRow["customer"] || lowerRow["supplier name"] || lowerRow["ledger name"] || lowerRow["party name"] || lowerRow["ledger"] || "").trim();
