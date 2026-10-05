@@ -461,9 +461,25 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId, user
       lines.push({
         accountId: supplier.ledgerAccountId.toString(),
         debit: 0,
-        credit: bill.grandTotal,
+        credit: bill.amountDue !== undefined ? bill.amountDue : bill.grandTotal,
         narration: `Purchase from supplier for bill ${bill.purchaseBillNo}`,
       });
+
+      if (bill.amountPaid && bill.amountPaid > 0) {
+        let paymentAccount = await Account.findOne({ workspaceId, companyId, accountCode: "CASH" }) 
+                          || await Account.findOne({ workspaceId, companyId, accountCategory: "CASH" });
+        if (paymentAccount) {
+          lines.push({
+            accountId: paymentAccount._id.toString(),
+            debit: 0,
+            credit: bill.amountPaid,
+            narration: `Advance payment for bill ${bill.purchaseBillNo}`,
+          });
+        } else {
+          // Fallback to avoid out-of-balance if Cash account is missing
+          lines[lines.length - 1].credit += bill.amountPaid;
+        }
+      }
 
       // Handle small rounding differences
       let totalDebit = lines.reduce((acc, l) => acc + l.debit, 0);

@@ -6,7 +6,6 @@ const createLedgerEntry = async (payload, options = {}) => {
   const [entry] = await Ledger.create([payload], {
     session: options.session || null,
   });
-  import('fs').then(fs => fs.appendFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-timing.txt', `Ledger.create took: ${Date.now() - t}ms\\n`));
   return entry;
 };
 
@@ -33,7 +32,6 @@ const findLastLedgerEntry = async (
     .sort({ voucherDate: -1, createdAt: -1 })
     .session(options.session || null);
   
-  import('fs').then(fs => fs.appendFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-timing.txt', `findLastLedgerEntry took: ${Date.now() - t}ms\\n`));
   return res;
 };
 
