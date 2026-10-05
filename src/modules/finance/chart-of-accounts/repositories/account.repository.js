@@ -74,7 +74,12 @@ const saveAccount = async (account) => {
   return account.save();
 };
 
-const getAccountsByIds = async (accountIds, companyId, workspaceId, options = {}) => {
+const getAccountsByIds = async (
+  accountIds,
+  companyId,
+  workspaceId,
+  options = {},
+) => {
   return Account.find({
     _id: { $in: accountIds },
     companyId,
@@ -115,7 +120,9 @@ const getAccounts = async (
   }
 
   if (filters.excludeCategories) {
-    const excludeArr = filters.excludeCategories.split(",").map(c => c.trim());
+    const excludeArr = filters.excludeCategories
+      .split(",")
+      .map((c) => c.trim());
     query.accountCategory = { $nin: excludeArr };
   }
 
@@ -134,24 +141,24 @@ const getAccounts = async (
     const allCashAccounts = await Account.find({
       companyId,
       isDeleted: false,
-      accountCategory: "CASH"
+      accountCategory: "CASH",
     }).select("_id");
-    const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
+    const allCashAccountIds = allCashAccounts.map((a) => a._id.toString());
 
     const BranchCash = mongoose.model("BranchCash");
     const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
     const validBranchCashAccounts = await BranchCash.find({
       companyId,
       isActive: true,
-      branchId: targetBranchId
+      branchId: targetBranchId,
     }).select("ledgerAccountId");
     const validLedgerIds = validBranchCashAccounts
-      .map(c => c.ledgerAccountId?.toString())
+      .map((c) => c.ledgerAccountId?.toString())
       .filter(Boolean);
 
     const invalidLedgerIds = allCashAccountIds
-      .filter(id => !validLedgerIds.includes(id))
-      .map(id => new mongoose.Types.ObjectId(id));
+      .filter((id) => !validLedgerIds.includes(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
 
     if (invalidLedgerIds.length > 0) {
       if (query._id) {

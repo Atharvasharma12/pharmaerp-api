@@ -1,5 +1,6 @@
 import { Shift } from "./shift.model.js";
-import { DayClosing } from "../day-closings/dayClosing.model.js";
+import { BusinessDay } from "../business-days/businessDay.model.js";
+import { getOpenBusinessDay } from "../business-days/businessDay.service.js";
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
 import branchCashService from "../../finance/treasury/cash-management/branch-cash/services/branchCash.service.js";
 import ApiError from "../../../utils/ApiError.js";
@@ -11,16 +12,20 @@ import branchCashRepository from "../../finance/treasury/cash-management/branch-
 export const openShift = async (data) => {
   const { workspaceId, companyId, branchId, date } = data;
 
-  // Ensure no open day closing for this date
-  const { dateFilter } = getBusinessDateRange(date);
-  const dayClosing = await DayClosing.findOne({ branchId, date: dateFilter, status: { $ne: "cancelled" } });
-  if (dayClosing) {
-    throw new ApiError(400, "A day closing process already exists for this date.");
+  // Guard 1: An OPEN Business Day must exist for this branch.
+  // A shift cannot be created without an active Business Day session.
+  const openDay = await getOpenBusinessDay(branchId);
+  if (!openDay) {
+    throw new ApiError(
+      400,
+      "No open Business Day found for this branch. " +
+      "Please open a Business Day first before starting a shift."
+    );
   }
 
-  // Ensure no currently open shift for this branch
-  const openShift = await Shift.findOne({ branchId, status: "open" });
-  if (openShift) {
+  // Guard 2: Ensure no currently open shift for this branch
+  const existingOpenShift = await Shift.findOne({ branchId, status: "open" });
+  if (existingOpenShift) {
     throw new ApiError(400, "An open shift already exists for this branch. Please close it first.");
   }
 
@@ -64,8 +69,16 @@ export const openShift = async (data) => {
 
   const shift = await Shift.create({
     ...data,
+    // Derive date from the active Business Day (not from user input)
+    date: openDay.businessDate,
+    businessDayId: openDay._id,
     openingFloatAmount,
     openingDenominations,
+  });
+
+  // Add this shift to the Business Day's shifts array
+  await BusinessDay.findByIdAndUpdate(openDay._id, {
+    $addToSet: { shifts: shift._id },
   });
 
   return shift;
@@ -164,8 +177,39 @@ export const closeShift = async (
   // Expected = Opening + Cash Sales + Deposits into Running − Withdrawals from Running
   const expectedCash = shift.openingFloatAmount + totalCashSales + totalManualDeposits - totalManualWithdrawalsFromRunning;
 
-  // ── Freeze excess cash into frozen reserve ───────────────────────────────
-  if (frozenAmount > 0 && shift.branchId) {
+  // ── Check for Denomination-wise Adjustment ───────────────────────────────
+  let isAdjusted = false;
+  let expectedDenominations = [];
+  let adjustedDenominations = [];
+  if (shift.branchId) {
+    const balance = await branchCashRepository.findBalanceByBranchId(shift.branchId, shift.companyId);
+    const runningDenoms = balance?.runningDenominations || [];
+    const expectedMap = new Map(runningDenoms.map(d => [Number(d.denomination), Number(d.quantity) || 0]));
+    const closingMap = new Map(closingDenominations.map(d => [Number(d.denomination), Number(d.count || d.quantity) || 0]));
+    
+    // Build expectedDenominations array
+    expectedDenominations = Array.from(expectedMap.entries()).map(([denom, count]) => ({
+      denomination: denom,
+      count: count,
+      amount: denom * count
+    })).filter(d => d.count > 0);
+
+    for (const d of [500, 200, 100, 50, 20, 10, 5, 2, 1]) {
+      const expCount = expectedMap.get(d) || 0;
+      const actCount = closingMap.get(d) || 0;
+      if (expCount !== actCount) {
+        isAdjusted = true;
+        adjustedDenominations.push({
+          denomination: d,
+          expectedCount: expCount,
+          actualCount: actCount
+        });
+      }
+    }
+  }
+
+  // ── Freeze excess cash into frozen reserve OR apply adjustment ──────────
+  if ((frozenAmount > 0 || isAdjusted) && shift.branchId) {
     try {
       await branchCashService.freezeAtShiftClose(
         shift.branchId.toString(),
@@ -175,15 +219,53 @@ export const closeShift = async (
         frozenDenominations,
         closingDenominations  // full counted denominations for carry-forward calculation
       );
-      // Log freeze event to frozenLedger for day-closing timeline
-      await branchCashService.pushFreezeAuditEntry(
-        shift.branchId.toString(),
-        shift.companyId.toString(),
-        { frozenAmount, shiftId: shift._id, userId },
-      );
+      
+      if (frozenAmount > 0) {
+        // Log freeze event to frozenLedger for day-closing timeline
+        await branchCashService.pushFreezeAuditEntry(
+          shift.branchId.toString(),
+          shift.companyId.toString(),
+          { frozenAmount, shiftId: shift._id, userId },
+        );
+      }
     } catch (freezeErr) {
       console.warn("[Shift] freezeAtShiftClose warning:", freezeErr.message);
       // Non-fatal if BranchCash hasn't been initialised yet (legacy data)
+    }
+  }
+
+  // ── Post Shift Adjustment (if adjusted) ────────────
+  const cashDifferenceAmount = totalCash - expectedCash;
+  if (isAdjusted && shift.branchId) {
+    try {
+      await branchCashService.postShiftAdjustment(
+        shift.workspaceId.toString(),
+        shift.companyId.toString(),
+        userId,
+        shift.branchId.toString(),
+        cashDifferenceAmount,
+        shift._id.toString()
+      );
+    } catch (adjErr) {
+      console.warn("[Shift] postShiftAdjustment warning:", adjErr.message);
+    }
+  }
+
+  // ── Capture Branch Cash Snapshot ─────────────────────────────────────────
+  let branchRunningCashAtClose = null;
+  let branchFrozenCashAtClose = null;
+  if (shift.branchId) {
+    try {
+      const finalBalance = await branchCashService.getByBranchId(
+        shift.branchId.toString(),
+        shift.companyId.toString()
+      );
+      if (finalBalance) {
+        branchRunningCashAtClose = finalBalance.runningCash || 0;
+        branchFrozenCashAtClose = finalBalance.frozenCash || 0;
+      }
+    } catch (err) {
+      console.warn("[Shift] Error capturing branch cash snapshot:", err.message);
     }
   }
 
@@ -191,9 +273,14 @@ export const closeShift = async (
   shift.expectedClosingCashAmount = expectedCash;
   shift.actualClosingCashAmount = totalCash;
   shift.closingDenominations = closingDenominations;
-  shift.cashDifferenceAmount = totalCash - expectedCash;
+  shift.expectedDenominations = expectedDenominations;
+  shift.adjustedDenominations = adjustedDenominations;
+  shift.cashDifferenceAmount = cashDifferenceAmount;
+  shift.isAdjusted = isAdjusted;
   shift.carryForwardAmount = safeCarry;
   shift.frozenAtClose = frozenAmount;
+  shift.branchRunningCashAtClose = branchRunningCashAtClose;
+  shift.branchFrozenCashAtClose = branchFrozenCashAtClose;
   shift.cashSalesTotal = totalCashSales; // persisted for day-closing aggregation
   // Kept for backward compat, zeroed since fund transfers are deprecated
   shift.totalFundWithdrawals = 0;

@@ -511,12 +511,28 @@ const freezeAtShiftClose = async (
   userId,
   frozenAmount,
   frozenDenominations = [],
-  allCountedDenominations = [],
+  allCountedDenominations = null,
   options = {},
 ) => {
   const { session } = options;
 
-  if (frozenAmount <= 0 && frozenDenominations.length === 0) return null;
+  if (frozenAmount <= 0 && frozenDenominations.length === 0) {
+    if (allCountedDenominations !== null) {
+      const runningCarryForward = allCountedDenominations.map(d => ({
+        denomination: Number(d.denomination),
+        quantity: Number(d.count || d.quantity) || 0
+      })).filter(d => d.quantity > 0);
+
+      return await branchCashRepository.setRunningDenominations(
+        branchId,
+        companyId,
+        runningCarryForward,
+        userId,
+        { session }
+      );
+    }
+    return null;
+  }
 
   const balance = await branchCashRepository.findBalanceByBranchId(
     branchId,
@@ -550,7 +566,7 @@ const freezeAtShiftClose = async (
       );
     }
 
-    if (allCountedDenominations.length > 0) {
+    if (allCountedDenominations !== null) {
       // Build running carry-forward = allCounted - frozen
       const countedMap = new Map();
       for (const d of allCountedDenominations) {
@@ -1164,6 +1180,111 @@ const withdrawCash = async (workspaceId, companyId, userId, payload) => {
   }
 };
 
+/**
+ * Post an adjustment (shortage/overage) during shift close.
+ * Creates a Journal Voucher to keep the ledger in sync with the physical cash.
+ */
+const postShiftAdjustment = async (
+  workspaceId,
+  companyId,
+  userId,
+  branchId,
+  differenceAmount,
+  shiftId,
+  options = {}
+) => {
+  const { session } = options;
+  if (differenceAmount === null || differenceAmount === undefined) return;
+
+  const isShortage = differenceAmount < 0;
+  const absAmount = Math.abs(differenceAmount);
+  
+  const branchCash = await branchCashRepository.findByBranchId(branchId, companyId, { session });
+  if (!branchCash?.ledgerAccountId) return;
+
+  let voucherId = null;
+  const narration = `Shift ${shiftId} Cash Adjustment: ${absAmount === 0 ? 'Denominations' : (isShortage ? 'Shortage' : 'Overage')}`;
+
+  if (absAmount > 0) {
+    const { default: journalVoucherRepository } = await import(
+      "../../../../journal-vouchers/repositories/journalVoucher.repository.js"
+    );
+    const { default: journalLineRepository } = await import(
+      "../../../../journal-vouchers/repositories/journalLine.repository.js"
+    );
+    const { default: journalPostingService } = await import(
+      "../../../../journal-vouchers/services/journalPosting.service.js"
+    );
+    const { default: voucherNumberService } = await import(
+      "../../../../journal-vouchers/services/voucherNumber.service.js"
+    );
+    const { VOUCHER_TYPE } = await import(
+      "../../../../journal-vouchers/constants/voucherType.constant.js"
+    );
+
+    // Use a system account for Cash Adjustment (EXPENSE)
+    const cashAdjustmentAccount = await findOrCreateSystemAccount(
+      workspaceId, companyId, userId,
+      "SYS-CASH-ADJ", "Cash Shortage/Overage", "EXPENSE", "EXPENSE",
+      "SYS-MISC-EXPENSE", "Miscellaneous Expenses", session,
+    );
+
+    const voucherNumber = await voucherNumberService.generateVoucherNumber(
+      companyId, workspaceId, VOUCHER_TYPE.JOURNAL, { session },
+    );
+
+    const voucher = await journalVoucherRepository.createVoucher(
+      {
+        workspaceId, companyId, voucherNumber,
+        voucherDate: new Date(), voucherType: VOUCHER_TYPE.JOURNAL,
+        narration,
+        totalDebit: absAmount, totalCredit: absAmount, createdBy: userId,
+      },
+      { session },
+    );
+
+    // If shortage (difference < 0): Debit Adjustment Expense, Credit Branch Cash (decreasing cash)
+    // If overage (difference > 0): Debit Branch Cash (increasing cash), Credit Adjustment Expense (decreasing expense / income)
+    const debitAccountId = isShortage ? cashAdjustmentAccount._id : branchCash.ledgerAccountId;
+    const creditAccountId = isShortage ? branchCash.ledgerAccountId : cashAdjustmentAccount._id;
+
+    await journalLineRepository.createLines(
+      [
+        { workspaceId, companyId, voucherId: voucher._id, accountId: debitAccountId, debit: absAmount, credit: 0, narration },
+        { workspaceId, companyId, voucherId: voucher._id, accountId: creditAccountId, debit: 0, credit: absAmount, narration },
+      ],
+      { session },
+    );
+
+    await journalPostingService.postJournalVoucher(
+      voucher._id, companyId, workspaceId, userId, { session },
+    );
+    voucherId = voucher._id;
+  }
+  
+  // Also create a CashTransaction record
+  const { default: CashTransaction } = await import("../../cash-transactions/models/cashTransaction.model.js");
+  const { CASH_TRANSACTION_TYPE, CASH_TRANSACTION_DIRECTION, CASH_TRANSACTION_STATUS } = await import("../../cash-transactions/constants/cashTransaction.constant.js");
+
+  await CashTransaction.create([{
+    workspaceId,
+    companyId,
+    branchId,
+    transactionNumber: `ADJ-${Date.now()}`,
+    transactionDate: new Date(),
+    cashPartition: "running",
+    transactionType: CASH_TRANSACTION_TYPE.ADJUSTMENT,
+    direction: isShortage ? CASH_TRANSACTION_DIRECTION.DEBIT : CASH_TRANSACTION_DIRECTION.CREDIT,
+    amount: absAmount,
+    narration,
+    status: CASH_TRANSACTION_STATUS.POSTED,
+    journalVoucherId: voucherId,
+    createdBy: userId,
+    postedAt: new Date(),
+    postedBy: userId
+  }], { session });
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default {
@@ -1176,6 +1297,7 @@ export default {
   deductFromFrozen,
   freezeAtShiftClose,
   pushFreezeAuditEntry,
+  postShiftAdjustment,
   // Manual operations
   manualDeposit,
   manualWithdraw,   // backward compat alias

@@ -1,7 +1,6 @@
 import asyncHandler from "../../../utils/asyncHandler.js";
 import ApiError from "../../../utils/ApiError.js";
 import { Shift } from "./shift.model.js";
-import { DayClosing } from "../day-closings/dayClosing.model.js";
 import { openShift as openShiftService, closeShift, cancelShift as cancelShiftService } from "./shift.service.js";
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
 import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTransfer.model.js";
@@ -16,7 +15,7 @@ export const createShift = asyncHandler(async (req, res, next) => {
   
   if (!branchId) return next(new ApiError(400, "Branch ID is missing in context"));
 
-  // Check by branchId only (not openedBy)
+  // Check by branchId only — ensure no shift is already open
   const existingOpenShift = await Shift.findOne({ branchId, status: "open" });
   if (existingOpenShift) {
     return next(new ApiError(400, "A shift is already open for this branch. Please close it first."));
@@ -28,19 +27,8 @@ export const createShift = asyncHandler(async (req, res, next) => {
     return next(new ApiError(400, "Branch cash must be initialized before opening a shift. Please go to Treasury > Branch Cash to initialize it."));
   }
 
-  // Handle date selection: default today, optionally tomorrow
-  const { canonicalDate, dateFilter, dateStr } = getBusinessDateRange(req.body.date);
-  
-  // Guard: no shift if that date already has a closed day closing
-  const existingDC = await DayClosing.findOne({
-    branchId,
-    date: dateFilter,
-    status: { $ne: "cancelled" }
-  });
-  if (existingDC) {
-    return next(new ApiError(400, `Day closing already done for ${dateStr}. Cannot open shift.`));
-  }
-
+  // NOTE: date and businessDayId are now resolved inside openShiftService
+  // from the active Business Day. We do not pass date from the request body.
   const now = new Date();
   const openPeriod = getTimePeriod(now);
 
@@ -51,7 +39,6 @@ export const createShift = asyncHandler(async (req, res, next) => {
     branchId,
     openedBy: req.user?._id,
     openedAt: now,
-    date: canonicalDate,
     openPeriod: openPeriod.id,
     shiftNo: `SHF-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 100)}`
   };

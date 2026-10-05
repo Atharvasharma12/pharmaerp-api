@@ -47,10 +47,11 @@ const bankDepositSlipSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Optional: links this slip to the day closing it was prepared within
-    dayClosingId: {
+    // Links this slip to the Business Day it was prepared within.
+    // Cannot create a slip without an open Business Day.
+    businessDayId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "DayClosing",
+      ref: "BusinessDay",
       default: null,
       index: true,
     },
@@ -300,8 +301,8 @@ bankDepositSlipSchema.index({
   isDeleted: 1,
 });
 
-// Day closing-linked slip lookup
-bankDepositSlipSchema.index({ dayClosingId: 1, status: 1, isDeleted: 1 });
+// Business Day-linked slip lookup
+bankDepositSlipSchema.index({ businessDayId: 1, status: 1, isDeleted: 1 });
 
 // Branch-level reporting
 bankDepositSlipSchema.index({

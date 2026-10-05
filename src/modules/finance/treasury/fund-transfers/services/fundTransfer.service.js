@@ -204,7 +204,6 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
     // 9. Auto-link to open shift / day closing and resolve branchId
     // Determine which cash account to use for shift detection (prefer FROM, fallback TO)
     let resolvedShiftId = payload.shiftId || null;
-    let resolvedDayClosingId = payload.dayClosingId || null;
     let resolvedBranchId = null;
 
     const primaryBranchId =
@@ -233,19 +232,21 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       }
     }
 
-    // If dayClosingId not explicitly provided, auto-detect draft day closing for this branch
-    if (!resolvedDayClosingId && resolvedBranchId) {
+    // If businessDayId not explicitly provided, auto-detect open Business Day for this branch
+    let resolvedBusinessDayId = payload.businessDayId || null;
+    if (!resolvedBusinessDayId && resolvedBranchId) {
       try {
-        const { DayClosing } = await import("../../../../operations/day-closings/dayClosing.model.js");
-        const draftDC = await DayClosing.findOne({
+        const { BusinessDay } = await import("../../../../operations/business-days/businessDay.model.js");
+        const openDay = await BusinessDay.findOne({
           companyId,
           workspaceId,
           branchId: resolvedBranchId,
-          status: "draft",
+          status: "open",
         }).select("_id").session(session);
-        if (draftDC) resolvedDayClosingId = draftDC._id;
-      } catch (dcErr) {
-        console.warn("[FundTransfer] Could not auto-link day closing:", dcErr.message);
+        if (openDay) resolvedBusinessDayId = openDay._id;
+      } catch (bdErr) {
+        // Non-fatal: fund transfer proceeds even if Business Day link fails
+        console.warn("[FundTransfer] Could not auto-link business day:", bdErr.message);
       }
     }
 
@@ -255,7 +256,7 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       companyId,
       branchId: resolvedBranchId,
       shiftId: resolvedShiftId,
-      dayClosingId: resolvedDayClosingId,
+      businessDayId: resolvedBusinessDayId,
       transferNumber,
       transferDate: new Date(transferDate),
       transferType,

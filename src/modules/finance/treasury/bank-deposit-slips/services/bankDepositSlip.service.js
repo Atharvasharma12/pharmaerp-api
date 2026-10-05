@@ -301,27 +301,36 @@ const createBankDepositSlip = async (
       session,
     );
 
-    // ── 8. Auto-link open day closing ────────────────────────────────────
-    let resolvedDayClosingId = payload.dayClosingId || null;
+    // ── 8. Auto-link open Business Day (required) ─────────────────────────
+    let resolvedBusinessDayId = payload.businessDayId || null;
 
-    if (!resolvedDayClosingId && branchId) {
+    if (!resolvedBusinessDayId && branchId) {
       try {
-        const { DayClosing } = await import(
-          "../../../../operations/day-closings/dayClosing.model.js"
+        const { BusinessDay } = await import(
+          "../../../../operations/business-days/businessDay.model.js"
         );
-        const activeDayClosing = await DayClosing.findOne({
+        const activeBusinessDay = await BusinessDay.findOne({
           companyId,
           workspaceId,
           branchId,
-          status: { $in: ["draft", "open"] },
+          status: "open",
         })
           .select("_id")
           .session(session);
-        if (activeDayClosing) resolvedDayClosingId = activeDayClosing._id;
-      } catch (dcErr) {
+        if (activeBusinessDay) {
+          resolvedBusinessDayId = activeBusinessDay._id;
+        } else {
+          throw new ApiError(
+            400,
+            "A Bank Deposit Slip can only be created during an open Business Day. " +
+            "Please open a Business Day for this branch first."
+          );
+        }
+      } catch (bdErr) {
+        if (bdErr instanceof ApiError) throw bdErr;
         console.warn(
-          "[BankDepositSlip] Could not auto-link day closing:",
-          dcErr.message,
+          "[BankDepositSlip] Could not auto-link business day:",
+          bdErr.message,
         );
       }
     }
@@ -332,7 +341,7 @@ const createBankDepositSlip = async (
         workspaceId,
         companyId,
         branchId,
-        dayClosingId: resolvedDayClosingId,
+        businessDayId: resolvedBusinessDayId,
         slipNumber,
         slipDate: new Date(slipDate),
         fromCashAccountId: null,      // deprecated — not set for new slips

@@ -26,6 +26,19 @@ const shiftSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+
+    /** The BusinessDay this shift belongs to.
+     *  Required for all NEW shifts. Null only on legacy migrated records. */
+    businessDayId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessDay",
+      default: null,
+      index: true,
+    },
+
+    /** Logical business date — derived from the parent BusinessDay.businessDate.
+     *  Always set from businessDay.businessDate at shift creation time.
+     *  Retained for backward-compatible queries (e.g. date-range reports). */
     date: {
       type: Date,
       required: true,
@@ -108,14 +121,40 @@ const shiftSchema = new mongoose.Schema(
         amount: { type: Number },
       }
     ],
+    expectedDenominations: [
+      {
+        denomination: { type: Number },
+        count: { type: Number },
+        amount: { type: Number },
+      }
+    ],
+    adjustedDenominations: [
+      {
+        denomination: { type: Number },
+        expectedCount: { type: Number },
+        actualCount: { type: Number },
+      }
+    ],
     cashDifferenceAmount: {
       type: Number,
       default: 0,
+    },
+    isAdjusted: {
+      type: Boolean,
+      default: false,
     },
     note: {
       type: String,
       trim: true,
       default: "",
+    },
+    branchRunningCashAtClose: {
+      type: Number,
+      default: null,
+    },
+    branchFrozenCashAtClose: {
+      type: Number,
+      default: null,
     },
 
     // Fund transfer totals — kept for backward compat but no longer updated
@@ -172,7 +211,7 @@ const shiftSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Ensure unique shift per branch per day
-shiftSchema.index({ branchId: 1, date: 1, shiftNo: 1 }, { unique: true });
+// Unique shift number within a Business Day
+shiftSchema.index({ businessDayId: 1, shiftNo: 1 }, { unique: true, sparse: true });
 
 export const Shift = mongoose.model("Shift", shiftSchema);

@@ -15,7 +15,7 @@ const POPULATE_ACCOUNTS = [
 ];
 
 const POPULATE_DAY_CLOSING = [
-  { path: "dayClosingId", select: "dayClosingNo date status" },
+  { path: "businessDayId", select: "businessDayNo businessDate status" },
 ];
 
 const POPULATE_DENOMINATION = [
@@ -100,7 +100,7 @@ const getSlips = async (workspaceId, companyId, filters = {}, options = {}) => {
   if (filters.fromCashAccountId) query.fromCashAccountId = filters.fromCashAccountId;
   if (filters.toBankAccountId) query.toBankAccountId = filters.toBankAccountId;
   if (filters.branchId) query.branchId = filters.branchId;
-  if (filters.dayClosingId) query.dayClosingId = filters.dayClosingId;
+  if (filters.businessDayId) query.businessDayId = filters.businessDayId;
 
   if (filters.startDate || filters.endDate) {
     query.slipDate = {};

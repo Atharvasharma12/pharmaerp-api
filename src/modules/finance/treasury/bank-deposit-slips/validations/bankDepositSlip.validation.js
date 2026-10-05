@@ -69,7 +69,7 @@ export const createBankDepositSlipSchema = Joi.object({
 
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
 
-  dayClosingId: objectId.allow(null, "").optional(),
+  businessDayId: objectId.allow(null, "").optional(),
 });
 
 // ── Confirm Deposit ───────────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ export const getBankDepositSlipsQuerySchema = Joi.object({
   fromCashAccountId: objectId.optional(),
   toBankAccountId: objectId.optional(),
   branchId: objectId.optional(),
-  dayClosingId: objectId.allow(null, "").optional(),
+  businessDayId: objectId.allow(null, "").optional(),
 
   startDate: Joi.date().optional(),
   endDate: Joi.date().optional(),

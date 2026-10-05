@@ -59,7 +59,7 @@ export const createFundTransferSchema = Joi.object({
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
 
   shiftId: objectId.allow(null, "").optional(),
-  dayClosingId: objectId.allow(null, "").optional(),
+  businessDayId: objectId.allow(null, "").optional(),
 
   // REQUIRED when fromAccountType = "CASH".
   // Denomination breakdown is mandatory for any cash movement.
