@@ -55,6 +55,7 @@ const getLedgerEntries = async (
   filters = {},
   options = {}
 ) => {
+  const Account = mongoose.model("Account");
   if (
     !mongoose.Types.ObjectId.isValid(workspaceId) ||
     !mongoose.Types.ObjectId.isValid(companyId)
@@ -143,6 +144,31 @@ const getLedgerEntries = async (
     const totalDebit = aggregate[0]?.totalDebit || 0;
     const totalCredit = aggregate[0]?.totalCredit || 0;
     
+    if (entries.length > 0 && query.accountId) {
+      let currentBalance = 0;
+      const account = await Account.findById(query.accountId).session(options.session || null);
+      if (account) {
+        const isAssetOrExpense = ["ASSET", "EXPENSE"].includes(account.accountNature);
+        const hasOB = entries.some(e => e.voucherNumber && e.voucherNumber.startsWith("OB-"));
+        const opBal = hasOB ? 0 : (account.openingBalance || 0);
+        
+        if (isAssetOrExpense) {
+          currentBalance = account.openingBalanceType === "dr" ? opBal : -opBal;
+        } else {
+          currentBalance = account.openingBalanceType === "cr" ? opBal : -opBal;
+        }
+        
+        for (const entry of entries) {
+          if (isAssetOrExpense) {
+            currentBalance += (entry.debit || 0) - (entry.credit || 0);
+          } else {
+            currentBalance += (entry.credit || 0) - (entry.debit || 0);
+          }
+          entry.runningBalance = currentBalance;
+        }
+      }
+    }
+
     return { entries, total: entries.length, totalDebit, totalCredit };
   }
 
@@ -167,6 +193,56 @@ const getLedgerEntries = async (
 
   const totalDebit = aggregate[0]?.totalDebit || 0;
   const totalCredit = aggregate[0]?.totalCredit || 0;
+
+  if (entries.length > 0 && query.accountId) {
+    const firstEntry = entries[0];
+    const beforeQuery = { ...query };
+    beforeQuery.$or = [
+      { voucherDate: { $lt: firstEntry.voucherDate } },
+      { voucherDate: firstEntry.voucherDate, createdAt: { $lt: firstEntry.createdAt } }
+    ];
+    
+    const beforeAgg = await Ledger.aggregate([
+      { $match: beforeQuery },
+      { $group: { _id: null, totalDebit: { $sum: "$debit" }, totalCredit: { $sum: "$credit" } } }
+    ]).session(options.session || null);
+    
+    let currentBalance = 0;
+    const account = await Account.findById(query.accountId).session(options.session || null);
+    
+    if (account) {
+      const isAssetOrExpense = ["ASSET", "EXPENSE"].includes(account.accountNature);
+      
+      const hasOB = entries.some(e => e.voucherNumber && e.voucherNumber.startsWith("OB-"));
+      // if OB is on this page, or was in before entries... wait, this is tricky.
+      // Better to check if OB exists in DB before this point.
+      const obEntry = await Ledger.findOne({ ...query, voucherNumber: { $regex: /^OB-/ } }).session(options.session || null);
+      const opBal = obEntry ? 0 : (account.openingBalance || 0);
+      
+      if (isAssetOrExpense) {
+        currentBalance = account.openingBalanceType === "dr" ? opBal : -opBal;
+      } else {
+        currentBalance = account.openingBalanceType === "cr" ? opBal : -opBal;
+      }
+      
+      if (beforeAgg.length > 0) {
+        if (isAssetOrExpense) {
+          currentBalance += (beforeAgg[0].totalDebit || 0) - (beforeAgg[0].totalCredit || 0);
+        } else {
+          currentBalance += (beforeAgg[0].totalCredit || 0) - (beforeAgg[0].totalDebit || 0);
+        }
+      }
+      
+      for (const entry of entries) {
+        if (isAssetOrExpense) {
+          currentBalance += (entry.debit || 0) - (entry.credit || 0);
+        } else {
+          currentBalance += (entry.credit || 0) - (entry.debit || 0);
+        }
+        entry.runningBalance = currentBalance;
+      }
+    }
+  }
 
   return { entries, total, page, limit, totalDebit, totalCredit };
 };
