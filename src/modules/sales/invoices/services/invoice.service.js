@@ -704,7 +704,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     
     _logTime('Transaction Committed');
     _timingStats.push(`--- Total Time: ${Date.now() - _startTotal}ms ---`);
-    import('fs').then(fs => fs.appendFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-timing.txt', new Date().toISOString() + '\\n' + _timingStats.join('\\n') + '\\n\\n'));
 
     return savedInvoice;
   } catch (error) {
