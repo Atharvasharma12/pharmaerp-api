@@ -5,8 +5,8 @@ import companyRepository from "../repositories/company.repository.js";
 import workspaceRepository from "../../workspaces/repositories/workspace.repository.js";
 import memberAccessRepository from "../../../core/access-control/repositories/memberAccess.repository.js";
 import coaSeederService from "../../../finance/chart-of-accounts/services/coaSeeder.service.js";
-
-
+import financialPeriodService from "../../../finance/financial-periods/services/financialPeriod.service.js";
+import { PERIOD_TYPE, PERIOD_STATUS } from "../../../finance/financial-periods/constants/financialPeriod.constant.js";
 import { COMPANY_STATUS } from "../constants/company.constant.js";
 
 import {
@@ -113,6 +113,31 @@ const createCompany = async (workspaceId, userId, payload) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Automatically create 1 active financial year for the new company
+    try {
+      const now = new Date();
+      let startYear = now.getFullYear();
+      if (now.getMonth() < 3) {
+        startYear -= 1; // If Jan-Mar, financial year started previous year
+      }
+      
+      const startDate = new Date(startYear, 3, 1); // April 1
+      const endDate = new Date(startYear + 1, 2, 31, 23, 59, 59); // March 31
+      const endYearShort = String(startYear + 1).slice(-2);
+      const periodCode = `FY-${startYear}-${endYearShort}`;
+
+      await financialPeriodService.createFinancialPeriod(workspaceId, company._id, userId, {
+        startDate,
+        endDate,
+        periodType: PERIOD_TYPE.YEAR,
+        periodCode,
+        isCurrent: true,
+        status: PERIOD_STATUS.OPEN,
+      });
+    } catch (fyError) {
+      console.warn("Could not automatically create financial year:", fyError);
+    }
 
     return company.toSafeObject();
   } catch (error) {

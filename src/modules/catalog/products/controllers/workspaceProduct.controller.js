@@ -59,7 +59,7 @@ export const getWorkspaceProducts = asyncHandler(async (req, res) => {
   const branchId = req.headers["x-branch-id"];
   
   const referer = req.headers.referer || "";
-  const isSalesRoute = referer.includes("/sales");
+  const isSalesRoute = referer.includes("/sales") || referer.includes("/billing") || referer.includes("/pos");
   const branchFilterId = isSalesRoute ? branchId : null;
 
   const result = await workspaceProductService.getWorkspaceProducts(
@@ -198,7 +198,7 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
   page = Number(page);
   limit = Number(limit);
 
-  const { product, facility, expiryDate, expired, lowStock, inStockOnly } = filters;
+  const { product, facility, facility_id, branch_id, expiryDate, expired, lowStock, inStockOnly } = filters;
   const matchStage = { workspaceId: req.workspaceId };
 
   if (inStockOnly) {
@@ -211,11 +211,13 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     }
     matchStage.product = new mongoose.Types.ObjectId(product);
   }
-  if (facility && facility !== "all_facility") {
-    if (!mongoose.Types.ObjectId.isValid(facility)) {
+
+  const targetFacility = facility || facility_id || branch_id;
+  if (targetFacility && targetFacility !== "all_facility") {
+    if (!mongoose.Types.ObjectId.isValid(targetFacility)) {
       return res.status(400).json(new ApiResponse(400, "Invalid facility ID"));
     }
-    matchStage.branch_id = new mongoose.Types.ObjectId(facility);
+    matchStage.branch_id = new mongoose.Types.ObjectId(targetFacility);
   }
 
   if (search && !product) {
