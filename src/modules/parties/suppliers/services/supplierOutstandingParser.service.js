@@ -65,11 +65,8 @@ export const parseSupplierOutstandingExcel = (buffer) => {
       }
 
       // Is it a Report Header?
-      if (isReportHeader(fullRowText) && !fullRowText.match(dateRegex)) {
-         currentSupplier = null; // Reset supplier context on page break / header
-         if (!dateRegex.test(fullRowText) && !fallbackDateRegex.test(fullRowText)) {
-           continue;
-         }
+      if (isReportHeader(fullRowText)) {
+         continue; // Skip all report headers, including those with dates (e.g. 'UPTO 30-09-2026')
       }
 
       const dateCellMatch = row.find(cell => dateRegex.test(cell) || fallbackDateRegex.test(cell));
