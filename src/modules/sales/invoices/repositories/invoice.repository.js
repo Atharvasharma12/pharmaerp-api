@@ -6,6 +6,20 @@ const createInvoice = async (invoiceData, options = {}) => {
   return invoice.save({ session: options.session || null });
 };
 
+const getInvoiceById = async (invoiceId, companyId, workspaceId, session = null) => {
+  const query = {
+    _id: invoiceId,
+    companyId: new mongoose.Types.ObjectId(companyId),
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    isDeleted: false,
+  };
+
+  const queryBuilder = SalesInvoice.findOne(query).lean();
+  if (session) queryBuilder.session(session);
+
+  return queryBuilder.exec();
+};
+
 const getLatestInvoiceByPrefix = async (companyId, workspaceId, prefix) => {
   return SalesInvoice.findOne({
     companyId: new mongoose.Types.ObjectId(companyId),
@@ -81,6 +95,7 @@ const getAllInvoices = async (companyId, workspaceId, filters = {}, pagination =
 
 export default {
   createInvoice,
+  getInvoiceById,
   getInvoicesByCustomerId,
   getAllInvoices,
   getLatestInvoiceByPrefix,
