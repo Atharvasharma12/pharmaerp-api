@@ -58,10 +58,6 @@ export const parseB2BOutstandingExcel = (buffer) => {
         dueStr = compactRow[dateIndex + 3];
 
         if (invoiceNumber && invoiceDateStr && billAmountStr && balanceStr) {
-          if (invoiceNumber.startsWith("*")) {
-            invoiceNumber = invoiceNumber.substring(1);
-          }
-          
           const [d, m, y] = invoiceDateStr.split("-");
           const fullY = y.length === 2 ? `20${y}` : y;
           const invoiceDate = `${fullY}-${m}-${d}`;
@@ -85,15 +81,15 @@ export const parseB2BOutstandingExcel = (buffer) => {
       }
     } else {
       const upperText = fullRowText.toUpperCase();
-      if (!upperText.includes("DEBTORS OUTSTANDING AS ON")) {
+      // Ignore document headers, page breaks, and column headers that might appear after page breaks
+      if (
+        !upperText.includes("DEBTORS OUTSTANDING AS ON") &&
+        !/\bPAGE\s+NO\b/i.test(fullRowText) &&
+        !/\bCONTINUED\b/i.test(fullRowText) &&
+        !(upperText.includes("INVOICE") && upperText.includes("DATE") && upperText.includes("BILL AMT"))
+      ) {
         let name = fullRowText;
         
-        // Remove 'Page No..' and anything after it
-        const pageIdx = upperText.indexOf("PAGE NO");
-        if (pageIdx !== -1) {
-          name = name.substring(0, pageIdx).trim();
-        }
-
         // Clean up trailing hyphens or random dashes
         name = name.replace(/[-_]+$/g, '').trim();
 
