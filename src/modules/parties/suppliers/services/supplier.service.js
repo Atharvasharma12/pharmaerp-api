@@ -7,6 +7,7 @@ import ledgerService from "../../../finance/ledger/services/ledger.service.js";
 import ledgerRepository from "../../../finance/ledger/repositories/ledger.repository.js";
 import purchaseBillRepository from "../../../catalog/purchase-bills/repositories/purchaseBill.repository.js";
 import * as xlsx from "xlsx";
+import { previewOutstandingImport, confirmOutstandingImport } from "./supplierOutstandingImport.service.js";
 
 const createSupplier = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -69,11 +70,18 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
   }
 
   const accCode = supplierCode ? `SUP-${supplierCode}` : `SUP-${Date.now()}`;
+  let accountName = `${businessName} - Supplier`;
+  
+  const existingAcc = await Account.findOne({ companyId, accountName }).lean();
+  if (existingAcc) {
+    accountName = `${businessName} - Supplier (${accCode})`;
+  }
+
   const ledgerAccount = await Account.create({
     workspaceId,
     companyId,
     accountCode: accCode,
-    accountName: `${businessName} - Supplier`,
+    accountName: accountName,
     accountGroupId: creditorsGroup?._id,
     accountNature: "LIABILITY",
     accountCategory: "SUPPLIER",
@@ -577,17 +585,112 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
   };
 
   try {
-    const payloads = suppliersData.map(supplierData => ({
-      ...supplierData,
+    const Supplier = mongoose.model("Supplier");
+    const AccountGroup = mongoose.model("AccountGroup");
+    const Account = mongoose.model("Account");
+
+    // Pre-fetch existing to prevent duplicates during concurrent imports
+    const existingSuppliers = await Supplier.find({
       workspaceId,
       companyId,
-      createdBy: userId,
-    }));
-
-    // Use bulk insertion
-    await supplierRepository.insertManySuppliers(payloads);
+      isDeleted: false
+    }).select("businessName").lean();
     
-    results.successful = payloads.length;
+    const existingNames = new Set(existingSuppliers.map(s => s.businessName?.toLowerCase().replace(/\s+/g, ' ').trim()).filter(Boolean));
+
+    let creditorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_CREDITORS" }) 
+                      || await AccountGroup.findOne({ workspaceId, companyId, groupName: "Sundry Creditors" });
+    if (!creditorsGroup) {
+        const currentLiabilities = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "CURRENT_LIABILITIES" }) || await AccountGroup.findOne({ workspaceId, companyId, groupName: /Current Liabilit/i });
+        if (currentLiabilities) {
+            creditorsGroup = await AccountGroup.create({
+                workspaceId,
+                companyId,
+                groupName: "Sundry Creditors",
+                groupCode: "SUNDRY_CREDITORS",
+                parentGroupId: currentLiabilities._id,
+                isSystemGroup: true,
+                createdBy: userId,
+            });
+        }
+    }
+
+    const payloadsToInsert = [];
+    
+    for (const supplierData of suppliersData) {
+      const normalizedName = supplierData.businessName?.toLowerCase().replace(/\s+/g, ' ').trim();
+      if (normalizedName && existingNames.has(normalizedName)) {
+         results.failed++;
+         results.errors.push(`Supplier already exists: ${supplierData.businessName}`);
+         continue;
+      }
+      
+      // Auto-generate code
+      const supplierCode = `SUP${Math.floor(100000 + Math.random() * 900000)}`;
+      const accCode = `SUP-${supplierCode}`;
+      
+      let accountName = `${supplierData.businessName} - Supplier`;
+      const existingAcc = await Account.findOne({ companyId, accountName }).lean();
+      if (existingAcc) {
+        accountName = `${supplierData.businessName} - Supplier (${accCode})`;
+      }
+      
+      let ledgerAccount;
+      try {
+        ledgerAccount = await Account.create({
+          workspaceId,
+          companyId,
+          accountCode: accCode,
+          accountName: accountName,
+          accountGroupId: creditorsGroup?._id,
+          accountNature: "LIABILITY",
+          accountCategory: "SUPPLIER",
+          openingBalance: supplierData.openingBalance || 0,
+          openingBalanceType: supplierData.openingBalanceType || "cr",
+          status: "active",
+          isSystemAccount: false,
+          createdBy: userId,
+        });
+      } catch (err) {
+        if (err.code === 11000) {
+          accountName = `${supplierData.businessName} - Supplier (${accCode})`;
+          ledgerAccount = await Account.create({
+            workspaceId,
+            companyId,
+            accountCode: accCode,
+            accountName: accountName,
+            accountGroupId: creditorsGroup?._id,
+            accountNature: "LIABILITY",
+            accountCategory: "SUPPLIER",
+            openingBalance: supplierData.openingBalance || 0,
+            openingBalanceType: supplierData.openingBalanceType || "cr",
+            status: "active",
+            isSystemAccount: false,
+            createdBy: userId,
+          });
+        } else {
+          throw err;
+        }
+      }
+
+      payloadsToInsert.push({
+        ...supplierData,
+        supplierCode,
+        ledgerAccountId: ledgerAccount._id,
+        workspaceId,
+        companyId,
+        createdBy: userId,
+      });
+      
+      if (normalizedName) {
+        existingNames.add(normalizedName);
+      }
+    }
+
+    if (payloadsToInsert.length > 0) {
+      await supplierRepository.insertManySuppliers(payloadsToInsert);
+      results.successful = payloadsToInsert.length;
+    }
   } catch (error) {
     if (error.writeErrors) {
       // If some failed in unordered bulk op
@@ -617,4 +720,6 @@ export default {
   getSupplierPayments,
   previewImport,
   confirmImport,
+  previewOutstandingImport,
+  confirmOutstandingImport,
 };

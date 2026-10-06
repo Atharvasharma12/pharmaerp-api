@@ -226,6 +226,9 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       const Branch = mongoose.model("Branch");
       const validBranches = await Branch.find({ companyId: extractedCompanyId, isDeleted: false }).select("_id").lean();
       matchStage.branch_id = { $in: validBranches.map(b => b._id) };
+    } else {
+      // Prevent cross-company data leakage by defaulting to an impossible match if companyId is completely missing
+      matchStage.branch_id = null;
     }
   }
 
