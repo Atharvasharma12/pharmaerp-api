@@ -135,12 +135,48 @@ export const previewImport = asyncHandler(async (req, res) => {
       req.companyId,
       req.file.buffer
     );
+  } else if (importType === "b2c") {
+    // Parse using the robust xlsx parser for .xlsx files
+    const parsedData = await customerService.previewImport(
+      req.workspaceId,
+      req.companyId,
+      req.file.buffer,
+      importType
+    );
+
+    const validCustomersData = parsedData
+      .filter((r) => r.isValid)
+      .map((r) => ({ ...r.data, customerType: "other" }));
+
+    if (validCustomersData.length > 0) {
+      try {
+        const importResult = await customerService.confirmImport(
+          req.workspaceId,
+          req.companyId,
+          req.user._id,
+          validCustomersData,
+          importType
+        );
+
+        return res.status(200).json(
+          new ApiResponse(200, "B2C Customers imported successfully", {
+            isDirectlyImported: true,
+            importResult,
+          })
+        );
+      } catch (err) {
+        return res.status(500).json(new ApiResponse(500, `Bulk insert failed: ${err.message}`));
+      }
+    } else {
+      return res.status(400).json(new ApiResponse(400, "No valid B2C customer records found in the file. Ensure the Excel file has valid 'Name' columns."));
+    }
   } else {
-    // Default to B2B/B2C logic
+    // Default to B2B logic
     result = await customerService.previewImport(
       req.workspaceId,
       req.companyId,
-      req.file.buffer
+      req.file.buffer,
+      importType
     );
   }
   
@@ -163,7 +199,8 @@ export const confirmImport = asyncHandler(async (req, res) => {
       req.workspaceId,
       req.companyId,
       req.user._id,
-      req.body.customers
+      req.body.customers,
+      importType
     );
   }
   

@@ -232,7 +232,32 @@ const deleteCustomerById = async (customerId, companyId, workspaceId, deletedBy)
 };
 
 const insertManyCustomers = async (payloads) => {
-  return Customer.insertMany(payloads, { ordered: false });
+  const BATCH_SIZE = 1000;
+  let successful = 0;
+  const writeErrors = [];
+  
+  for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+    const batch = payloads.slice(i, i + BATCH_SIZE);
+    try {
+      await Customer.insertMany(batch, { ordered: false });
+      successful += batch.length;
+    } catch (err) {
+      if (err.writeErrors) {
+        successful += (batch.length - err.writeErrors.length);
+        writeErrors.push(...err.writeErrors);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (writeErrors.length > 0) {
+    const error = new Error("Bulk insert failed for some records");
+    error.writeErrors = writeErrors;
+    throw error;
+  }
+  
+  return { success: true };
 };
 
 export default {
