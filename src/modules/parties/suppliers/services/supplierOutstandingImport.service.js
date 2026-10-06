@@ -13,7 +13,9 @@ const normalizeSupplierName = (name) => {
 
 const normalizeInvoiceNumber = (inv) => {
   if (!inv) return null;
-  return inv.replace(/^\*+\s*/, "").trim().toUpperCase();
+  const val = inv.replace(/^\*+\s*/g, "").trim().toUpperCase();
+  if (val.replace(/\*/g, '').trim() === "") return null;
+  return val;
 };
 
 export const previewOutstandingImport = async (workspaceId, companyId, fileBuffer) => {
@@ -78,11 +80,11 @@ export const previewOutstandingImport = async (workspaceId, companyId, fileBuffe
     if (status !== "SUPPLIER_CONTEXT_MISSING") {
       if (!matchedSupplier) {
          status = "SUPPLIER_NOT_FOUND";
-      } else if (tx.type === "DR") {
-         status = "DEBIT_TRANSACTION";
       } else if (!normalizedInv || normalizedInv === "UPTO") {
-         status = "MISSING_INVOICE_NUMBER";
-      } else {
+         normalizedInv = `TX-${tx.rowNumber}`;
+      }
+      
+      if (status === "NEW") {
          const key = `${supplierId}-${normalizedInv}`;
          if (existingBillsSet.has(key)) {
            status = "ALREADY_IMPORTED";
@@ -149,9 +151,9 @@ export const confirmOutstandingImport = async (workspaceId, companyId, userId, t
     const supplierUpdatesMap = new Map();
 
     for (const data of transactionsToImport) {
-      if (!data.supplierId || !data.invoiceNumber || data.type === "DR") {
+      if (!data.supplierId || !data.invoiceNumber) {
          failed++;
-         errors.push(`Row ${data.invoiceNumber || 'Unknown'}: Invalid data or Debit transaction`);
+         errors.push(`Row ${data.invoiceNumber || 'Unknown'}: Invalid data`);
          continue;
       }
       
@@ -167,7 +169,8 @@ export const confirmOutstandingImport = async (workspaceId, companyId, userId, t
       seenKeysInTransaction.add(key);
       
       const cid = data.supplierId.toString();
-      supplierUpdatesMap.set(cid, (supplierUpdatesMap.get(cid) || 0) + (data.amount || 0));
+      const amtChange = data.type === "DR" ? -(data.amount || 0) : (data.amount || 0);
+      supplierUpdatesMap.set(cid, (supplierUpdatesMap.get(cid) || 0) + amtChange);
 
       // Parse date
       let parsedDate = new Date();
@@ -187,44 +190,46 @@ export const confirmOutstandingImport = async (workspaceId, companyId, userId, t
 
       const pbId = new mongoose.Types.ObjectId();
       
-      billsToInsert.push({
-         _id: pbId,
-         workspaceId,
-         companyId,
-         branchId: null, // Depending on if it's required
-         supplierId: data.supplierId,
-         purchaseBillNo: pbNumber,
-         supplierInvoiceNo: normalizedInv,
-         legacyReference: data.invoiceNumber,
-         invoiceDate: parsedDate,
-         status: PURCHASE_BILL_STATUS.CONFIRMED,
-         createdBy: userId,
-         grossTotal: data.amount || 0,
-         grandTotal: data.amount || 0,
-         amountDue: data.amount || 0,
-         amountPaid: 0,
-         items: [{
-             itemName: "Historical Outstanding",
-             qty: 1,
-             rate: data.amount || 0,
-             amount: data.amount || 0
-         }],
-         rateBasis: "PTS",
-         isDeleted: false,
-         legacyImportKey: key // Optional extra protection field
-      });
+      if (data.type === "CR") {
+        billsToInsert.push({
+           _id: pbId,
+           workspaceId,
+           companyId,
+           branchId: null, // Depending on if it's required
+           supplierId: data.supplierId,
+           purchaseBillNo: pbNumber,
+           supplierInvoiceNo: normalizedInv,
+           legacyReference: data.invoiceNumber,
+           invoiceDate: parsedDate,
+           status: PURCHASE_BILL_STATUS.CONFIRMED,
+           createdBy: userId,
+           grossTotal: data.amount || 0,
+           grandTotal: data.amount || 0,
+           amountDue: data.amount || 0,
+           amountPaid: 0,
+           items: [{
+               itemName: "Historical Outstanding",
+               qty: 1,
+               rate: data.amount || 0,
+               amount: data.amount || 0
+           }],
+           rateBasis: "PTS",
+           isDeleted: false,
+           legacyImportKey: key // Optional extra protection field
+        });
+      }
 
       statementsToInsert.push({
          workspaceId,
          companyId,
          supplierId: data.supplierId,
-         transactionType: "PURCHASE_BILL",
-         referenceType: "LEGACY_PURCHASE_BILL",
-         reference: pbNumber,
-         description: `Legacy Outstanding Bill ${normalizedInv}`,
+         transactionType: data.type === "DR" ? "PAYMENT" : "PURCHASE_BILL",
+         referenceType: data.type === "DR" ? "LEGACY_PAYMENT" : "LEGACY_PURCHASE_BILL",
+         reference: data.type === "DR" ? `LEG-PAY-${normalizedInv}` : pbNumber,
+         description: `Legacy ${data.type === "DR" ? "Payment/Debit" : "Outstanding Bill"} ${normalizedInv}`,
          amount: data.amount,
-         debit: 0,
-         credit: data.amount,
+         debit: data.type === "DR" ? data.amount : 0,
+         credit: data.type === "CR" ? data.amount : 0,
          date: parsedDate
       });
       
