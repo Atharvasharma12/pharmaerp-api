@@ -1,3 +1,4 @@
+import Branch from "../../../organization/branches/models/branch.model.js";
 import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 
@@ -59,7 +60,7 @@ export const getWorkspaceProducts = asyncHandler(async (req, res) => {
   const branchId = req.headers["x-branch-id"];
   
   const referer = req.headers.referer || "";
-  const isSalesRoute = referer.includes("/sales");
+  const isSalesRoute = referer.includes("/sales") || referer.includes("/billing") || referer.includes("/pos");
   const branchFilterId = isSalesRoute ? branchId : null;
 
   const result = await workspaceProductService.getWorkspaceProducts(
@@ -198,7 +199,7 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
   page = Number(page);
   limit = Number(limit);
 
-  const { product, facility, expiryDate, expired, lowStock, inStockOnly } = filters;
+  const { product, facility, facility_id, branch_id, expiryDate, expired, lowStock, inStockOnly } = filters;
   const matchStage = { workspaceId: req.workspaceId };
 
   if (inStockOnly) {
@@ -211,11 +212,24 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     }
     matchStage.product = new mongoose.Types.ObjectId(product);
   }
-  if (facility && facility !== "all_facility") {
-    if (!mongoose.Types.ObjectId.isValid(facility)) {
+
+  const targetFacility = facility || facility_id || branch_id;
+  if (targetFacility && targetFacility !== "all_facility") {
+    if (!mongoose.Types.ObjectId.isValid(targetFacility)) {
       return res.status(400).json(new ApiResponse(400, "Invalid facility ID"));
     }
-    matchStage.branch_id = new mongoose.Types.ObjectId(facility);
+    matchStage.branch_id = new mongoose.Types.ObjectId(targetFacility);
+  } else {
+    // If the companyId is sent via headers or body but NOT in req.companyId because companyContextMiddleware is missing
+    const extractedCompanyId = req.companyId || req.headers["x-company-id"] || req.body.companyId;
+    if (extractedCompanyId) {
+      const Branch = mongoose.model("Branch");
+      const validBranches = await Branch.find({ companyId: extractedCompanyId, isDeleted: false }).select("_id").lean();
+      matchStage.branch_id = { $in: validBranches.map(b => b._id) };
+    } else {
+      // Prevent cross-company data leakage by defaulting to an impossible match if companyId is completely missing
+      matchStage.branch_id = null;
+    }
   }
 
   if (search && !product) {

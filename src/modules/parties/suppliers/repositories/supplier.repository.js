@@ -1,3 +1,4 @@
+import Ledger from "../../../finance/ledger/models/ledger.model.js";
 import mongoose from "mongoose";
 import Supplier from "../models/supplier.model.js";
 import { SUPPLIER_STATUS } from "../constants/supplier.constant.js";
@@ -139,79 +140,80 @@ const getSuppliersStats = async (workspaceId, companyId, filters = {}) => {
   
   const query = buildSupplierQuery(workspaceId, companyId, filters);
 
-  const result = await Supplier.aggregate([
-    { $match: query },
-    {
-      $lookup: {
-        from: "ledgers",
-        let: { account_id: "$ledgerAccountId" },
-        pipeline: [
-          { $match: { $expr: { $eq: ["$accountId", "$$account_id"] } } },
-          { $sort: { voucherDate: -1, createdAt: -1 } },
-          { $limit: 1 }
-        ],
-        as: "lastLedgerEntry"
-      }
-    },
-    {
-      $unwind: { path: "$lastLedgerEntry", preserveNullAndEmptyArrays: true }
-    },
-    {
-      $project: {
-        status: 1,
-        balance: {
-          $cond: {
-            if: { $ifNull: ["$lastLedgerEntry._id", false] },
-            then: { $abs: { $ifNull: ["$lastLedgerEntry.runningBalance", 0] } },
-            else: { $ifNull: ["$openingBalance", 0] }
-          }
-        },
-        balanceType: {
-          $cond: {
-            if: { $ifNull: ["$lastLedgerEntry._id", false] },
-            then: { $cond: [{ $gte: [{ $ifNull: ["$lastLedgerEntry.runningBalance", 0] }, 0] }, "cr", "dr"] },
-            else: { $toLower: { $ifNull: ["$openingBalanceType", "cr"] } }
-          }
+  const suppliers = await Supplier.find(query)
+    .select("ledgerAccountId status openingBalance openingBalanceType")
+    .lean();
+
+  const ledgerAccountIds = suppliers
+    .map(s => s.ledgerAccountId)
+    .filter(id => id != null);
+
+  
+  
+  
+  let ledgerStats = [];
+  if (ledgerAccountIds.length > 0) {
+    ledgerStats = await Ledger.aggregate([
+      { $match: { accountId: { $in: ledgerAccountIds } } },
+      {
+        $group: {
+          _id: "$accountId",
+          totalDebit: { $sum: "$debit" },
+          totalCredit: { $sum: "$credit" }
         }
       }
-    },
-    {
-      $group: {
-        _id: null,
-        total: { $sum: 1 },
-        active: { $sum: { $cond: [{ $eq: [{ $toLower: "$status" }, "active"] }, 1, 0] } },
-        inactive: { $sum: { $cond: [{ $eq: [{ $toLower: "$status" }, "inactive"] }, 1, 0] } },
-        blocked: { $sum: { $cond: [{ $eq: [{ $toLower: "$status" }, "blocked"] }, 1, 0] } },
-        totalCr: { $sum: { $cond: [{ $eq: ["$balanceType", "cr"] }, "$balance", 0] } },
-        totalDr: { $sum: { $cond: [{ $eq: ["$balanceType", "dr"] }, "$balance", 0] } }
-      }
-    }
-  ]);
-
-  if (result.length > 0) {
-    const data = result[0];
-    const netRunning = data.totalCr - data.totalDr;
-    return {
-      total: data.total,
-      active: data.active,
-      inactive: data.inactive,
-      blocked: data.blocked,
-      totalCr: data.totalCr,
-      totalDr: data.totalDr,
-      netRunning: Math.abs(netRunning),
-      runningType: netRunning >= 0 ? "Cr" : "Dr"
-    };
+    ]);
   }
 
+  const ledgerMap = {};
+  ledgerStats.forEach(stat => {
+    ledgerMap[stat._id.toString()] = stat;
+  });
+
+  let totalCr = 0;
+  let totalDr = 0;
+  let active = 0;
+  let inactive = 0;
+  let blocked = 0;
+
+  suppliers.forEach(supplier => {
+    const s = (supplier.status || "active").toLowerCase();
+    if (s === "active") active++;
+    else if (s === "inactive") inactive++;
+    else if (s === "blocked") blocked++;
+
+    const l = ledgerMap[supplier.ledgerAccountId?.toString()] || { totalDebit: 0, totalCredit: 0 };
+    
+    let totalDebit = l.totalDebit;
+    let totalCredit = l.totalCredit;
+
+    const opBal = Number(supplier.openingBalance) || 0;
+    const opBalType = (supplier.openingBalanceType || "cr").toLowerCase();
+
+    if (opBalType === "dr") {
+      totalDebit += opBal;
+    } else {
+      totalCredit += opBal;
+    }
+
+    const net = totalCredit - totalDebit;
+    if (net >= 0) {
+      totalCr += net;
+    } else {
+      totalDr += Math.abs(net);
+    }
+  });
+
+  const netRunning = totalCr - totalDr;
   return {
-    total: 0,
-    active: 0,
-    inactive: 0,
-    blocked: 0,
-    totalCr: 0,
-    totalDr: 0,
-    netRunning: 0,
-    runningType: "Cr"
+    total: suppliers.length,
+    active,
+    inactive,
+    blocked,
+    totalCr,
+    totalDr,
+    netRunning: Math.abs(netRunning),
+    runningType: netRunning >= 0 ? "Cr" : "Dr"
   };
 };
 

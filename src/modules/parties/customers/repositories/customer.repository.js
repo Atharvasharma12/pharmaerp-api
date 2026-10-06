@@ -1,3 +1,4 @@
+import Ledger from "../../../finance/ledger/models/ledger.model.js";
 import mongoose from "mongoose";
 import Customer from "../models/customer.model.js";
 import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
@@ -126,28 +127,77 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
   ]);
 
   // Calculate overall stats for the filtered query (ignoring pagination)
-  const allFilteredCustomers = await Customer.find(query).select('status openingBalance openingBalanceType');
+  const allFilteredCustomers = await Customer.find(query).select('ledgerAccountId status openingBalance openingBalanceType').lean();
+  
+  const ledgerAccountIds = allFilteredCustomers
+    .map(c => c.ledgerAccountId)
+    .filter(id => id != null);
+    
+  let ledgerStats = [];
+  if (ledgerAccountIds.length > 0) {
+    ledgerStats = await Ledger.aggregate([
+      { $match: { accountId: { $in: ledgerAccountIds } } },
+      {
+        $group: {
+          _id: "$accountId",
+          totalDebit: { $sum: "$debit" },
+          totalCredit: { $sum: "$credit" }
+        }
+      }
+    ]);
+  }
+
+  const ledgerMap = {};
+  ledgerStats.forEach(stat => {
+    ledgerMap[stat._id.toString()] = stat;
+  });
+
   let totalCr = 0;
   let totalDr = 0;
   let active = 0;
   let inactive = 0;
   let blocked = 0;
 
-  allFilteredCustomers.forEach((c) => {
-    const amt = Number(c.openingBalance) || 0;
-    if (String(c.openingBalanceType).toLowerCase() === "cr") {
-      totalCr += amt;
-    } else {
-      totalDr += amt;
-    }
-
-    const s = (c.status || "active").toLowerCase();
+  allFilteredCustomers.forEach(customer => {
+    const s = (customer.status || "active").toLowerCase();
     if (s === "active") active++;
     else if (s === "inactive") inactive++;
     else if (s === "blocked") blocked++;
+
+    const l = ledgerMap[customer.ledgerAccountId?.toString()] || { totalDebit: 0, totalCredit: 0 };
+    
+    let totalDebit = l.totalDebit;
+    let totalCredit = l.totalCredit;
+
+    const opBal = Number(customer.openingBalance) || 0;
+    const opBalType = (customer.openingBalanceType || "dr").toLowerCase(); // Customers usually have Dr balance
+
+    if (opBalType === "dr") {
+      totalDebit += opBal;
+    } else {
+      totalCredit += opBal;
+    }
+
+    // For customers (Sundry Debtors), Debit is positive balance, Credit is negative
+    // But we just want the absolute totals of Cr and Dr
+    const net = totalDebit - totalCredit; 
+    if (net >= 0) {
+      totalDr += net; // Positive means Dr
+    } else {
+      totalCr += Math.abs(net); // Negative means Cr
+    }
   });
 
-  const stats = { totalCr, totalDr, active, inactive, blocked };
+  const netRunning = totalDr - totalCr;
+  const stats = { 
+    totalCr, 
+    totalDr, 
+    active, 
+    inactive, 
+    blocked,
+    netRunning: Math.abs(netRunning),
+    runningType: netRunning >= 0 ? "Dr" : "Cr"
+  };
 
   return { customers, total, page, limit, stats };
 };
@@ -181,7 +231,37 @@ const deleteCustomerById = async (customerId, companyId, workspaceId, deletedBy)
   );
 };
 
+const insertManyCustomers = async (payloads) => {
+  const BATCH_SIZE = 1000;
+  let successful = 0;
+  const writeErrors = [];
+  
+  for (let i = 0; i < payloads.length; i += BATCH_SIZE) {
+    const batch = payloads.slice(i, i + BATCH_SIZE);
+    try {
+      await Customer.insertMany(batch, { ordered: false });
+      successful += batch.length;
+    } catch (err) {
+      if (err.writeErrors) {
+        successful += (batch.length - err.writeErrors.length);
+        writeErrors.push(...err.writeErrors);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (writeErrors.length > 0) {
+    const error = new Error("Bulk insert failed for some records");
+    error.writeErrors = writeErrors;
+    throw error;
+  }
+  
+  return { success: true };
+};
+
 export default {
+  insertManyCustomers,
   findCustomerById,
   findCustomerByIdCompanyAndWorkspace,
   findCustomerByCode,

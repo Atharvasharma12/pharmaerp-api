@@ -119,3 +119,90 @@ export const getCustomerSales = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Customer sales fetched successfully", salesResult));
 });
+
+export const previewImport = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json(new ApiResponse(400, "Excel file is required"));
+  }
+  
+  const importType = req.body.importType || "b2b";
+  let result;
+  
+  if (importType === "b2b-outstanding") {
+    // We will inject the new parser service later
+    result = await customerService.previewB2BOutstandingImport(
+      req.workspaceId,
+      req.companyId,
+      req.file.buffer
+    );
+  } else if (importType === "b2c") {
+    // Parse using the robust xlsx parser for .xlsx files
+    const parsedData = await customerService.previewImport(
+      req.workspaceId,
+      req.companyId,
+      req.file.buffer,
+      importType
+    );
+
+    const validCustomersData = parsedData
+      .filter((r) => r.isValid)
+      .map((r) => ({ ...r.data, customerType: "other" }));
+
+    if (validCustomersData.length > 0) {
+      try {
+        const importResult = await customerService.confirmImport(
+          req.workspaceId,
+          req.companyId,
+          req.user._id,
+          validCustomersData,
+          importType
+        );
+
+        return res.status(200).json(
+          new ApiResponse(200, "B2C Customers imported successfully", {
+            isDirectlyImported: true,
+            importResult,
+          })
+        );
+      } catch (err) {
+        return res.status(500).json(new ApiResponse(500, `Bulk insert failed: ${err.message}`));
+      }
+    } else {
+      return res.status(400).json(new ApiResponse(400, "No valid B2C customer records found in the file. Ensure the Excel file has valid 'Name' columns."));
+    }
+  } else {
+    // Default to B2B logic
+    result = await customerService.previewImport(
+      req.workspaceId,
+      req.companyId,
+      req.file.buffer,
+      importType
+    );
+  }
+  
+  return res.status(200).json(new ApiResponse(200, "Preview generated successfully", result));
+});
+
+export const confirmImport = asyncHandler(async (req, res) => {
+  const importType = req.body.importType || "b2b";
+  let result;
+  
+  if (importType === "b2b-outstanding") {
+    result = await customerService.confirmB2BOutstandingImport(
+      req.workspaceId,
+      req.companyId,
+      req.user._id,
+      req.body.customers
+    );
+  } else {
+    result = await customerService.confirmImport(
+      req.workspaceId,
+      req.companyId,
+      req.user._id,
+      req.body.customers,
+      importType
+    );
+  }
+  
+  return res.status(200).json(new ApiResponse(200, "Customers imported successfully", result));
+});
