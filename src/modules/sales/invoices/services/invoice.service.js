@@ -19,6 +19,11 @@ import PaymentQr from "../../../finance/treasury/payment-qr/models/paymentQr.mod
 import voucherNumberService from "../../../finance/journal-vouchers/services/voucherNumber.service.js";
 import cashTransactionRepository from "../../../finance/treasury/cash-management/cash-transactions/repositories/cashTransaction.repository.js";
 import cashDenominationRepository from "../../../finance/treasury/cash-management/cash-denominations/repositories/cashDenomination.repository.js";
+import SalesInvoice from "../models/invoice.model.js";
+import GstLedger from "../../../finance/gst-ledger/models/gstLedger.model.js";
+import JournalVoucher from "../../../finance/journal-vouchers/models/journalVoucher.model.js";
+import CashTransaction from "../../../finance/treasury/cash-management/cash-transactions/models/cashTransaction.model.js";
+import BankTransaction from "../../../finance/treasury/bank-management/bank-transactions/models/bankTransaction.model.js";
 
 /**
  * Validates that all cash payments have explicit denomination breakdowns
@@ -113,7 +118,7 @@ const validateCashDenominations = (saleData) => {
   }
 };
 
-const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null) => {
+const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null, existingSession = null) => {
   // Enforce mandatory cash denomination breakdown
   validateCashDenominations(saleData);
 
@@ -126,8 +131,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     _lastTime = now;
   };
 
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  const session = existingSession || await mongoose.startSession();
+  if (!existingSession) session.startTransaction();
 
   try {
     _logTime('Session started');
@@ -699,19 +704,109 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
   }
   _logTime('All payments processed');
 
-    await session.commitTransaction();
-    session.endSession();
+    if (!existingSession) {
+      await session.commitTransaction();
+      session.endSession();
+    }
     
     _logTime('Transaction Committed');
     _timingStats.push(`--- Total Time: ${Date.now() - _startTotal}ms ---`);
 
     return savedInvoice;
   } catch (error) {
+    if (!existingSession) {
+      try {
+        await session.abortTransaction();
+      } catch (abortErr) {
+        // Ignore abort errors if transaction is already committed or aborted
+      }
+      session.endSession();
+    }
+    throw error;
+  }
+};
+
+const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, workspaceId, user = null) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const oldInvoice = await invoiceRepository.getInvoiceById(invoiceId, companyId, workspaceId, session);
+    if (!oldInvoice) {
+      throw new ApiError(404, "Invoice not found");
+    }
+
+    // 1. Revert Inventory (Add quantities back)
+    if (Array.isArray(oldInvoice.items) && oldInvoice.items.length > 0) {
+      const batchOps = [];
+      const facilityOps = [];
+      const resolvedBranchId = oldInvoice.branchId;
+
+      for (const item of oldInvoice.items) {
+        const qtyToRevert = Number(item.qty) || 0;
+        if (qtyToRevert <= 0) continue;
+
+        const productId = item.productId || item.workspaceProductId || item.id;
+        const rawBatchId = item.batchId || (item.batch && item.batch._id) || item.batch;
+
+        if (rawBatchId) {
+          batchOps.push({
+            updateOne: {
+              filter: { _id: rawBatchId },
+              update: { $inc: { batchQty: qtyToRevert } }
+            }
+          });
+        }
+
+        if (productId && resolvedBranchId) {
+          facilityOps.push({
+            updateOne: {
+              filter: { product_id: productId, facility_id: resolvedBranchId },
+              update: { $inc: { total_qty_available: qtyToRevert, qoh: qtyToRevert, atp: qtyToRevert } }
+            }
+          });
+        }
+      }
+
+      if (batchOps.length > 0) {
+        // Need to import Batch and ProductFacility
+        await mongoose.model('Batch').bulkWrite(batchOps, { session });
+      }
+      if (facilityOps.length > 0) {
+        await mongoose.model('ProductFacility').bulkWrite(facilityOps, { session });
+      }
+    }
+
+    // 2. Delete GSTR-1 entry
+    await GstLedger.deleteMany({ voucherId: oldInvoice._id }, { session });
+
+    // 3. Delete Cash Transactions
+    await CashTransaction.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
+
+    // 4. Delete Bank Transactions
+    await BankTransaction.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
+
+    // 5. Delete Journal Vouchers
+    await JournalVoucher.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
+
+    // 6. Delete old invoice
+    await SalesInvoice.deleteOne({ _id: oldInvoice._id }, { session });
+
+    // Keep original invoice No and date
+    saleData.invoiceNo = oldInvoice.invoiceNo;
+    saleData.date = oldInvoice.date;
+
+    // 7. Record the new sale in the same session
+    const updatedInvoice = await recordCustomerSale(customerId, saleData, companyId, workspaceId, user, session);
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return updatedInvoice;
+  } catch (error) {
     try {
       await session.abortTransaction();
-    } catch (abortErr) {
-      // Ignore abort errors if transaction is already committed or aborted
-    }
+    } catch (abortErr) {}
     session.endSession();
     throw error;
   }
@@ -763,6 +858,7 @@ const getAllCustomerSales = async (companyId, workspaceId, branchId = null, pagi
 
 export default {
   recordCustomerSale,
+  updateCustomerSale,
   getCustomerSales,
   getAllCustomerSales,
 };
