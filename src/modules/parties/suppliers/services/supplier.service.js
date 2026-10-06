@@ -63,6 +63,8 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
               groupName: "Sundry Creditors",
               groupCode: "SUNDRY_CREDITORS",
               parentGroupId: currentLiabilities._id,
+              nature: "LIABILITY",
+              status: "active",
               isSystemGroup: true,
               createdBy: userId,
           });
@@ -609,6 +611,8 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
                 groupName: "Sundry Creditors",
                 groupCode: "SUNDRY_CREDITORS",
                 parentGroupId: currentLiabilities._id,
+                nature: "LIABILITY",
+                status: "active",
                 isSystemGroup: true,
                 createdBy: userId,
             });
