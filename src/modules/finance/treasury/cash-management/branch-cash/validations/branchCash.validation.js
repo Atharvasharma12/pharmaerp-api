@@ -9,6 +9,13 @@ export const getBranchCashSchema = Joi.object({
   branchId: Joi.string().hex().length(24).required(),
 });
 
+export const initializeBranchCashSchema = Joi.object({
+  branchId: Joi.string().hex().length(24).required(),
+  openingAmount: Joi.number().min(0).required(),
+  openingDenominations: Joi.array().items(denominationSchema).min(1).required(),
+  narration: Joi.string().max(500).optional().allow("", null),
+});
+
 export const depositSchema = Joi.object({
   branchId: Joi.string().hex().length(24).required(),
   amount: Joi.number().positive().required().messages({
