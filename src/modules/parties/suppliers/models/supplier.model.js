@@ -226,13 +226,13 @@ const supplierSchema = new mongoose.Schema(
   },
 );
 
+import crypto from "crypto";
+
 const generateSupplierCode = async () => {
   const Supplier = mongoose.models.Supplier;
 
   while (true) {
-    const code = `${SUPPLIER_CODE_PREFIX}${Math.floor(
-      100000 + Math.random() * 900000,
-    )}`;
+    const code = `${SUPPLIER_CODE_PREFIX}${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
 
     const exists = await Supplier.exists({
       supplierCode: code,
