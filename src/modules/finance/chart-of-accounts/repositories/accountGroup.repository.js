@@ -57,7 +57,9 @@ const findGroupByName = async (companyId, groupName, options = {}) => {
     companyId,
     groupName: String(groupName).trim(),
     isDeleted: false,
-  }).select(options.select || "");
+  })
+    .select(options.select || "")
+    .session(options.session || null);
 };
 
 const createGroup = async (payload, options = {}) => {

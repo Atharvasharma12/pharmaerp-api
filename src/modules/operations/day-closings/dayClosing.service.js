@@ -28,6 +28,9 @@ export const createDayClosing = async (data) => {
   let closingDenominations = [];
   let totalFundWithdrawals = 0;
   let totalFundDeposits = 0;
+  let totalManualDeposits = 0;
+  let totalManualWithdrawals = 0;
+  const cashByShift = [];
 
   if (shifts.length > 0) {
     // Sort shifts by open time to reliably get first/last
@@ -44,6 +47,29 @@ export const createDayClosing = async (data) => {
 
     totalFundWithdrawals = shifts.reduce((sum, s) => sum + (s.totalFundWithdrawals || 0), 0);
     totalFundDeposits = shifts.reduce((sum, s) => sum + (s.totalFundDeposits || 0), 0);
+
+    // Build per-shift cash breakdown
+    for (const s of shifts) {
+      const shiftDeposits = (s.manualDeposits || []).reduce((acc, d) => acc + (d.amount || 0), 0);
+      const shiftWithdrawals = (s.manualWithdrawals || [])
+        .filter((w) => w.source === "running")
+        .reduce((acc, w) => acc + (w.amount || 0), 0);
+
+      totalManualDeposits += shiftDeposits;
+      totalManualWithdrawals += shiftWithdrawals;
+
+      cashByShift.push({
+        shiftId:      s._id,
+        shiftName:    s.shiftName || "",
+        shiftNo:      s.shiftNo || "",
+        openingFloat: s.openingFloatAmount || 0,
+        cashSales:    s.cashSalesTotal || 0,
+        deposits:     shiftDeposits,
+        withdrawals:  shiftWithdrawals,
+        expectedCash: s.expectedClosingCashAmount || 0,
+        actualCash:   s.actualClosingCashAmount || 0,
+      });
+    }
   }
 
   const dayClosing = await DayClosing.create({
@@ -57,6 +83,9 @@ export const createDayClosing = async (data) => {
     closingDenominations,
     totalFundWithdrawals,
     totalFundDeposits,
+    totalManualDeposits,
+    totalManualWithdrawals,
+    cashByShift,
     cashDifferenceAmount: actualTotal - expectedTotal,
   });
 

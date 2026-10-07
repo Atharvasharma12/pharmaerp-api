@@ -10,6 +10,8 @@ import {
   getBankDepositSlipById,
   confirmDeposit,
   cancelBankDepositSlip,
+  withdrawFromBankDepositSlip,
+  getCashInTransit,
 } from "../controllers/bankDepositSlip.controller.js";
 
 import {
@@ -18,6 +20,8 @@ import {
   cancelBankDepositSlipSchema,
   slipIdParamSchema,
   getBankDepositSlipsQuerySchema,
+  withdrawFromSlipSchema,
+  getCashInTransitQuerySchema,
 } from "../validations/bankDepositSlip.validation.js";
 
 const router = Router();
@@ -28,6 +32,15 @@ router.use(workspaceContextMiddleware);
 router.use(companyContextMiddleware);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
+
+// GET /treasury/bank-deposit-slips/cash-in-transit
+// Company-scope view of all PREPARED slips with remainingAmount (must be before /:slipId)
+router.get(
+  "/cash-in-transit",
+  validate(getCashInTransitQuerySchema, "query"),
+  getCashInTransit,
+);
+
 
 // POST /treasury/bank-deposit-slips
 // Create a new bank deposit slip (Status → PREPARED)
@@ -59,12 +72,21 @@ router.post(
 );
 
 // POST /treasury/bank-deposit-slips/:slipId/cancel
-// Cancel the slip (reverses journals, returns denominations)
+// Cancel the slip (reverses journals, returns remainingAmount denominations to frozen)
 router.post(
   "/:slipId/cancel",
   validate(slipIdParamSchema, "params"),
   validate(cancelBankDepositSlipSchema),
   cancelBankDepositSlip,
+);
+
+// POST /treasury/bank-deposit-slips/:slipId/withdraw
+// Partial withdraw from a PREPARED slip before deposit
+router.post(
+  "/:slipId/withdraw",
+  validate(slipIdParamSchema, "params"),
+  validate(withdrawFromSlipSchema),
+  withdrawFromBankDepositSlip,
 );
 
 export default router;

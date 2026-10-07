@@ -521,7 +521,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (true) {
+      if (gstNumber.length >= 2) {
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
           state = GST_STATE_CODES[stateCode];
