@@ -619,6 +619,23 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
         }
     }
 
+    const existingCodes = await Supplier.find({ isDeleted: false }).select("supplierCode").lean();
+    const usedCodes = new Set(existingCodes.map(s => s.supplierCode));
+
+    const existingAccounts = await Account.find({
+      companyId,
+      isDeleted: false
+    }).select("accountName accountCode").lean();
+    const existingAccountNamesSet = new Set(existingAccounts.map(a => a.accountName));
+
+    // Add existing account codes to usedCodes to prevent orphaned account code collisions
+    existingAccounts.forEach(a => {
+      if (a.accountCode && a.accountCode.startsWith('SUP-')) {
+        usedCodes.add(a.accountCode.replace('SUP-', ''));
+      }
+    });
+
+    const accountsToInsert = [];
     const payloadsToInsert = [];
     
     for (const supplierData of suppliersData) {
@@ -630,57 +647,41 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
       }
       
       // Auto-generate code
-      const supplierCode = `SUP${Math.floor(100000 + Math.random() * 900000)}`;
+      let supplierCode;
+      do {
+         supplierCode = `SUP${Math.floor(100000 + Math.random() * 900000)}`;
+      } while (usedCodes.has(supplierCode));
+      usedCodes.add(supplierCode);
       const accCode = `SUP-${supplierCode}`;
       
       let accountName = `${supplierData.businessName} - Supplier`;
-      const existingAcc = await Account.findOne({ companyId, accountName }).lean();
-      if (existingAcc) {
+      if (existingAccountNamesSet.has(accountName)) {
         accountName = `${supplierData.businessName} - Supplier (${accCode})`;
       }
+      existingAccountNamesSet.add(accountName);
       
-      let ledgerAccount;
-      try {
-        ledgerAccount = await Account.create({
-          workspaceId,
-          companyId,
-          accountCode: accCode,
-          accountName: accountName,
-          accountGroupId: creditorsGroup?._id,
-          accountNature: "LIABILITY",
-          accountCategory: "SUPPLIER",
-          openingBalance: supplierData.openingBalance || 0,
-          openingBalanceType: supplierData.openingBalanceType || "cr",
-          status: "active",
-          isSystemAccount: false,
-          createdBy: userId,
-        });
-      } catch (err) {
-        if (err.code === 11000) {
-          accountName = `${supplierData.businessName} - Supplier (${accCode})`;
-          ledgerAccount = await Account.create({
-            workspaceId,
-            companyId,
-            accountCode: accCode,
-            accountName: accountName,
-            accountGroupId: creditorsGroup?._id,
-            accountNature: "LIABILITY",
-            accountCategory: "SUPPLIER",
-            openingBalance: supplierData.openingBalance || 0,
-            openingBalanceType: supplierData.openingBalanceType || "cr",
-            status: "active",
-            isSystemAccount: false,
-            createdBy: userId,
-          });
-        } else {
-          throw err;
-        }
-      }
+      const accountId = new mongoose.Types.ObjectId();
+      
+      accountsToInsert.push({
+        _id: accountId,
+        workspaceId,
+        companyId,
+        accountCode: accCode,
+        accountName: accountName,
+        accountGroupId: creditorsGroup?._id,
+        accountNature: "LIABILITY",
+        accountCategory: "SUPPLIER",
+        openingBalance: supplierData.openingBalance || 0,
+        openingBalanceType: supplierData.openingBalanceType || "cr",
+        status: "active",
+        isSystemAccount: false,
+        createdBy: userId,
+      });
 
       payloadsToInsert.push({
         ...supplierData,
         supplierCode,
-        ledgerAccountId: ledgerAccount._id,
+        ledgerAccountId: accountId,
         workspaceId,
         companyId,
         createdBy: userId,
@@ -688,6 +689,18 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
       
       if (normalizedName) {
         existingNames.add(normalizedName);
+      }
+    }
+
+    if (accountsToInsert.length > 0) {
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < accountsToInsert.length; i += BATCH_SIZE) {
+        const batch = accountsToInsert.slice(i, i + BATCH_SIZE);
+        try {
+          await Account.insertMany(batch, { ordered: false });
+        } catch (err) {
+          console.warn("Some accounts failed to insert during bulk import batch:", err.message);
+        }
       }
     }
 
@@ -701,7 +714,8 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
       results.successful = suppliersData.length - error.writeErrors.length;
       results.failed = error.writeErrors.length;
       error.writeErrors.forEach(err => {
-        results.errors.push(`Failed for index ${err.index}: ${err.errmsg}`);
+        const errorMsg = err.errmsg || err.message || (err.err && err.err.errmsg) || JSON.stringify(err);
+        results.errors.push(`Failed for index ${err.index}: ${errorMsg}`);
       });
     } else {
       results.failed = suppliersData.length;

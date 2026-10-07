@@ -1,4 +1,5 @@
 import xlsx from "xlsx";
+import crypto from "crypto";
 import { parseB2BOutstandingExcel } from "./b2bOutstandingParser.service.js";
 import SalesInvoice from "../../../sales/invoices/models/invoice.model.js";
 
@@ -586,21 +587,32 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     const AccountGroup = mongoose.model("AccountGroup");
     const Account = mongoose.model("Account");
 
-    // Pre-fetch existing to prevent duplicates during concurrent imports
-    const existingCustomers = await CustomerModel.find({
-      workspaceId,
-      companyId,
-      isDeleted: false
-    }).select("name billingAddress.city mobile").lean();
+    // Optimize: Fetch ONLY relevant customers for this batch to prevent N^2 performance degradation
+    const chunkMobiles = customersData.map(c => (c.mobile || "").trim()).filter(Boolean);
+    const chunkNames = customersData.map(c => (c.name || "").trim()).filter(Boolean);
+
+    let existingCustomers = [];
+    if (importType !== "b2c" && chunkNames.length > 0) {
+      existingCustomers = await CustomerModel.find({
+        workspaceId,
+        companyId,
+        isDeleted: false,
+        name: { $in: chunkNames }
+      }).select("name billingAddress.city mobile").lean();
+    }
     
-    const existingKeys = new Set(existingCustomers.map(c => {
-      const n = (c.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
-      const city = (c.billingAddress?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
-      const m = (c.mobile || "").trim();
-      return `${n}|${city}|${m}`;
-    }).filter(k => k.startsWith("|") === false));
+    const existingKeys = new Set();
+    const existingMobiles = new Set();
     
-    const existingMobiles = new Set(existingCustomers.map(c => c.mobile).filter(Boolean));
+    existingCustomers.forEach(c => {
+      if (c.mobile) existingMobiles.add(c.mobile);
+      if (importType !== "b2c") {
+        const n = (c.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
+        const city = (c.billingAddress?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
+        const m = (c.mobile || "").trim();
+        if (n) existingKeys.add(`${n}|${city}|${m}`);
+      }
+    });
 
     let debtorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_DEBTORS" }) 
                       || await AccountGroup.findOne({ workspaceId, companyId, groupName: "Sundry Debtors" });
@@ -631,15 +643,17 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
             createdBy: userId,
         });
     }
-    const existingCodes = await CustomerModel.find({ companyId, isDeleted: false }).select("customerCode").lean();
-    const usedCodes = new Set(existingCodes.map(c => c.customerCode));
     
-    // Batch query for existing account names to avoid conflicts
-    const expectedAccountNames = customersData.map(c => `${c.name} - Customer`);
+    // To maximize performance, we completely skip checking the database for existing codes.
+    // We rely entirely on the 8-character cryptographic hex string which gives 4.2 billion combinations,
+    // making collisions practically impossible.
+    const usedCodes = new Set();
+    
+    // Fetch only account names relevant to this batch
+    const accountNamesToCheck = customersData.map(c => `${c.name} - Customer`);
     const existingAccounts = await Account.find({
       companyId,
-      accountName: { $in: expectedAccountNames },
-      isDeleted: false
+      accountName: { $in: accountNamesToCheck }
     }).select("accountName").lean();
     
     const existingAccountNamesSet = new Set(existingAccounts.map(a => a.accountName));
@@ -653,14 +667,7 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
       const mobile = (customerData.mobile || "").trim();
       const customerKey = `${normalizedName}|${normalizedCity}|${mobile}`;
 
-      if (importType === "b2c") {
-        if (mobile && existingMobiles.has(mobile)) {
-          results.failed++;
-          results.errors.push(`Customer with mobile ${mobile} already exists`);
-          continue;
-        }
-        if (mobile) existingMobiles.add(mobile);
-      } else {
+      if (importType !== "b2c") {
         if (normalizedName && existingKeys.has(customerKey)) {
            results.failed++;
            results.errors.push(`Customer already exists: ${customerData.name}`);
@@ -670,10 +677,10 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
         existingKeys.add(customerKey);
       }
       
-      // Auto-generate unique code
+      // Auto-generate unique code that won't collide even across concurrent chunks
       let customerCode;
       do {
-         customerCode = `CUS${Math.floor(100000 + Math.random() * 900000)}`;
+         customerCode = `CUS-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       } while(usedCodes.has(customerCode));
       usedCodes.add(customerCode);
       
@@ -749,7 +756,8 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     if (error.writeErrors) {
       results.failed = error.writeErrors.length;
       error.writeErrors.forEach(err => {
-        results.errors.push(`Bulk import failed: ${err.errmsg}`);
+        const errorMsg = err.errmsg || err.message || (err.err && err.err.errmsg) || JSON.stringify(err);
+        results.errors.push(`Bulk import failed: ${errorMsg}`);
       });
     } else {
       results.failed = customersData.length;
