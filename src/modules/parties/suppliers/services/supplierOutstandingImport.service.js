@@ -126,7 +126,7 @@ export const previewOutstandingImport = async (workspaceId, companyId, fileBuffe
              const matchKey = findNearestMatch(normName, Array.from(supplierMap.keys()));
              if (matchKey) {
                  const suggested = supplierMap.get(matchKey).businessName;
-                 matchStatus = `NOT FOUND (Did you mean "${suggested}"?)`;
+                 matchedSupplier = supplierMap.get(matchKey); matchStatus = `MATCHED (Auto-corrected to "${suggested}")`;
              }
          }
       }
