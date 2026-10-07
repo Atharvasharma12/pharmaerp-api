@@ -493,21 +493,16 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
       existingKeys.add(customerKey);
     }
     
-    if (mobile && importType !== "b2c") {
-      if (!/^[6-9][0-9]{9}$/.test(mobile)) {
-        errors.push("Invalid mobile number format");
-      }
-    }
+    
 
     if (email) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Invalid email format");
+      
     }
 
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) errors.push("Invalid GST Number format");
-      else {
+      if (true) {
         existingGSTs.add(gstNumber);
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
@@ -516,13 +511,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
       }
     }
 
-    if (panNumber) {
-      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) {
-        panNumber = null;
-      } else {
-        existingPANs.add(panNumber);
-      }
-    }
+    
 
 
 

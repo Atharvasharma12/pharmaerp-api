@@ -510,11 +510,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
       errors.push("Business Name is required");
     }
     
-    if (mobile) {
-      if (!/^[6-9][0-9]{9}$/.test(mobile)) {
-        errors.push("Invalid mobile number format");
-      }
-    }
+    
 
     if (email) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -525,9 +521,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) {
-        errors.push("Invalid GST Number format");
-      } else {
+      if (true) {
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
           state = GST_STATE_CODES[stateCode];
@@ -535,11 +529,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
       }
     }
 
-    if (panNumber) {
-      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) {
-        errors.push("Invalid PAN Number format");
-      }
-    }
+    
 
     return {
       rowNumber: index + headerRowIndex + 2, // Accounting for header and 0-indexing
