@@ -58,7 +58,7 @@ const cashDenominationBalanceSchema = new mongoose.Schema(
 
     cashAccountId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "BranchCash",
+      ref: \"BranchCash\",
       required: [true, "Cash Account is required"],
       index: true,
     },

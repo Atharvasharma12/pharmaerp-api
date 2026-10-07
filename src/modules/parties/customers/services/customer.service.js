@@ -502,7 +502,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (gstNumber.length >= 2) {
+      if (true) {
         existingGSTs.add(gstNumber);
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
