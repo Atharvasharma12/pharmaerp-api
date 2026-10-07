@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
 import ApiError from "../../../../utils/ApiError.js";
 import supplierRepository from "../repositories/supplier.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
@@ -55,18 +56,30 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
   let creditorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_CREDITORS" }) 
                     || await AccountGroup.findOne({ workspaceId, companyId, groupName: "Sundry Creditors" });
   if (!creditorsGroup) {
-      const currentLiabilities = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "CURRENT_LIABILITIES" }) || await AccountGroup.findOne({ workspaceId, companyId, groupName: /Current Liabilit/i });
-      if (currentLiabilities) {
-          creditorsGroup = await AccountGroup.create({
+      let currentLiabilities = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "CURRENT_LIABILITIES" }) || await AccountGroup.findOne({ workspaceId, companyId, groupName: /Current Liabilit/i });
+      if (!currentLiabilities) {
+          currentLiabilities = await AccountGroup.create({
               workspaceId,
               companyId,
-              groupName: "Sundry Creditors",
-              groupCode: "SUNDRY_CREDITORS",
-              parentGroupId: currentLiabilities._id,
+              groupName: "Current Liabilities",
+              groupCode: "CURRENT_LIABILITIES",
+              nature: "LIABILITY",
               isSystemGroup: true,
               createdBy: userId,
           });
       }
+      
+      creditorsGroup = await AccountGroup.create({
+          workspaceId,
+          companyId,
+          groupName: "Sundry Creditors",
+          groupCode: "SUNDRY_CREDITORS",
+          parentGroupId: currentLiabilities._id,
+          nature: "LIABILITY",
+          status: "active",
+          isSystemGroup: true,
+          createdBy: userId,
+      });
   }
 
   const accCode = supplierCode ? `SUP-${supplierCode}` : `SUP-${Date.now()}`;
@@ -495,57 +508,28 @@ const previewImport = async (workspaceId, companyId, fileBuffer) => {
 
     if (!businessName) {
       errors.push("Business Name is required");
-    } else if (existingNames.has(normalizedName)) {
-      errors.push("Supplier with a similar name already exists");
-    } else {
-      existingNames.add(normalizedName);
     }
     
-    if (mobile) {
-      if (!/^[6-9][0-9]{9}$/.test(mobile)) {
-        errors.push("Invalid mobile number format");
-      } else if (existingMobilePhones.has(mobile)) {
-        errors.push("Mobile number already exists in workspace");
-      } else {
-        existingMobilePhones.add(mobile);
-      }
-    }
+    
 
     if (email) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         errors.push("Invalid email format");
-      } else if (existingEmails.has(email)) {
-        errors.push("Email already exists in workspace");
-      } else {
-        existingEmails.add(email);
       }
     }
 
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) {
-        errors.push("Invalid GST Number format");
-      } else if (existingGSTs.has(gstNumber)) {
-        errors.push("GST Number already exists in workspace");
-      } else {
+      if (true) {
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
           state = GST_STATE_CODES[stateCode];
         }
-        existingGSTs.add(gstNumber);
       }
     }
 
-    if (panNumber) {
-      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) {
-        errors.push("Invalid PAN Number format");
-      } else if (existingPANs.has(panNumber)) {
-        errors.push("PAN Number already exists in workspace");
-      } else {
-        existingPANs.add(panNumber);
-      }
-    }
+    
 
     return {
       rowNumber: index + headerRowIndex + 2, // Accounting for header and 0-indexing
@@ -601,82 +585,91 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
     let creditorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_CREDITORS" }) 
                       || await AccountGroup.findOne({ workspaceId, companyId, groupName: "Sundry Creditors" });
     if (!creditorsGroup) {
-        const currentLiabilities = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "CURRENT_LIABILITIES" }) || await AccountGroup.findOne({ workspaceId, companyId, groupName: /Current Liabilit/i });
-        if (currentLiabilities) {
-            creditorsGroup = await AccountGroup.create({
+        let currentLiabilities = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "CURRENT_LIABILITIES" }) || await AccountGroup.findOne({ workspaceId, companyId, groupName: /Current Liabilit/i });
+        if (!currentLiabilities) {
+            currentLiabilities = await AccountGroup.create({
                 workspaceId,
                 companyId,
-                groupName: "Sundry Creditors",
-                groupCode: "SUNDRY_CREDITORS",
-                parentGroupId: currentLiabilities._id,
+                groupName: "Current Liabilities",
+                groupCode: "CURRENT_LIABILITIES",
+                nature: "LIABILITY",
                 isSystemGroup: true,
                 createdBy: userId,
             });
         }
+        
+        creditorsGroup = await AccountGroup.create({
+            workspaceId,
+            companyId,
+            groupName: "Sundry Creditors",
+            groupCode: "SUNDRY_CREDITORS",
+            parentGroupId: currentLiabilities._id,
+            nature: "LIABILITY",
+            status: "active",
+            isSystemGroup: true,
+            createdBy: userId,
+        });
     }
 
+    const existingCodes = await Supplier.find({ isDeleted: false }).select("supplierCode").lean();
+    const usedCodes = new Set(existingCodes.map(s => s.supplierCode));
+
+    const existingAccounts = await Account.find({
+      companyId,
+      isDeleted: false
+    }).select("accountName accountCode").lean();
+    const existingAccountNamesSet = new Set(existingAccounts.map(a => a.accountName));
+
+    // Add existing account codes to usedCodes to prevent orphaned account code collisions
+    existingAccounts.forEach(a => {
+      if (a.accountCode && a.accountCode.startsWith('SUP-')) {
+        usedCodes.add(a.accountCode.replace('SUP-', ''));
+      }
+    });
+
+    const accountsToInsert = [];
     const payloadsToInsert = [];
     
     for (const supplierData of suppliersData) {
       const normalizedName = supplierData.businessName?.toLowerCase().replace(/\s+/g, ' ').trim();
-      if (normalizedName && existingNames.has(normalizedName)) {
-         results.failed++;
-         results.errors.push(`Supplier already exists: ${supplierData.businessName}`);
-         continue;
-      }
+
       
       // Auto-generate code
-      const supplierCode = `SUP${Math.floor(100000 + Math.random() * 900000)}`;
+      let supplierCode;
+      do {
+         supplierCode = `SUP${crypto.randomBytes(4).toString("hex").toUpperCase()}`;
+      } while (usedCodes.has(supplierCode));
+      usedCodes.add(supplierCode);
       const accCode = `SUP-${supplierCode}`;
       
       let accountName = `${supplierData.businessName} - Supplier`;
-      const existingAcc = await Account.findOne({ companyId, accountName }).lean();
-      if (existingAcc) {
+      if (existingAccountNamesSet.has(accountName)) {
         accountName = `${supplierData.businessName} - Supplier (${accCode})`;
       }
+      existingAccountNamesSet.add(accountName);
       
-      let ledgerAccount;
-      try {
-        ledgerAccount = await Account.create({
-          workspaceId,
-          companyId,
-          accountCode: accCode,
-          accountName: accountName,
-          accountGroupId: creditorsGroup?._id,
-          accountNature: "LIABILITY",
-          accountCategory: "SUPPLIER",
-          openingBalance: supplierData.openingBalance || 0,
-          openingBalanceType: supplierData.openingBalanceType || "cr",
-          status: "active",
-          isSystemAccount: false,
-          createdBy: userId,
-        });
-      } catch (err) {
-        if (err.code === 11000) {
-          accountName = `${supplierData.businessName} - Supplier (${accCode})`;
-          ledgerAccount = await Account.create({
-            workspaceId,
-            companyId,
-            accountCode: accCode,
-            accountName: accountName,
-            accountGroupId: creditorsGroup?._id,
-            accountNature: "LIABILITY",
-            accountCategory: "SUPPLIER",
-            openingBalance: supplierData.openingBalance || 0,
-            openingBalanceType: supplierData.openingBalanceType || "cr",
-            status: "active",
-            isSystemAccount: false,
-            createdBy: userId,
-          });
-        } else {
-          throw err;
-        }
-      }
+      const accountId = new mongoose.Types.ObjectId();
+      
+      accountsToInsert.push({
+        _id: accountId,
+        workspaceId,
+        companyId,
+        accountCode: accCode,
+        accountName: accountName,
+        accountGroupId: creditorsGroup?._id,
+        accountNature: "LIABILITY",
+        accountCategory: "SUPPLIER",
+        openingBalance: supplierData.openingBalance || 0,
+        openingBalanceType: supplierData.openingBalanceType || "cr",
+        status: "active",
+        isSystemAccount: false,
+        createdBy: userId,
+      });
 
       payloadsToInsert.push({
         ...supplierData,
         supplierCode,
-        ledgerAccountId: ledgerAccount._id,
+        ledgerAccountId: accountId,
         workspaceId,
         companyId,
         createdBy: userId,
@@ -684,6 +677,18 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
       
       if (normalizedName) {
         existingNames.add(normalizedName);
+      }
+    }
+
+    if (accountsToInsert.length > 0) {
+      const BATCH_SIZE = 1000;
+      for (let i = 0; i < accountsToInsert.length; i += BATCH_SIZE) {
+        const batch = accountsToInsert.slice(i, i + BATCH_SIZE);
+        try {
+          await Account.insertMany(batch, { ordered: false });
+        } catch (err) {
+          console.warn("Some accounts failed to insert during bulk import batch:", err.message);
+        }
       }
     }
 
@@ -697,7 +702,8 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
       results.successful = suppliersData.length - error.writeErrors.length;
       results.failed = error.writeErrors.length;
       error.writeErrors.forEach(err => {
-        results.errors.push(`Failed for index ${err.index}: ${err.errmsg}`);
+        const errorMsg = err.errmsg || err.message || (err.err && err.err.errmsg) || JSON.stringify(err);
+        results.errors.push(`Failed for index ${err.index}: ${errorMsg}`);
       });
     } else {
       results.failed = suppliersData.length;

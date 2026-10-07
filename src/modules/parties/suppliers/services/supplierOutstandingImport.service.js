@@ -11,6 +11,56 @@ const normalizeSupplierName = (name) => {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 };
 
+
+const levenshteinDistance = (a, b) => {
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const matrix = [];
+  for (let i = 0; i <= b.length; i++) { matrix[i] = [i]; }
+  for (let j = 0; j <= a.length; j++) { matrix[0][j] = j; }
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+};
+
+const findNearestMatch = (name, candidates) => {
+  if (!name || !candidates || (candidates.length === 0 && candidates.size === 0)) return null;
+  const lowerName = name.toLowerCase().replace(/\s+/g, " ").trim();
+  let bestMatch = null;
+  let minDistance = Infinity;
+
+  // First check inclusion (often the case with B2B names)
+  for (const candidate of candidates) {
+    if (candidate.includes(lowerName) || lowerName.includes(candidate)) {
+      const dist = Math.abs(candidate.length - lowerName.length);
+      if (dist < minDistance) {
+        minDistance = dist;
+        bestMatch = candidate;
+      }
+    }
+  }
+
+  // If no inclusion match, fall back to Levenshtein distance
+  if (!bestMatch) {
+    for (const candidate of candidates) {
+      const dist = levenshteinDistance(lowerName, candidate);
+      const maxAllowed = Math.max(3, Math.floor(lowerName.length * 0.3));
+      if (dist <= maxAllowed && dist < minDistance) {
+        minDistance = dist;
+        bestMatch = candidate;
+      }
+    }
+  }
+  return bestMatch;
+};
+
 const normalizeInvoiceNumber = (inv) => {
   if (!inv) return null;
   const val = inv.replace(/^\*+\s*/g, "").trim().toUpperCase();
@@ -69,6 +119,15 @@ export const previewOutstandingImport = async (workspaceId, companyId, fileBuffe
              matchStatus = "MATCHED"; 
              break;
            }
+         }
+         
+         // If still no match, find nearest match for suggestion
+         if (!matchedSupplier) {
+             const matchKey = findNearestMatch(normName, Array.from(supplierMap.keys()));
+             if (matchKey) {
+                 const suggested = supplierMap.get(matchKey).businessName;
+                 matchedSupplier = supplierMap.get(matchKey); matchStatus = `MATCHED (Auto-corrected to "${suggested}")`;
+             }
          }
       }
     }

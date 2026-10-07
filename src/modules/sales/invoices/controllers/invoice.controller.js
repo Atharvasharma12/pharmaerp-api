@@ -67,3 +67,25 @@ export const getAllCustomerSales = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "All customer sales fetched successfully", result));
 });
+
+export const updateCustomerSale = asyncHandler(async (req, res) => {
+  const branchId =
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    req.query.branchId ||
+    req.body.branchId ||
+    null;
+
+  const result = await invoiceService.updateCustomerSale(
+    req.params.invoiceId,
+    req.params.customerId,
+    { ...req.body, branchId },
+    req.companyId,
+    req.workspaceId,
+    req.user
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer sale updated successfully", result));
+});
