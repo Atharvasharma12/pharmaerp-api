@@ -2,6 +2,7 @@ import asyncHandler from "../../../utils/asyncHandler.js";
 import ApiError from "../../../utils/ApiError.js";
 import { BusinessDay } from "./businessDay.model.js";
 import { Shift } from "../shifts/shift.model.js";
+import Branch from "../../organization/branches/models/branch.model.js";
 import BankDepositSlip from "../../finance/treasury/bank-deposit-slips/models/bankDepositSlip.model.js";
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
 import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTransfer.model.js";
@@ -107,13 +108,24 @@ const calculateShiftSummary = async (shift) => {
     upiBreakdown = [{ paymentQrId: null, upiId: "Unattributed", label: "Legacy / Untracked", provider: null, ...upiBreakdownRaw["unattributed"] }];
   }
 
+  const shiftDeposits =
+    (shift.manualDeposits || []).reduce((acc, d) => acc + (Number(d.amount) || 0), 0) ||
+    Number(shift.totalFundDeposits) ||
+    0;
+  const shiftWithdrawals =
+    (shift.manualWithdrawals || []).reduce((acc, w) => acc + (Number(w.amount) || 0), 0) ||
+    Number(shift.totalFundWithdrawals) ||
+    0;
+
   const expectedClosingCashAmount =
     shift.expectedClosingCashAmount !== undefined && shift.status === "closed"
       ? shift.expectedClosingCashAmount
-      : (shift.openingFloatAmount || 0) + cashNet - (shift.totalFundWithdrawals || 0) + (shift.totalFundDeposits || 0);
+      : (shift.openingFloatAmount || 0) + cashNet - shiftWithdrawals + shiftDeposits;
 
   return {
     ...shift.toObject(),
+    totalFundDeposits: shiftDeposits,
+    totalFundWithdrawals: shiftWithdrawals,
     invoiceCount,
     cashInvoiceCount,
     paymentQrCount,
@@ -125,53 +137,123 @@ const calculateShiftSummary = async (shift) => {
   };
 };
 
-const fetchFundTransfers = async ({ shiftIds = [], businessDayId = null }) => {
-  const orConditions = [];
-  if (shiftIds.length > 0) orConditions.push({ shiftId: { $in: shiftIds } });
-  if (businessDayId) orConditions.push({ businessDayId });
-
-  if (orConditions.length === 0) {
-    return { withdrawals: [], deposits: [], totalWithdrawals: 0, totalDeposits: 0 };
-  }
-
-  const fundTransfers = await FundTransfer.find({
-    $or: orConditions,
-    status: FUND_TRANSFER_STATUS.POSTED,
-    isDeleted: false,
-  })
-    .populate("fromBankAccountId", "accountName")
-    .populate("toBankAccountId", "accountName")
-    .populate("createdBy", "fullName");
-
+const fetchFundTransfers = async ({ shifts = [], shiftIds = [], businessDayId = null }) => {
   const withdrawals = [];
   const deposits = [];
   let totalWithdrawals = 0;
   let totalDeposits = 0;
 
-  for (const ft of fundTransfers) {
-    const ftData = {
-      _id: ft._id,
-      transferNumber: ft.transferNumber,
-      amount: ft.amount,
-      narration: ft.narration,
-      transferDate: ft.transferDate,
-      createdBy: ft.createdBy?.fullName || "System",
-    };
+  // 1. Process shift manual deposits and manual withdrawals
+  for (const s of shifts) {
+    const shiftName = s.shiftName || `Shift ${s.shiftNo || ""}`;
+    const shiftId = s._id;
 
-    if (ft.fromAccountType === "CASH") {
-      withdrawals.push({
-        ...ftData,
-        toAccountType: ft.toAccountType,
-        toAccountName: ft.toCashAccountId?.accountName || ft.toBankAccountId?.accountName || "External",
-      });
-      totalWithdrawals += ft.amount;
-    } else if (ft.toAccountType === "CASH") {
-      deposits.push({
-        ...ftData,
-        fromAccountType: ft.fromAccountType,
-        fromAccountName: ft.fromCashAccountId?.accountName || ft.fromBankAccountId?.accountName || "External",
-      });
-      totalDeposits += ft.amount;
+    if (Array.isArray(s.manualDeposits)) {
+      for (const dep of s.manualDeposits) {
+        deposits.push({
+          _id: dep._id,
+          transferNumber: `DEP-${String(dep._id).slice(-6).toUpperCase()}`,
+          referenceNo: `DEP-${String(dep._id).slice(-6).toUpperCase()}`,
+          amount: Number(dep.amount) || 0,
+          narration: dep.narration || "Manual cash deposit",
+          transferDate: dep.date || s.openedAt,
+          createdBy:
+            dep.createdBy?.fullName ||
+            dep.createdBy?.name ||
+            dep.createdBy?.email ||
+            "Staff",
+          fromAccountType: "CASH",
+          fromAccountName: "External Cash",
+          toAccountType: "CASH",
+          toAccountName: "Branch Cash Drawer",
+          shiftId,
+          shiftName,
+          source: "shift_manual_deposit",
+        });
+        totalDeposits += Number(dep.amount) || 0;
+      }
+    }
+
+    if (Array.isArray(s.manualWithdrawals)) {
+      for (const w of s.manualWithdrawals) {
+        withdrawals.push({
+          _id: w._id,
+          transferNumber: `WDL-${String(w._id).slice(-6).toUpperCase()}`,
+          referenceNo: `WDL-${String(w._id).slice(-6).toUpperCase()}`,
+          amount: Number(w.amount) || 0,
+          narration: w.narration || "Manual cash withdrawal",
+          transferDate: w.date || s.openedAt,
+          createdBy:
+            w.createdBy?.fullName ||
+            w.createdBy?.name ||
+            w.createdBy?.email ||
+            "Staff",
+          fromAccountType: "CASH",
+          fromAccountName: w.source === "running" ? "Running Drawer" : "Frozen Reserve",
+          toAccountType: "CASH",
+          toAccountName: "External",
+          shiftId,
+          shiftName,
+          source: w.source || "shift_manual_withdrawal",
+        });
+        totalWithdrawals += Number(w.amount) || 0;
+      }
+    }
+  }
+
+  // 2. Query any posted FundTransfer records
+  const orConditions = [];
+  if (shiftIds.length > 0) orConditions.push({ shiftId: { $in: shiftIds } });
+  if (businessDayId) orConditions.push({ businessDayId });
+
+  if (orConditions.length > 0) {
+    const fundTransfers = await FundTransfer.find({
+      $or: orConditions,
+      status: FUND_TRANSFER_STATUS.POSTED,
+      isDeleted: false,
+    })
+      .populate("fromBankAccountId", "accountName")
+      .populate("toBankAccountId", "accountName")
+      .populate("createdBy", "fullName name email");
+
+    for (const ft of fundTransfers) {
+      const ftData = {
+        _id: ft._id,
+        transferNumber: ft.transferNumber,
+        referenceNo: ft.transferNumber,
+        amount: Number(ft.amount) || 0,
+        narration: ft.narration,
+        transferDate: ft.transferDate,
+        createdBy: ft.createdBy?.fullName || ft.createdBy?.name || "System",
+        shiftId: ft.shiftId || null,
+        source: "fund_transfer",
+      };
+
+      if (ft.fromAccountType === "CASH") {
+        withdrawals.push({
+          ...ftData,
+          fromAccountType: ft.fromAccountType,
+          fromAccountName: "Branch Cash Drawer",
+          toAccountType: ft.toAccountType,
+          toAccountName:
+            ft.toCashAccountId?.accountName ||
+            ft.toBankAccountId?.accountName ||
+            "External",
+        });
+        totalWithdrawals += Number(ft.amount) || 0;
+      } else if (ft.toAccountType === "CASH") {
+        deposits.push({
+          ...ftData,
+          fromAccountType: ft.fromAccountType,
+          fromAccountName:
+            ft.fromCashAccountId?.accountName ||
+            ft.fromBankAccountId?.accountName ||
+            "External",
+          toAccountType: ft.toAccountType,
+          toAccountName: "Branch Cash Drawer",
+        });
+        totalDeposits += Number(ft.amount) || 0;
+      }
     }
   }
 
@@ -188,16 +270,22 @@ export const openBusinessDay = asyncHandler(async (req, res, next) => {
   const branchId = req.headers["x-branch-id"] || req.branchId || req.body.branchId || null;
   if (!branchId) return next(new ApiError(400, "Branch ID is missing"));
 
+  const clientDate = req.body.clientDate || req.query.clientDate || req.headers["x-client-date"] || null;
   const payload = {
     workspaceId: req.workspaceId,
     companyId: req.companyId,
     branchId,
-    businessDate: req.body.businessDate || req.body.date || new Date(),
+    businessDate: req.body.businessDate || req.body.date || clientDate || new Date(),
+    clientDate,
     createdBy: req.user?._id,
     note: req.body.note,
   };
 
   const businessDay = await openBusinessDayService(payload);
+  await businessDay.populate([
+    { path: "createdBy", select: "fullName name email role" },
+    { path: "branchId", select: "name branchCode branchName" },
+  ]);
   res.status(201).json({ success: true, data: businessDay });
 });
 
@@ -226,8 +314,9 @@ export const listBusinessDays = asyncHandler(async (req, res, next) => {
   const businessDays = await BusinessDay.find(filter)
     .sort({ businessDate: sortOrder })
     .populate("shifts")
-    .populate("createdBy", "fullName email")
-    .populate("closedBy", "fullName email");
+    .populate("createdBy", "fullName name email role")
+    .populate("closedBy", "fullName name email role")
+    .populate("branchId", "name branchCode branchName");
 
   res.status(200).json({ success: true, data: businessDays });
 });
@@ -244,7 +333,12 @@ export const getOpenBusinessDay = asyncHandler(async (req, res, next) => {
   const businessDay = await getOpenBusinessDayService(branchId);
   if (!businessDay) return next(new ApiError(404, "No open Business Day found for this branch"));
 
-  await businessDay.populate("shifts");
+  await businessDay.populate([
+    { path: "shifts" },
+    { path: "createdBy", select: "fullName name email role" },
+    { path: "closedBy", select: "fullName name email role" },
+    { path: "branchId", select: "name branchCode branchName" },
+  ]);
 
   // Also fetch the currently open shift (if any) to include in response
   const openShift = await Shift.findOne({ businessDayId: businessDay._id, status: "open" });
@@ -263,7 +357,8 @@ export const getSuggestedBusinessDate = asyncHandler(async (req, res, next) => {
   const branchId = req.headers["x-branch-id"] || req.branchId || req.query.branchId || null;
   if (!branchId) return next(new ApiError(400, "Branch ID is required"));
 
-  const suggestion = await getSuggestedBusinessDateService(branchId);
+  const clientDate = req.query.clientDate || req.headers["x-client-date"] || null;
+  const suggestion = await getSuggestedBusinessDateService(branchId, clientDate);
   res.status(200).json({ success: true, data: suggestion });
 });
 
@@ -272,7 +367,19 @@ export const getSuggestedBusinessDate = asyncHandler(async (req, res, next) => {
  * Returns a single Business Day by ID.
  */
 export const getBusinessDayById = asyncHandler(async (req, res, next) => {
-  const businessDay = await BusinessDay.findById(req.params.id).populate("shifts");
+  const businessDay = await BusinessDay.findById(req.params.id)
+    .populate({
+      path: "shifts",
+      populate: [
+        { path: "openedBy", select: "fullName name email role" },
+        { path: "closedBy", select: "fullName name email role" },
+        { path: "manualDeposits.createdBy", select: "fullName name email role" },
+        { path: "manualWithdrawals.createdBy", select: "fullName name email role" },
+      ],
+    })
+    .populate("createdBy", "fullName name email role")
+    .populate("closedBy", "fullName name email role")
+    .populate("branchId", "name branchCode branchName");
   if (!businessDay) return next(new ApiError(404, "Business Day not found"));
   res.status(200).json({ success: true, data: businessDay });
 });
@@ -282,10 +389,43 @@ export const getBusinessDayById = asyncHandler(async (req, res, next) => {
  * Returns a Business Day with full shift-level financial summary.
  */
 export const getBusinessDaySummary = asyncHandler(async (req, res, next) => {
-  const businessDay = await BusinessDay.findById(req.params.id).populate("shifts");
+  const businessDay = await BusinessDay.findById(req.params.id)
+    .populate({
+      path: "shifts",
+      populate: [
+        { path: "openedBy", select: "fullName name email role" },
+        { path: "closedBy", select: "fullName name email role" },
+        { path: "manualDeposits.createdBy", select: "fullName name email role" },
+        { path: "manualWithdrawals.createdBy", select: "fullName name email role" },
+      ],
+    })
+    .populate("createdBy", "fullName name email role")
+    .populate("closedBy", "fullName name email role")
+    .populate("branchId", "name branchCode branchName");
   if (!businessDay) return next(new ApiError(404, "Business Day not found"));
 
-  const shiftSummaries = await Promise.all(businessDay.shifts.map(calculateShiftSummary));
+  // Defensively fetch all shifts linked to this Business Day
+  const linkedShifts = await Shift.find({
+    $or: [
+      { businessDayId: businessDay._id },
+      { _id: { $in: (businessDay.shifts || []).map((s) => s._id || s) } },
+    ],
+  })
+    .populate("openedBy", "fullName name email role")
+    .populate("closedBy", "fullName name email role")
+    .populate("manualDeposits.createdBy", "fullName name email role")
+    .populate("manualWithdrawals.createdBy", "fullName name email role");
+
+  const shiftMap = new Map();
+  (businessDay.shifts || []).forEach((s) => {
+    if (s && s._id) shiftMap.set(String(s._id), s);
+  });
+  linkedShifts.forEach((s) => {
+    if (s && s._id) shiftMap.set(String(s._id), s);
+  });
+  const allShifts = Array.from(shiftMap.values());
+
+  const shiftSummaries = await Promise.all(allShifts.map(calculateShiftSummary));
 
   let totalInvoiceCount = 0;
   let totalCashInvoiceCount = 0;
@@ -316,17 +456,73 @@ export const getBusinessDaySummary = asyncHandler(async (req, res, next) => {
   });
 
   const upiBreakdown = Object.values(upiBreakdownRaw);
-  const shiftIds = (businessDay.shifts || []).map((s) => s._id);
-  const ftData = await fetchFundTransfers({ shiftIds, businessDayId: businessDay._id });
-  
-  const bankSlips = await BankDepositSlip.find({
+  const shiftIds = allShifts.map((s) => s._id);
+  const ftData = await fetchFundTransfers({
+    shifts: allShifts,
+    shiftIds,
     businessDayId: businessDay._id,
-    isDeleted: false,
-    status: { $ne: "cancelled" }
-  }).lean();
+  });
 
-  const totalFundWithdrawals = businessDay.totalFundWithdrawals || ftData.totalWithdrawals;
-  const totalFundDeposits = businessDay.totalFundDeposits || ftData.totalDeposits;
+  const branchId = businessDay.branchId?._id || businessDay.branchId;
+  const startOfDay = new Date(businessDay.businessDate);
+  startOfDay.setUTCHours(0, 0, 0, 0);
+  const endOfDay = new Date(businessDay.businessDate);
+  endOfDay.setUTCHours(23, 59, 59, 999);
+
+  const bankSlipConditions = [{ businessDayId: businessDay._id }];
+  if (branchId) {
+    bankSlipConditions.push({
+      branchId,
+      slipDate: {
+        $gte: new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000),
+        $lte: new Date(endOfDay.getTime() + 24 * 60 * 60 * 1000),
+      },
+    });
+    if (businessDay.actualOpenedAt) {
+      bankSlipConditions.push({
+        branchId,
+        createdAt: {
+          $gte: new Date(new Date(businessDay.actualOpenedAt).getTime() - 2 * 60 * 60 * 1000),
+          $lte: businessDay.actualClosedAt
+            ? new Date(new Date(businessDay.actualClosedAt).getTime() + 2 * 60 * 60 * 1000)
+            : new Date(Date.now() + 24 * 60 * 60 * 1000),
+        },
+      });
+    }
+  }
+
+  const bankSlips = await BankDepositSlip.find({
+    $or: bankSlipConditions,
+    isDeleted: false,
+    status: { $ne: "cancelled" },
+  })
+    .populate("toBankAccountId", "accountName accountNumber bankName")
+    .populate("createdBy", "fullName name email role")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const totalBankSlipsAmount = bankSlips.reduce(
+    (sum, b) => sum + (Number(b.amount) || 0),
+    0
+  );
+
+  // Retrieve current branch cash balances
+  let branchCash = null;
+  if (branchId) {
+    try {
+      const { default: branchCashService } = await import(
+        "../../finance/treasury/cash-management/branch-cash/services/branchCash.service.js"
+      );
+      branchCash = await branchCashService.getByBranchId(branchId, req.companyId);
+    } catch (bcErr) {
+      console.warn("[getBusinessDaySummary] Error fetching branchCash:", bcErr.message);
+    }
+  }
+
+  const totalFundWithdrawals =
+    ftData.totalWithdrawals || businessDay.totalFundWithdrawals || 0;
+  const totalFundDeposits =
+    ftData.totalDeposits || businessDay.totalFundDeposits || 0;
 
   let openingFloatAmount = businessDay.openingFloatAmount || 0;
   let expectedClosingCashAmount = businessDay.expectedClosingCashAmount || 0;
@@ -335,11 +531,22 @@ export const getBusinessDaySummary = asyncHandler(async (req, res, next) => {
   if (businessDay.status === "open" && shiftSummaries.length > 0) {
     openingFloatAmount = shiftSummaries[0].openingFloatAmount || 0;
     openingDenominations = shiftSummaries[0].openingDenominations || [];
-    expectedClosingCashAmount = openingFloatAmount + totalCashNet + totalFundDeposits - totalFundWithdrawals;
+    expectedClosingCashAmount =
+      openingFloatAmount + totalCashNet + totalFundDeposits - totalFundWithdrawals;
   }
+
+  const branchDoc = businessDay.branchId;
+  const branchName =
+    branchDoc?.name || branchDoc?.branchName || branchDoc?.displayName || null;
+  const branchCode = branchDoc?.branchCode || null;
 
   const summary = {
     ...businessDay.toObject(),
+    shifts: allShifts,
+    branchName,
+    branchCode,
+    branch: branchDoc,
+    branchCash,
     shiftSummaries,
     totalInvoiceCount,
     totalCashInvoiceCount,
@@ -357,6 +564,8 @@ export const getBusinessDaySummary = asyncHandler(async (req, res, next) => {
     openingDenominations,
     closingDenominations: businessDay.closingDenominations || [],
     bankSlips,
+    totalBankSlipsAmount,
+    bankSlipsCount: bankSlips.length,
   };
 
   res.status(200).json({ success: true, data: summary });
@@ -375,6 +584,14 @@ export const closeBusinessDay = asyncHandler(async (req, res, next) => {
     closingDenominations,
     note,
   });
+
+  if (businessDay) {
+    await businessDay.populate([
+      { path: "createdBy", select: "fullName name email role" },
+      { path: "closedBy", select: "fullName name email role" },
+      { path: "branchId", select: "name branchCode branchName" },
+    ]);
+  }
 
   res.status(200).json({ success: true, data: businessDay });
 });

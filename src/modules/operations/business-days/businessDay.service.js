@@ -6,25 +6,50 @@ import ApiError from "../../../utils/ApiError.js";
 
 /**
  * Normalise any date value to midnight UTC (canonical business date).
- * This ensures consistent comparison regardless of time zone offsets.
+ * Accepts YYYY-MM-DD string, Date object, or timestamp.
+ * Avoids timezone drift by parsing YYYY-MM-DD components directly into UTC.
  */
 const toCanonicalDate = (input) => {
-  const d = input ? new Date(input) : new Date();
+  if (!input) {
+    const d = new Date();
+    return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  }
+  if (typeof input === "string") {
+    const match = input.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const year = parseInt(match[1], 10);
+      const month = parseInt(match[2], 10) - 1;
+      const day = parseInt(match[3], 10);
+      return new Date(Date.UTC(year, month, day));
+    }
+  }
+  if (input instanceof Date && !Number.isNaN(input.getTime())) {
+    return new Date(Date.UTC(input.getUTCFullYear(), input.getUTCMonth(), input.getUTCDate()));
+  }
+  const d = new Date(input);
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 };
 
 /**
  * Returns today's canonical date (midnight UTC).
+ * If clientDate (e.g. "2026-10-08") is provided, normalizes that date.
  */
-const todayCanonical = () => toCanonicalDate(new Date());
+const todayCanonical = (clientDate) => {
+  if (clientDate) {
+    return toCanonicalDate(clientDate);
+  }
+  const d = new Date();
+  return new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+};
 
 /**
  * Returns tomorrow's canonical date (midnight UTC).
  */
-const tomorrowCanonical = () => {
-  const t = new Date();
+const tomorrowCanonical = (clientDate) => {
+  const base = todayCanonical(clientDate);
+  const t = new Date(base.getTime());
   t.setUTCDate(t.getUTCDate() + 1);
-  return toCanonicalDate(t);
+  return t;
 };
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -47,9 +72,9 @@ export const getOpenBusinessDay = async (branchId) => {
  *
  * @returns {{ suggestedDate: Date, reason: string }}
  */
-export const getSuggestedBusinessDate = async (branchId) => {
-  const today = todayCanonical();
-  const tomorrow = tomorrowCanonical();
+export const getSuggestedBusinessDate = async (branchId, clientDate) => {
+  const today = todayCanonical(clientDate);
+  const tomorrow = tomorrowCanonical(clientDate);
 
   const openDay = await BusinessDay.findOne({ branchId, status: "open" }).lean();
   if (openDay) {
@@ -59,6 +84,8 @@ export const getSuggestedBusinessDate = async (branchId) => {
       hasOpenDay: true,
       openDayId: openDay._id,
       openDayBusinessDate: openDay.businessDate,
+      todayDate: today,
+      tomorrowDate: tomorrow,
     };
   }
 
@@ -69,11 +96,25 @@ export const getSuggestedBusinessDate = async (branchId) => {
   }).lean();
 
   if (!todayDay || todayDay.status === "open") {
-    return { suggestedDate: today, reason: "Today has no closed Business Day yet.", hasOpenDay: false };
+    return {
+      suggestedDate: today,
+      reason: "Ready to start today's business day operations.",
+      hasOpenDay: false,
+      todayDate: today,
+      tomorrowDate: tomorrow,
+      isTodayClosed: false,
+    };
   }
 
   // Today is already closed → suggest tomorrow
-  return { suggestedDate: tomorrow, reason: "Today is already closed. Opening for tomorrow.", hasOpenDay: false };
+  return {
+    suggestedDate: tomorrow,
+    reason: "Today is already closed. Opening for tomorrow.",
+    hasOpenDay: false,
+    todayDate: today,
+    tomorrowDate: tomorrow,
+    isTodayClosed: true,
+  };
 };
 
 /**
@@ -81,18 +122,19 @@ export const getSuggestedBusinessDate = async (branchId) => {
  *
  * Rules enforced:
  *   1. No other BusinessDay can be OPEN for this branch.
- *   2. businessDate must be today or tomorrow only.
+ *   2. businessDate must be today or tomorrow only (past dates and dates beyond tomorrow strictly disallowed).
  *
  * @param {object} data
  * @param {string} data.workspaceId
  * @param {string} data.companyId
  * @param {string} data.branchId
  * @param {Date}   data.businessDate  - The logical date (validated: today or tomorrow)
+ * @param {string} [data.clientDate]  - Local calendar date string from client
  * @param {string} data.createdBy
  * @param {string} [data.note]
  */
 export const openBusinessDay = async (data) => {
-  const { workspaceId, companyId, branchId, businessDate, createdBy, note } = data;
+  const { workspaceId, companyId, branchId, businessDate, clientDate, createdBy, note } = data;
 
   // Guard 1: Only one open Business Day per branch
   const existingOpen = await BusinessDay.findOne({ branchId, status: "open" });
@@ -104,20 +146,41 @@ export const openBusinessDay = async (data) => {
     );
   }
 
-  // Guard 2: Enforce strict sequential date logic
-  const suggestion = await getSuggestedBusinessDate(branchId);
+  // Guard 2: Enforce strict sequential date logic (only Today or Tomorrow)
+  const suggestion = await getSuggestedBusinessDate(branchId, clientDate);
   
-  // This covers Guard 1 again, but safely relies on the centralized suggestion logic
   if (suggestion.hasOpenDay) {
     throw new ApiError(400, suggestion.reason);
   }
 
   const canonical = toCanonicalDate(businessDate);
-  if (canonical.getTime() !== suggestion.suggestedDate.getTime()) {
-    const formattedSuggest = suggestion.suggestedDate.toISOString().split("T")[0];
+  const today = todayCanonical(clientDate);
+  const tomorrow = tomorrowCanonical(clientDate);
+
+  if (canonical.getTime() < today.getTime()) {
     throw new ApiError(
       400,
-      `Invalid business date. The system requires opening the session for ${formattedSuggest}. ${suggestion.reason}`
+      `Cannot open a Business Day for past dates or yesterday. You can only open for today or tomorrow.`
+    );
+  }
+
+  if (canonical.getTime() > tomorrow.getTime()) {
+    throw new ApiError(
+      400,
+      `Cannot open a Business Day beyond tomorrow. You can only open for today or tomorrow.`
+    );
+  }
+
+  const existingForDate = await BusinessDay.findOne({
+    branchId,
+    businessDate: canonical,
+    status: { $ne: "cancelled" },
+  });
+
+  if (existingForDate) {
+    throw new ApiError(
+      400,
+      `A Business Day for this date (${canonical.toISOString().split("T")[0]}) already exists with status: ${existingForDate.status}.`
     );
   }
 
