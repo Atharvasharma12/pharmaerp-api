@@ -412,10 +412,11 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
   const existingGSTs = new Set(existingCustomers.map(s => s.gstNumber).filter(Boolean));
   const existingPANs = new Set(existingCustomers.map(s => s.panNumber).filter(Boolean));
   const existingKeys = new Set(existingCustomers.map(s => {
-    const n = (s.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
-    const c = (s.billingAddress?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
+    const n = (s.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const c = (s.billingAddress?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
     const m = (s.mobile || "").trim();
-    return `${n}|${c}|${m}`;
+    const e = (s.email || "").toLowerCase().trim();
+    return \`${n}|${m}|${e}|${c}\`;
   }).filter(k => k.startsWith("|") === false));
 
   const parsedRows = data.map((lowerRow, index) => {
@@ -483,35 +484,22 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
     }
 
     const normalizedCity = city.toLowerCase().replace(/\s+/g, ' ').trim();
-    const customerKey = `${normalizedName}|${normalizedCity}|${mobile || ""}`;
+    const emailLowerCase = email ? email.toLowerCase().trim() : "";
+    const customerKey = \`${normalizedName}|${mobile || ""}|${emailLowerCase}|${normalizedCity}\`;
 
     if (!businessName) {
       errors.push("Business Name is required");
     } else {
-      if (importType === "b2c") {
-        if (mobile) {
-          if (existingMobilePhones.has(mobile)) {
-             errors.push(`Customer with mobile number ${mobile} already exists`);
-          } else {
-             existingMobilePhones.add(mobile);
-          }
-        }
+      if (existingKeys.has(customerKey)) {
+        errors.push("Customer with same name, mobile, email, and city already exists");
       } else {
-        if (existingKeys.has(customerKey)) {
-          errors.push("Customer with same name, city, and mobile already exists in workspace or this file");
-        } else {
-          existingKeys.add(customerKey);
-        }
+        existingKeys.add(customerKey);
       }
     }
     
     if (mobile && importType !== "b2c") {
       if (!/^[6-9][0-9]{9}$/.test(mobile)) {
         errors.push("Invalid mobile number format");
-      } else if (existingMobilePhones.has(mobile)) {
-        mobile = null;
-      } else {
-        existingMobilePhones.add(mobile);
       }
     }
 
@@ -606,12 +594,11 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     
     existingCustomers.forEach(c => {
       if (c.mobile) existingMobiles.add(c.mobile);
-      if (importType !== "b2c") {
-        const n = (c.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
-        const city = (c.billingAddress?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
-        const m = (c.mobile || "").trim();
-        if (n) existingKeys.add(`${n}|${city}|${m}`);
-      }
+      const n = (c.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+      const city = (c.billingAddress?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
+      const m = (c.mobile || "").trim();
+      const e = (c.email || "").toLowerCase().trim();
+      if (n) existingKeys.add(`${n}|${m}|${e}|${city}`);
     });
 
     let debtorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_DEBTORS" }) 
@@ -663,19 +650,18 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     
     for (const customerData of customersData) {
       const normalizedName = customerData.name?.toLowerCase().replace(/\s+/g, ' ').trim();
-      const normalizedCity = (customerData.address?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
+      const normalizedCity = (customerData.address?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
       const mobile = (customerData.mobile || "").trim();
-      const customerKey = `${normalizedName}|${normalizedCity}|${mobile}`;
+      const emailLowerCase = (customerData.email || "").toLowerCase().trim();
+      const customerKey = `${normalizedName}|${mobile}|${emailLowerCase}|${normalizedCity}`;
 
-      if (importType !== "b2c") {
-        if (normalizedName && existingKeys.has(customerKey)) {
-           results.failed++;
-           results.errors.push(`Customer already exists: ${customerData.name}`);
-           continue;
-        }
-        // Prevent duplicates in the same batch
-        existingKeys.add(customerKey);
+      if (normalizedName && existingKeys.has(customerKey)) {
+         results.failed++;
+         results.errors.push(`Customer already exists: ${customerData.name}`);
+         continue;
       }
+      // Prevent duplicates in the same batch
+      existingKeys.add(customerKey);
       
       // Auto-generate unique code that won't collide even across concurrent chunks
       let customerCode;
