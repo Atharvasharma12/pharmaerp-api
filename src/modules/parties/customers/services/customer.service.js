@@ -416,7 +416,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
     const c = (s.billingAddress?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
     const m = (s.mobile || "").trim();
     const e = (s.email || "").toLowerCase().trim();
-    return \`${n}|${m}|${e}|${c}\`;
+    return `${n}|${m}|${e}|${c}`;
   }).filter(k => k.startsWith("|") === false));
 
   const parsedRows = data.map((lowerRow, index) => {
@@ -485,16 +485,12 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
 
     const normalizedCity = city.toLowerCase().replace(/\s+/g, ' ').trim();
     const emailLowerCase = email ? email.toLowerCase().trim() : "";
-    const customerKey = \`${normalizedName}|${mobile || ""}|${emailLowerCase}|${normalizedCity}\`;
+    const customerKey = `${normalizedName}|${mobile || ""}|${emailLowerCase}|${normalizedCity}`;
 
     if (!businessName) {
       errors.push("Business Name is required");
     } else {
-      if (existingKeys.has(customerKey)) {
-        errors.push("Customer with same name, mobile, email, and city already exists");
-      } else {
-        existingKeys.add(customerKey);
-      }
+      existingKeys.add(customerKey);
     }
     
     if (mobile && importType !== "b2c") {
@@ -511,7 +507,6 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
       if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) errors.push("Invalid GST Number format");
-      else if (existingGSTs.has(gstNumber)) errors.push("GST Number already exists in workspace or this file");
       else {
         existingGSTs.add(gstNumber);
         const stateCode = gstNumber.substring(0, 2);
@@ -524,8 +519,6 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
     if (panNumber) {
       if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) {
         panNumber = null;
-      } else if (existingPANs.has(panNumber)) {
-        errors.push("PAN Number already exists in workspace or this file");
       } else {
         existingPANs.add(panNumber);
       }
@@ -655,11 +648,7 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
       const emailLowerCase = (customerData.email || "").toLowerCase().trim();
       const customerKey = `${normalizedName}|${mobile}|${emailLowerCase}|${normalizedCity}`;
 
-      if (normalizedName && existingKeys.has(customerKey)) {
-         results.failed++;
-         results.errors.push(`Customer already exists: ${customerData.name}`);
-         continue;
-      }
+      
       // Prevent duplicates in the same batch
       existingKeys.add(customerKey);
       
