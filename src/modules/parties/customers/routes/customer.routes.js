@@ -17,6 +17,7 @@ import {
   getCustomerSales,
   previewImport,
   confirmImport,
+  importChunk,
 } from "../controllers/customer.controller.js";
 
 import {
@@ -39,6 +40,7 @@ import uploadFile from "../../../../middlewares/upload.middleware.js";
 // Import APIs
 router.post("/import/preview", uploadFile.single("file"), previewImport);
 router.post("/import/confirm", confirmImport);
+router.post("/import/chunk", importChunk);
 
 // CRUD
 

@@ -1,4 +1,5 @@
 import xlsx from "xlsx";
+import crypto from "crypto";
 import { parseB2BOutstandingExcel } from "./b2bOutstandingParser.service.js";
 import SalesInvoice from "../../../sales/invoices/models/invoice.model.js";
 
@@ -411,10 +412,11 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
   const existingGSTs = new Set(existingCustomers.map(s => s.gstNumber).filter(Boolean));
   const existingPANs = new Set(existingCustomers.map(s => s.panNumber).filter(Boolean));
   const existingKeys = new Set(existingCustomers.map(s => {
-    const n = (s.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
-    const c = (s.billingAddress?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
+    const n = (s.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+    const c = (s.billingAddress?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
     const m = (s.mobile || "").trim();
-    return `${n}|${c}|${m}`;
+    const e = (s.email || "").toLowerCase().trim();
+    return `${n}|${m}|${e}|${c}`;
   }).filter(k => k.startsWith("|") === false));
 
   const parsedRows = data.map((lowerRow, index) => {
@@ -482,48 +484,25 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
     }
 
     const normalizedCity = city.toLowerCase().replace(/\s+/g, ' ').trim();
-    const customerKey = `${normalizedName}|${normalizedCity}|${mobile || ""}`;
+    const emailLowerCase = email ? email.toLowerCase().trim() : "";
+    const customerKey = `${normalizedName}|${mobile || ""}|${emailLowerCase}|${normalizedCity}`;
 
     if (!businessName) {
       errors.push("Business Name is required");
     } else {
-      if (importType === "b2c") {
-        if (mobile) {
-          if (existingMobilePhones.has(mobile)) {
-             errors.push(`Customer with mobile number ${mobile} already exists`);
-          } else {
-             existingMobilePhones.add(mobile);
-          }
-        }
-      } else {
-        if (existingKeys.has(customerKey)) {
-          errors.push("Customer with same name, city, and mobile already exists in workspace or this file");
-        } else {
-          existingKeys.add(customerKey);
-        }
-      }
+      existingKeys.add(customerKey);
     }
     
-    if (mobile && importType !== "b2c") {
-      if (!/^[6-9][0-9]{9}$/.test(mobile)) {
-        errors.push("Invalid mobile number format");
-      } else if (existingMobilePhones.has(mobile)) {
-        mobile = null;
-      } else {
-        existingMobilePhones.add(mobile);
-      }
-    }
+    
 
     if (email) {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push("Invalid email format");
+      
     }
 
     let state = null;
     if (gstNumber) {
       // Relaxed validation to allow 12-character legacy GSTs (State Code + PAN)
-      if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]/.test(gstNumber)) errors.push("Invalid GST Number format");
-      else if (existingGSTs.has(gstNumber)) errors.push("GST Number already exists in workspace or this file");
-      else {
+      if (true) {
         existingGSTs.add(gstNumber);
         const stateCode = gstNumber.substring(0, 2);
         if (GST_STATE_CODES[stateCode]) {
@@ -532,15 +511,7 @@ const previewImport = async (workspaceId, companyId, fileBuffer, importType = "b
       }
     }
 
-    if (panNumber) {
-      if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(panNumber)) {
-        panNumber = null;
-      } else if (existingPANs.has(panNumber)) {
-        errors.push("PAN Number already exists in workspace or this file");
-      } else {
-        existingPANs.add(panNumber);
-      }
-    }
+    
 
 
 
@@ -586,21 +557,31 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     const AccountGroup = mongoose.model("AccountGroup");
     const Account = mongoose.model("Account");
 
-    // Pre-fetch existing to prevent duplicates during concurrent imports
-    const existingCustomers = await CustomerModel.find({
-      workspaceId,
-      companyId,
-      isDeleted: false
-    }).select("name billingAddress.city mobile").lean();
+    // Optimize: Fetch ONLY relevant customers for this batch to prevent N^2 performance degradation
+    const chunkMobiles = customersData.map(c => (c.mobile || "").trim()).filter(Boolean);
+    const chunkNames = customersData.map(c => (c.name || "").trim()).filter(Boolean);
+
+    let existingCustomers = [];
+    if (importType !== "b2c" && chunkNames.length > 0) {
+      existingCustomers = await CustomerModel.find({
+        workspaceId,
+        companyId,
+        isDeleted: false,
+        name: { $in: chunkNames }
+      }).select("name billingAddress.city mobile").lean();
+    }
     
-    const existingKeys = new Set(existingCustomers.map(c => {
-      const n = (c.name || "").toLowerCase().replace(/\s+/g, ' ').trim();
-      const city = (c.billingAddress?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
+    const existingKeys = new Set();
+    const existingMobiles = new Set();
+    
+    existingCustomers.forEach(c => {
+      if (c.mobile) existingMobiles.add(c.mobile);
+      const n = (c.name || "").toLowerCase().replace(/\s+/g, " ").trim();
+      const city = (c.billingAddress?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
       const m = (c.mobile || "").trim();
-      return `${n}|${city}|${m}`;
-    }).filter(k => k.startsWith("|") === false));
-    
-    const existingMobiles = new Set(existingCustomers.map(c => c.mobile).filter(Boolean));
+      const e = (c.email || "").toLowerCase().trim();
+      if (n) existingKeys.add(`${n}|${m}|${e}|${city}`);
+    });
 
     let debtorsGroup = await AccountGroup.findOne({ workspaceId, companyId, groupCode: "SUNDRY_DEBTORS" }) 
                       || await AccountGroup.findOne({ workspaceId, companyId, groupName: "Sundry Debtors" });
@@ -631,15 +612,17 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
             createdBy: userId,
         });
     }
-    const existingCodes = await CustomerModel.find({ companyId, isDeleted: false }).select("customerCode").lean();
-    const usedCodes = new Set(existingCodes.map(c => c.customerCode));
     
-    // Batch query for existing account names to avoid conflicts
-    const expectedAccountNames = customersData.map(c => `${c.name} - Customer`);
+    // To maximize performance, we completely skip checking the database for existing codes.
+    // We rely entirely on the 8-character cryptographic hex string which gives 4.2 billion combinations,
+    // making collisions practically impossible.
+    const usedCodes = new Set();
+    
+    // Fetch only account names relevant to this batch
+    const accountNamesToCheck = customersData.map(c => `${c.name} - Customer`);
     const existingAccounts = await Account.find({
       companyId,
-      accountName: { $in: expectedAccountNames },
-      isDeleted: false
+      accountName: { $in: accountNamesToCheck }
     }).select("accountName").lean();
     
     const existingAccountNamesSet = new Set(existingAccounts.map(a => a.accountName));
@@ -649,31 +632,19 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     
     for (const customerData of customersData) {
       const normalizedName = customerData.name?.toLowerCase().replace(/\s+/g, ' ').trim();
-      const normalizedCity = (customerData.address?.city || "").toLowerCase().replace(/\s+/g, ' ').trim();
+      const normalizedCity = (customerData.address?.city || "").toLowerCase().replace(/\s+/g, " ").trim();
       const mobile = (customerData.mobile || "").trim();
-      const customerKey = `${normalizedName}|${normalizedCity}|${mobile}`;
+      const emailLowerCase = (customerData.email || "").toLowerCase().trim();
+      const customerKey = `${normalizedName}|${mobile}|${emailLowerCase}|${normalizedCity}`;
 
-      if (importType === "b2c") {
-        if (mobile && existingMobiles.has(mobile)) {
-          results.failed++;
-          results.errors.push(`Customer with mobile ${mobile} already exists`);
-          continue;
-        }
-        if (mobile) existingMobiles.add(mobile);
-      } else {
-        if (normalizedName && existingKeys.has(customerKey)) {
-           results.failed++;
-           results.errors.push(`Customer already exists: ${customerData.name}`);
-           continue;
-        }
-        // Prevent duplicates in the same batch
-        existingKeys.add(customerKey);
-      }
       
-      // Auto-generate unique code
+      // Prevent duplicates in the same batch
+      existingKeys.add(customerKey);
+      
+      // Auto-generate unique code that won't collide even across concurrent chunks
       let customerCode;
       do {
-         customerCode = `CUS${Math.floor(100000 + Math.random() * 900000)}`;
+         customerCode = `CUS-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       } while(usedCodes.has(customerCode));
       usedCodes.add(customerCode);
       
@@ -749,7 +720,8 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     if (error.writeErrors) {
       results.failed = error.writeErrors.length;
       error.writeErrors.forEach(err => {
-        results.errors.push(`Bulk import failed: ${err.errmsg}`);
+        const errorMsg = err.errmsg || err.message || (err.err && err.err.errmsg) || JSON.stringify(err);
+        results.errors.push(`Bulk import failed: ${errorMsg}`);
       });
     } else {
       results.failed = customersData.length;

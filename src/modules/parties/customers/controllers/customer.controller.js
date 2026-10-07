@@ -206,3 +206,27 @@ export const confirmImport = asyncHandler(async (req, res) => {
   
   return res.status(200).json(new ApiResponse(200, "Customers imported successfully", result));
 });
+
+export const importChunk = asyncHandler(async (req, res) => {
+  const { customers, importType } = req.body;
+
+  if (!Array.isArray(customers) || customers.length === 0) {
+    return res.status(400).json(new ApiResponse(400, "Customers array is required and cannot be empty"));
+  }
+
+  const resolvedImportType = importType || "b2c";
+  
+  const importResult = await customerService.confirmImport(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    customers,
+    resolvedImportType
+  );
+
+  return res.status(200).json(
+    new ApiResponse(200, "Chunk imported successfully", {
+      importResult,
+    })
+  );
+});
