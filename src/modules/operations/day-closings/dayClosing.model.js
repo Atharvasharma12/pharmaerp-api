@@ -104,6 +104,23 @@ const dayClosingSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Aggregated manual deposit/withdrawal totals across all shifts for this day
+    totalManualDeposits: { type: Number, default: 0 },
+    totalManualWithdrawals: { type: Number, default: 0 },
+    // Per-shift cash breakdown — populated when day closing is created
+    cashByShift: [
+      {
+        shiftId:       { type: mongoose.Schema.Types.ObjectId, ref: "Shift" },
+        shiftName:     { type: String, default: "" },
+        shiftNo:       { type: String, default: "" },
+        openingFloat:  { type: Number, default: 0 },
+        cashSales:     { type: Number, default: 0 },
+        deposits:      { type: Number, default: 0 },
+        withdrawals:   { type: Number, default: 0 },
+        expectedCash:  { type: Number, default: 0 },
+        actualCash:    { type: Number, default: 0 },
+      },
+    ],
     note: {
       type: String,
       trim: true,

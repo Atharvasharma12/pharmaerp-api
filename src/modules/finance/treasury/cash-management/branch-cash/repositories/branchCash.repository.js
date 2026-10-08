@@ -376,6 +376,24 @@ const validateSufficientRunningDenominations = async (
   }
 };
 
+/**
+ * Append an audit entry to the frozenLedger array.
+ * Used by manualWithdraw, freezeAtShiftClose, and bankDepositSlip service.
+ */
+const pushFrozenLedgerEntry = async (
+  branchId,
+  companyId,
+  entry,
+  options = {},
+) => {
+  const { session } = options;
+  return BranchCashBalance.findOneAndUpdate(
+    { branchId, companyId },
+    { $push: { frozenLedger: entry } },
+    { new: true, session },
+  );
+};
+
 export { computeTotals };
 
 export default {
@@ -396,6 +414,8 @@ export default {
   // Validation
   validateSufficientFrozenDenominations,
   validateSufficientRunningDenominations,
+  // Audit
+  pushFrozenLedgerEntry,
   // Helper
   computeTotals,
 };

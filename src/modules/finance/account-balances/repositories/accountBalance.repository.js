@@ -140,11 +140,11 @@ const getBalances = async (workspaceId, companyId, filters = {}, options = {}) =
     }).select("_id");
     const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
 
-    const CashAccount = mongoose.model("CashAccount");
+    const BranchCash = mongoose.model("BranchCash");
     const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
-    const validBranchCashAccounts = await CashAccount.find({
+    const validBranchCashAccounts = await BranchCash.find({
       companyId,
-      isDeleted: false,
+      isActive: true,
       branchId: targetBranchId
     }).select("ledgerAccountId");
     const validLedgerIds = validBranchCashAccounts

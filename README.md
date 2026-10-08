@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # ERP Backend
 
 A modular backend for a retail pharmacy ERP platform built on top of the **Pahuch** ecosystem. The project is built with Node.js, Express, MongoDB, JWT-based authentication, and a feature-driven module structure that separates platform operations, organization management, subscription handling, catalog management, and a Quick Commerce marketplace layer.
@@ -1080,7 +1079,3 @@ ISC
 ## Team
 
 Developed for retail pharmacy ERP SaaS operations — powering the Pahuch Quick Commerce ecosystem.
-=======
-# pharmaerp-api
-this is the backend for all the applications
->>>>>>> origin/main
