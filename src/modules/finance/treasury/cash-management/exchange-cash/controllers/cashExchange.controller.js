@@ -3,11 +3,16 @@ import ApiResponse from "../../../../../../utils/ApiResponse.js";
 import cashExchangeService from "../services/cashExchange.service.js";
 
 export const createCashExchange = asyncHandler(async (req, res) => {
+
+  const branchId =
+    req.headers["x-branch-id"] || req.branchId || req.body.branchId || null;
+  const payload = { ...req.body, branchId };
+
   const cashExchange = await cashExchangeService.createCashExchange(
     req.workspaceId,
     req.companyId,
     req.user._id,
-    req.body,
+    payload,
   );
   return res
     .status(201)
@@ -54,3 +59,4 @@ export const cancelCashExchange = asyncHandler(async (req, res) => {
       new ApiResponse(200, "Cash Exchange cancelled successfully", cashExchange),
     );
 });
+

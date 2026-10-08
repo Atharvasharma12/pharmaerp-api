@@ -249,6 +249,24 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       }
     }
 
+    // If businessDayId not explicitly provided, auto-detect open Business Day for this branch
+    let resolvedBusinessDayId = payload.businessDayId || null;
+    if (!resolvedBusinessDayId && resolvedBranchId) {
+      try {
+        const { BusinessDay } = await import("../../../../operations/business-days/businessDay.model.js");
+        const openDay = await BusinessDay.findOne({
+          companyId,
+          workspaceId,
+          branchId: resolvedBranchId,
+          status: "open",
+        }).select("_id").session(session);
+        if (openDay) resolvedBusinessDayId = openDay._id;
+      } catch (bdErr) {
+        // Non-fatal: fund transfer proceeds even if Business Day link fails
+        console.warn("[FundTransfer] Could not auto-link business day:", bdErr.message);
+      }
+    }
+
     // 10. Save the Fund Transfer record
     const fundTransferPayload = {
       workspaceId,
@@ -256,6 +274,7 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       branchId: resolvedBranchId,
       shiftId: resolvedShiftId,
       dayClosingId: resolvedDayClosingId,
+      businessDayId: resolvedBusinessDayId,
       transferNumber,
       transferDate: new Date(transferDate),
       transferType,

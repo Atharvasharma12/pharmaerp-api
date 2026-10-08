@@ -199,7 +199,31 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
     runningType: netRunning >= 0 ? "Dr" : "Cr"
   };
 
-  return { customers, total, page, limit, stats };
+  const enrichedCustomers = customers.map(c => {
+    const doc = c.toObject ? c.toObject() : c;
+    const l = ledgerMap[doc.ledgerAccountId?.toString()] || { totalDebit: 0, totalCredit: 0 };
+    const opBal = Number(doc.openingBalance) || 0;
+    const opBalType = (doc.openingBalanceType || "dr").toLowerCase();
+
+    let totalDebit = l.totalDebit;
+    let totalCredit = l.totalCredit;
+
+    if (opBalType === "dr") {
+      totalDebit += opBal;
+    } else {
+      totalCredit += opBal;
+    }
+
+    const net = totalDebit - totalCredit;
+    doc.outstandingAmount = Math.abs(net);
+    doc.balanceType = net >= 0 ? "dr" : "cr";
+    
+    // We also attach a 'toSafeObject' mock if the service expects it, but since we return plain objects, we can just delete __v
+    delete doc.__v;
+    return doc;
+  });
+
+  return { customers: enrichedCustomers, total, page, limit, stats };
 };
 
 const deleteCustomerById = async (customerId, companyId, workspaceId, deletedBy) => {

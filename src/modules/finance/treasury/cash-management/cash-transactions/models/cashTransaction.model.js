@@ -67,7 +67,7 @@ const cashTransactionSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: [true, "Amount is required"],
-      min: [0.01, "Amount must be greater than zero"],
+      min: [0, "Amount must be zero or greater"],
     },
 
     // UTR / Reference / Receipt number
