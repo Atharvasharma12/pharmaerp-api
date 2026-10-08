@@ -6,7 +6,7 @@ const env = {
   // app
   NODE_ENV: process.env.NODE_ENV || "development",
 
-  PORT: Number(process.env.PORT) || 5000,
+  PORT: Number(process.env.PORT) || 5001,
 
   APP_NAME: process.env.APP_NAME || "Pharmacy ERP Backend",
 

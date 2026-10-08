@@ -1,9 +1,0 @@
-[
-  {
-    "paymentType": "Cash",
-    "amount": 59,
-    "cashAccountId": "6abc197214c146ab25bad8fc",
-    "denominations": [],
-    "returnedDenominations": []
-  }
-]

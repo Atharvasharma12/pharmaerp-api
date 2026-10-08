@@ -211,8 +211,29 @@ const getWorkspaceProducts = async (workspaceId, filters = {}, options = {}) => 
       options,
     );
 
+  const safeProducts = products.map((p) => p.toSafeObject());
+
+  if (safeProducts.length > 0) {
+    const productIds = safeProducts.map(p => p._id);
+    const facilityQuery = { workspaceId, product_id: { $in: productIds } };
+    if (filters.branchId) {
+      facilityQuery.facility_id = filters.branchId;
+    }
+
+    const facilities = await ProductFacility.find(facilityQuery).lean();
+    const stockMap = {};
+    facilities.forEach(f => {
+      const pId = f.product_id.toString();
+      stockMap[pId] = (stockMap[pId] || 0) + (f.qoh || f.total_qty_available || 0);
+    });
+
+    safeProducts.forEach(p => {
+      p.stock = stockMap[p._id.toString()] || 0;
+    });
+  }
+
   return {
-    products: products.map((p) => p.toSafeObject()),
+    products: safeProducts,
     total,
     page,
     limit,
@@ -719,10 +740,15 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
         productId = product._id;
         
         // Update existing product with latest rates
+        const updateFields = { mrp, ptr, pts, rateA, rateB, rateC, rateCPercentage };
+        if (item.rack) {
+          updateFields.rack = item.rack;
+        }
+
         productOps.push({
           updateOne: {
             filter: { _id: productId },
-            update: { $set: { mrp, ptr, pts, rateA, rateB, rateC, rateCPercentage } }
+            update: { $set: updateFields }
           }
         });
 
