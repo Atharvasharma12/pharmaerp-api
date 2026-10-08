@@ -719,10 +719,15 @@ const importWorkspaceProducts = async (workspaceId, itemsInput = [], user, optio
         productId = product._id;
         
         // Update existing product with latest rates
+        const updateFields = { mrp, ptr, pts, rateA, rateB, rateC, rateCPercentage };
+        if (item.rack) {
+          updateFields.rack = item.rack;
+        }
+
         productOps.push({
           updateOne: {
             filter: { _id: productId },
-            update: { $set: { mrp, ptr, pts, rateA, rateB, rateC, rateCPercentage } }
+            update: { $set: updateFields }
           }
         });
 

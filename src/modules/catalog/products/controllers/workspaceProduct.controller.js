@@ -259,6 +259,7 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       pack: b.product?.pack || "N/A",
       qty: b.batchQty,
       expiryDate: exp,
+      rack: b.rack || b.product?.rack || "",
     };
   });
 
