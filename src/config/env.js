@@ -31,7 +31,7 @@ const env = {
   CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5173",
 
   // email (Brevo API Configuration)
-  BREVO_API_KEY: process.env.BREVO_API_KEY || "",
+  // BREVO_API_KEY: process.env.BREVO_API_KEY || "",
 
   MAIL_FROM:
     process.env.MAIL_FROM || "Pharma ERP <devanshupadhyay2611@gmail.com>",
