@@ -90,6 +90,28 @@ const branchCashBalanceSchema = new mongoose.Schema(
       default: [],
     },
 
+    // ── Frozen Ledger (audit timeline) ───────────────────────────────────
+    // Every time frozen cash changes (shift close freeze, withdrawal, bank slip)
+    // a lightweight entry is appended. Used by day-closing to show the timeline
+    // of frozen-cash movements for a given date.
+    frozenLedger: [
+      {
+        // "freeze"          = running → frozen at shift close
+        // "withdrawal"      = frozen → external cash out
+        // "deposit_to_slip" = frozen → bank deposit slip
+        action: {
+          type: String,
+          enum: ["freeze", "withdrawal", "deposit_to_slip"],
+          required: true,
+        },
+        amount: { type: Number, required: true },
+        note: { type: String, default: "" },
+        shiftId: { type: mongoose.Schema.Types.ObjectId, ref: "Shift", default: null },
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        date: { type: Date, default: Date.now },
+      },
+    ],
+
     lastUpdatedAt: {
       type: Date,
       default: null,

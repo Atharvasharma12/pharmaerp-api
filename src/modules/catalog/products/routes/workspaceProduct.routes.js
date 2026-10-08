@@ -28,6 +28,7 @@ import {
   searchBeforeCreateQuerySchema,
 } from "../validations/workspaceProduct.validation.js";
 
+import companyContextMiddleware from "../../../../middlewares/companyContext.middleware.js";
 import uploadFile from "../../../../middlewares/upload.middleware.js";
 
 const router = Router();
@@ -35,6 +36,7 @@ const router = Router();
 // All workspace product routes require authentication + active workspace membership
 router.use(authMiddleware);
 router.use(workspaceContextMiddleware);
+router.use(companyContextMiddleware);
 
 // ---------------------
 // POST /catalog/products/detect

@@ -70,6 +70,7 @@ export const createBankDepositSlipSchema = Joi.object({
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
 
   dayClosingId: objectId.allow(null, "").optional(),
+  businessDayId: objectId.allow(null, "").optional(),
 });
 
 // ── Confirm Deposit ───────────────────────────────────────────────────────────
@@ -109,6 +110,7 @@ export const getBankDepositSlipsQuerySchema = Joi.object({
   toBankAccountId: objectId.optional(),
   branchId: objectId.optional(),
   dayClosingId: objectId.allow(null, "").optional(),
+  businessDayId: objectId.allow(null, "").optional(),
 
   startDate: Joi.date().optional(),
   endDate: Joi.date().optional(),
@@ -117,3 +119,30 @@ export const getBankDepositSlipsQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),
   all: Joi.boolean().default(false).optional(),
 });
+
+// ── Withdraw from Slip ────────────────────────────────────────────────────────
+
+export const withdrawFromSlipSchema = Joi.object({
+  amount: Joi.number().min(0.01).required().messages({
+    "any.required": "Withdrawal amount is required",
+    "number.min": "Withdrawal amount must be greater than zero",
+  }),
+  denominations: Joi.array()
+    .items(denominationLineSchema)
+    .min(1)
+    .required()
+    .messages({
+      "any.required": "Denomination breakdown is required",
+      "array.min": "At least one denomination line is required",
+    }),
+  narration: Joi.string().trim().max(500).allow(null, "").optional(),
+});
+
+// ── Cash In Transit Query ──────────────────────────────────────────────────────
+
+export const getCashInTransitQuerySchema = Joi.object({
+  branchId: objectId.optional(),
+  page: Joi.number().integer().min(1).default(1).optional(),
+  limit: Joi.number().integer().min(1).max(200).default(50).optional(),
+});
+

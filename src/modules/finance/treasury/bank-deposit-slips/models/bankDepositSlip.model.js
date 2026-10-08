@@ -5,11 +5,19 @@ import { BANK_DEPOSIT_SLIP_STATUS } from "../constants/bankDepositSlip.constant.
  * BankDepositSlip — Treasury instrument for physical cash deposit at a bank branch.
  *
  * Lifecycle:
- *   PREPARED  → slip created, cash bagged & deducted from cash account.
- *               Step 1 journal: Cash A/c Cr | Cash In Transit A/c Dr
- *   DEPOSITED → bank confirmed receipt.
- *               Step 2 journal: Cash In Transit A/c Cr | Bank A/c Dr
- *   CANCELLED → voided, both journals reversed, denominations returned.
+ *   PREPARED  → slip created, cash bagged & deducted from FROZEN cash.
+ *               Step-1 journal: BranchCash A/c Cr | Cash-In-Transit A/c Dr
+ *
+ *   PREPARED (partial withdraw) → Some cash taken back from the bag before deposit.
+ *               Journal per withdrawal: Cash-Payments A/c Dr | Cash-In-Transit A/c Cr
+ *               Tracked in withdrawals[]. remainingAmount = amount - SUM(withdrawals[].amount)
+ *
+ *   DEPOSITED → bank confirmed receipt of remainingAmount.
+ *               Step-2 journal: Cash-In-Transit A/c Cr | Bank A/c Dr
+ *
+ *   CANCELLED → voided. Only remainingAmount is returned to FROZEN cash.
+ *               Partial-withdraw journals are NOT reversed (cash already exited).
+ *               Reversal journal: Cash-In-Transit A/c Cr | BranchCash A/c Dr (remainingAmount only)
  *
  * This is distinct from a Fund Transfer: the two-step journal correctly models
  * the transit period (cash has left the counter but not yet cleared the bank).
@@ -43,6 +51,14 @@ const bankDepositSlipSchema = new mongoose.Schema(
     dayClosingId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "DayClosing",
+      default: null,
+      index: true,
+    },
+    // Links this slip to the Business Day it was prepared within.
+    // Cannot create a slip without an open Business Day.
+    businessDayId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "BusinessDay",
       default: null,
       index: true,
     },
@@ -111,6 +127,46 @@ const bankDepositSlipSchema = new mongoose.Schema(
       ref: "CashDenomination",
       default: null,
       index: true,
+    },
+
+    // ── Partial Withdrawals ────────────────────────────────────────────────
+    // Records each cash withdrawal taken from this slip before deposit/cancel.
+    // remainingAmount (computed, never stored) = amount - SUM(withdrawals[].amount)
+    // When the slip is cancelled, only remainingAmount is returned to frozen cash.
+    withdrawals: {
+      type: [
+        {
+          // Scalar total for this withdrawal — must equal SUM(denominations[].subtotal)
+          amount: {
+            type: Number,
+            required: true,
+            min: [0.01, "Withdrawal amount must be greater than zero"],
+          },
+          // Physical denomination breakdown of the withdrawn cash
+          denominations: [
+            {
+              denomination: { type: Number, required: true },
+              quantity:     { type: Number, required: true, min: 0 },
+              subtotal:     { type: Number, required: true },
+              _id: false,
+            },
+          ],
+          // Journal voucher: Dr Cash-Payments / Cr Cash-In-Transit
+          journalVoucherId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "JournalVoucher",
+            default: null,
+          },
+          withdrawnBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "User",
+          },
+          withdrawnAt: { type: Date, default: Date.now },
+          narration:   { type: String, maxlength: 500, default: null },
+          _id: false,
+        },
+      ],
+      default: [],
     },
 
     // ── Status lifecycle ───────────────────────────────────────────────────
@@ -254,6 +310,8 @@ bankDepositSlipSchema.index({
 
 // Day closing-linked slip lookup
 bankDepositSlipSchema.index({ dayClosingId: 1, status: 1, isDeleted: 1 });
+// Business Day-linked slip lookup
+bankDepositSlipSchema.index({ businessDayId: 1, status: 1, isDeleted: 1 });
 
 // Branch-level reporting
 bankDepositSlipSchema.index({

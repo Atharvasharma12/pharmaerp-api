@@ -15,8 +15,10 @@ const extractSupplierHeader = (row) => {
   if (Array.isArray(row)) {
     row = row.join(" ");
   }
-  if (typeof row === "string" && /^--------[^-]/.test(row)) {
-    return row.replace(/^--------/, "").trim();
+  if (typeof row === "string" && /^--[^-]/.test(row)) {
+    let text = row.replace(/^--+/, "").trim();
+    let parts = text.split(/\s{2,}/);
+    return parts[0].trim();
   }
   return null;
 };
@@ -60,7 +62,7 @@ const parseLedgerTransaction = (text) => {
   const match = text.match(transactionRegex);
   if (match) {
     return {
-      reference: match[1].trim(),
+      reference: match[1].replace(/^[\*\s]+/, "").trim() || `NOREF-${match[2]}-${match[3].replace(/[^\d.]/g, "")}`,
       date: match[2],
       amount: parseFloat(match[3].replace(/[^\d.]/g, "")),
       type: match[4].toUpperCase(), // 'CR' or 'DR'
@@ -89,10 +91,16 @@ const classifyTransaction = (transaction) => {
 
 const calculateSupplierOutstanding = (transactions) => {
   return transactions.reduce((acc, tx) => {
-    if (tx.type === "CR") return acc + tx.amount;
-    if (tx.type === "DR") return acc - tx.amount;
+    if (tx.type === "CR") {
+      acc.cr += tx.amount;
+      acc.outstanding += tx.amount;
+    }
+    if (tx.type === "DR") {
+      acc.dr += tx.amount;
+      acc.outstanding -= tx.amount;
+    }
     return acc;
-  }, 0);
+  }, { dr: 0, cr: 0, outstanding: 0 });
 };
 
 const matchSupplier = (ledgerSupplierName, supplierMap) => {
@@ -143,6 +151,8 @@ const reconcileSupplierLedger = (data) => {
   let totalSuppliers = data.length;
   let totalBills = 0;
   let totalAmount = 0;
+  let totalDr = 0;
+  let totalCr = 0;
   
   data.forEach(supplier => {
     supplier.transactions.forEach(tx => {
@@ -150,10 +160,12 @@ const reconcileSupplierLedger = (data) => {
         totalBills++;
         totalAmount += tx.amount;
       }
+      if (tx.type === "DR") totalDr += tx.amount;
+      if (tx.type === "CR") totalCr += tx.amount;
     });
   });
   
-  return { totalSuppliers, totalBills, totalAmount };
+  return { totalSuppliers, totalBills, totalAmount, totalDr, totalCr };
 };
 
 const importSupplierBills = async (filePath, workspaceId, companyId, branchId, userId) => {

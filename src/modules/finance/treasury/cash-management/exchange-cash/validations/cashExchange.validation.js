@@ -38,6 +38,11 @@ export const createCashExchangeSchema = Joi.object({
     "date.base": "Exchange date must be a valid date",
   }),
 
+  cashPartition: Joi.string().valid("running", "frozen").required().messages({
+    "any.required": "Cash partition is required",
+    "any.only": "Cash partition must be either running or frozen",
+  }),
+
   // Denominations received FROM the customer (what they handed you)
   denominationsReceived: Joi.array()
     .items(denominationLineSchema)
@@ -87,6 +92,7 @@ export const createCashExchangeSchema = Joi.object({
 export const cancelCashExchangeSchema = Joi.object({
   reason: Joi.string().trim().max(500).allow(null, "").optional(),
 });
+
 
 export const cashExchangeIdParamSchema = Joi.object({
   cashExchangeId: objectId.required().messages({

@@ -4,23 +4,27 @@ node_modules/
 # Build output
 dist/
 build/
+.vite/
 
 # Environment files
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# Vite
-.vite/
+.env.*
 
 # Logs
+logs/
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+!logs/.gitkeep
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+public/*
+!public/.gitkeep
 
 # Editor
 .vscode/*
@@ -45,8 +49,6 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
-
-# Local files
 *.local
 
 # Certificates / keys

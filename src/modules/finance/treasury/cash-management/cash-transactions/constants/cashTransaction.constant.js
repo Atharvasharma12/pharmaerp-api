@@ -3,6 +3,7 @@ export const CASH_TRANSACTION_TYPE = {
   CASH_OUT: "CASH_OUT",         // Cash paid out (e.g. vendor payment)
   EXPENSE: "EXPENSE",           // Direct expense paid from cash
   PETTY_CASH: "PETTY_CASH",     // Small petty cash expense
+  ADJUSTMENT: "ADJUSTMENT",     // Adjustment for cash discrepancy
   OTHER: "OTHER",
 };
 

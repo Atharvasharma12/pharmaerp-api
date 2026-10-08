@@ -301,9 +301,8 @@ const createBankDepositSlip = async (
       session,
     );
 
-    // ── 8. Auto-link open day closing ────────────────────────────────────
+    // ── 8. Auto-link open day closing (Legacy) ────────────────────────────────────
     let resolvedDayClosingId = payload.dayClosingId || null;
-
     if (!resolvedDayClosingId && branchId) {
       try {
         const { DayClosing } = await import(
@@ -314,14 +313,43 @@ const createBankDepositSlip = async (
           workspaceId,
           branchId,
           status: { $in: ["draft", "open"] },
+        }).select("_id").session(session);
+        if (activeDayClosing) resolvedDayClosingId = activeDayClosing._id;
+      } catch (dcErr) {
+        console.warn("[BankDepositSlip] Could not auto-link day closing:", dcErr.message);
+      }
+    }
+
+    // ── 8. Auto-link open Business Day (required) ─────────────────────────
+    let resolvedBusinessDayId = payload.businessDayId || null;
+
+    if (!resolvedBusinessDayId && branchId) {
+      try {
+        const { BusinessDay } = await import(
+          "../../../../operations/business-days/businessDay.model.js"
+        );
+        const activeBusinessDay = await BusinessDay.findOne({
+          companyId,
+          workspaceId,
+          branchId,
+          status: "open",
         })
           .select("_id")
           .session(session);
-        if (activeDayClosing) resolvedDayClosingId = activeDayClosing._id;
-      } catch (dcErr) {
+        if (activeBusinessDay) {
+          resolvedBusinessDayId = activeBusinessDay._id;
+        } else {
+          throw new ApiError(
+            400,
+            "A Bank Deposit Slip can only be created during an open Business Day. " +
+            "Please open a Business Day for this branch first."
+          );
+        }
+      } catch (bdErr) {
+        if (bdErr instanceof ApiError) throw bdErr;
         console.warn(
-          "[BankDepositSlip] Could not auto-link day closing:",
-          dcErr.message,
+          "[BankDepositSlip] Could not auto-link business day:",
+          bdErr.message,
         );
       }
     }
@@ -333,6 +361,7 @@ const createBankDepositSlip = async (
         companyId,
         branchId,
         dayClosingId: resolvedDayClosingId,
+        businessDayId: resolvedBusinessDayId,
         slipNumber,
         slipDate: new Date(slipDate),
         fromCashAccountId: null,      // deprecated — not set for new slips
@@ -525,24 +554,55 @@ const cancelBankDepositSlip = async (
       );
     }
 
-    // Return denominations to the source cash account balance
-    if (slip.cashDenominationId) {
+    // Return REMAINING denominations to the source cash account balance.
+    // remainingAmount = slip.amount - SUM(withdrawals[].amount)
+    // Partial withdrawals already exited the system via their own journal entries;
+    // only the remaining (unreturned) cash is returned to frozen.
+    const totalWithdrawn = (slip.withdrawals || []).reduce(
+      (s, w) => s + (Number(w.amount) || 0), 0,
+    );
+    const remainingAmount = slip.amount - totalWithdrawn;
+
+    if (slip.cashDenominationId && remainingAmount > 0) {
       const denomDoc = await mongoose
         .model("CashDenomination")
         .findById(slip.cashDenominationId)
         .session(session);
 
       if (denomDoc && denomDoc.denominations && denomDoc.denominations.length > 0) {
-        // Return denominations to the branch cash frozen partition.
-        // addFrozenDenominations recomputes frozenTotal from denomination sums — no scalar increment needed.
-        const branchCashRepository = (await import("../../cash-management/branch-cash/repositories/branchCash.repository.js")).default;
-        await branchCashRepository.addFrozenDenominations(
-          slip.branchId,
-          slip.companyId,
-          denomDoc.denominations,
-          userId,
-          { session },
-        );
+        // Compute which denominations to return based on withdrawal sub-totals
+        // If no partial withdrawals occurred, return everything.
+        let denominationsToReturn = denomDoc.denominations;
+
+        if (totalWithdrawn > 0) {
+          // Aggregate withdrawn denominations to subtract from total
+          const withdrawnDenomMap = new Map();
+          for (const w of (slip.withdrawals || [])) {
+            for (const d of (w.denominations || [])) {
+              const key = Number(d.denomination);
+              withdrawnDenomMap.set(key, (withdrawnDenomMap.get(key) || 0) + Number(d.quantity));
+            }
+          }
+          // Subtract withdrawn from original denominations
+          denominationsToReturn = denomDoc.denominations
+            .map((d) => {
+              const withdrawn = withdrawnDenomMap.get(Number(d.denomination)) || 0;
+              const returnQty = Math.max(0, Number(d.quantity) - withdrawn);
+              return { denomination: Number(d.denomination), quantity: returnQty };
+            })
+            .filter((d) => d.quantity > 0);
+        }
+
+        if (denominationsToReturn.length > 0) {
+          const branchCashRepo = (await import("../../cash-management/branch-cash/repositories/branchCash.repository.js")).default;
+          await branchCashRepo.addFrozenDenominations(
+            slip.branchId,
+            slip.companyId,
+            denominationsToReturn,
+            userId,
+            { session },
+          );
+        }
       }
     }
 
@@ -598,12 +658,156 @@ const getBankDepositSlipById = async (id, companyId, workspaceId) => {
   return slip.toSafeObject();
 };
 
+// PARTIAL WITHDRAW FROM BANK DEPOSIT SLIP
+
+/**
+ * Withdraw partial cash from a PREPARED BDS before deposit.
+ *
+ * Rules:
+ *   - Slip must be PREPARED.
+ *   - Withdrawal amount must not exceed remainingAmount.
+ *   - Denominations required (no scalar-only).
+ *   - Journal: Dr Cash-Payments / Cr Cash-In-Transit
+ *   - Entry appended to slip.withdrawals[].
+ */
+const withdrawFromBankDepositSlip = async (workspaceId, companyId, userId, payload) => {
+  const { slipId, amount, denominations = [], narration } = payload;
+
+  if (!denominations || denominations.length === 0) {
+    throw new ApiError(400, "Denomination breakdown is required for BDS withdrawal.");
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const slip = await mongoose
+      .model("BankDepositSlip")
+      .findOne({ _id: slipId, companyId, workspaceId, isDeleted: false })
+      .session(session);
+
+    if (!slip) throw new ApiError(404, "Bank Deposit Slip not found");
+    if (slip.status !== BANK_DEPOSIT_SLIP_STATUS.PREPARED) {
+      throw new ApiError(
+        400,
+        `Cannot withdraw from slip in status '${slip.status}'. Only PREPARED slips allow withdrawals.`,
+      );
+    }
+
+    // Validate denomination sum
+    const processedDenoms = denominations.map((d) => ({
+      denomination: Number(d.denomination),
+      quantity:     Number(d.quantity) || 0,
+      subtotal:     Number(d.denomination) * (Number(d.quantity) || 0),
+    }));
+    const denomSum = processedDenoms.reduce((s, d) => s + d.subtotal, 0);
+    if (Math.abs(denomSum - amount) > 0.01) {
+      throw new ApiError(
+        400,
+        `Denomination sum (Rs.${denomSum}) does not match declared withdrawal (Rs.${amount}).`,
+      );
+    }
+
+    // Validate against remaining amount
+    const alreadyWithdrawn = (slip.withdrawals || []).reduce(
+      (s, w) => s + (Number(w.amount) || 0), 0,
+    );
+    const remainingAmount = slip.amount - alreadyWithdrawn;
+    if (amount > remainingAmount + 0.01) {
+      throw new ApiError(
+        400,
+        `Cannot withdraw Rs.${amount}: only Rs.${remainingAmount.toFixed(2)} remains in this slip.`,
+      );
+    }
+
+    // Journal: Dr Cash-Payments / Cr Cash-In-Transit
+    const cashInTransitAccount = await getCashInTransitAccount(workspaceId, companyId, userId, session);
+    const cashPaymentsAccount  = await findOrCreateSystemAccount(
+      workspaceId, companyId, userId,
+      "SYS-CASH-PAYMENTS", "Cash Payments", "EXPENSE", "EXPENSE",
+      "SYS-MISC-EXPENSE", "Miscellaneous Expenses", session,
+    );
+
+    const wdNarration = narration || `Partial withdrawal from BDS ${slip.slipNumber}`;
+    const withdrawalVoucher = await createAndPostContraVoucher(
+      workspaceId, companyId, userId, new Date(), wdNarration, slip.slipNumber,
+      [
+        { accountId: cashPaymentsAccount._id, debit: amount,  credit: 0,      narration: wdNarration },
+        { accountId: cashInTransitAccount._id, debit: 0,      credit: amount,  narration: wdNarration },
+      ],
+      session,
+    );
+
+    // Append to slip.withdrawals[]
+    slip.withdrawals = slip.withdrawals || [];
+    slip.withdrawals.push({
+      amount,
+      denominations: processedDenoms,
+      journalVoucherId: withdrawalVoucher._id,
+      withdrawnBy: userId,
+      withdrawnAt: new Date(),
+      narration: narration || null,
+    });
+    await slip.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return getBankDepositSlipById(slip._id, companyId, workspaceId);
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
+// CASH IN TRANSIT (company-scope read)
+
+/**
+ * Returns all PREPARED BDS across the company (or filtered by branchId).
+ * Each slip has remainingAmount = amount - SUM(withdrawals[].amount) computed.
+ * Used by the read-only CIT page (no branch restriction by default).
+ */
+const getCashInTransit = async (workspaceId, companyId, query = {}) => {
+  const { page = 1, limit = 50, branchId } = query;
+
+  const filters = { status: BANK_DEPOSIT_SLIP_STATUS.PREPARED };
+  if (branchId) filters.branchId = branchId;
+
+  const result = await bankDepositSlipRepository.getSlips(
+    workspaceId, companyId, filters,
+    { page, limit, sort: "-slipDate", all: false },
+  );
+
+  const slips = result.slips.map((s) => {
+    const obj = s.toSafeObject();
+    const totalWithdrawn = (s.withdrawals || []).reduce(
+      (acc, w) => acc + (Number(w.amount) || 0), 0,
+    );
+    obj.remainingAmount = s.amount - totalWithdrawn;
+    obj.totalWithdrawn  = totalWithdrawn;
+    return obj;
+  });
+
+  const totalCIT = slips.reduce((sum, s) => sum + s.remainingAmount, 0);
+
+  return {
+    cashInTransit: slips,
+    totalCIT,
+    total: result.total,
+    page: result.page,
+    limit: result.limit,
+  };
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default {
   createBankDepositSlip,
   confirmDeposit,
   cancelBankDepositSlip,
+  withdrawFromBankDepositSlip,
+  getCashInTransit,
   getBankDepositSlips,
   getBankDepositSlipById,
 };
