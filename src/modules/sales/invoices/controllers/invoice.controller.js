@@ -89,3 +89,17 @@ export const updateCustomerSale = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Customer sale updated successfully", result));
 });
+
+
+export const cancelCustomerSale = asyncHandler(async (req, res) => {
+  const result = await invoiceService.cancelCustomerSale(
+    req.params.invoiceId,
+    req.companyId,
+    req.workspaceId,
+    req.user
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer sale cancelled successfully", result));
+});
