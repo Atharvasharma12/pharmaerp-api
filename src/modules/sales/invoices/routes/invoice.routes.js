@@ -4,6 +4,7 @@ import {
   getCustomerSales,
   getAllCustomerSales,
   updateCustomerSale,
+  cancelCustomerSale,
 } from "../controllers/invoice.controller.js";
 
 import authMiddleware from "../../../../middlewares/auth.middleware.js";
@@ -23,5 +24,6 @@ router.get("/customer/:customerId", getCustomerSales);
 router.post("/customer/:customerId?", recordCustomerSale);
 router.put("/customer/:invoiceId", updateCustomerSale);
 router.put("/customer/:customerId/:invoiceId", updateCustomerSale);
+router.put("/:invoiceId/cancel", cancelCustomerSale);
 
 export default router;
