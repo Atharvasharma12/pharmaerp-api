@@ -159,6 +159,14 @@ export const getWorkspaceProductsQuerySchema = Joi.object({
   // Simple name search (regex) — not full-text like GlobalProduct
   search: Joi.string().trim().min(1).max(200).allow("").optional(),
 
+  summary: Joi.boolean().optional(),
+
+  branchId: objectId.when("summary", {
+    is: true,
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
+
   page: Joi.number().integer().min(1).default(1).optional(),
 
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),

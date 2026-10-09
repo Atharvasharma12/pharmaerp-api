@@ -56,17 +56,30 @@ export const createWorkspaceProduct = asyncHandler(async (req, res) => {
 });
 
 export const getWorkspaceProducts = asyncHandler(async (req, res) => {
-  const { status, productType, search, page, limit } = req.query;
-  const branchId = req.headers["x-branch-id"];
-  
-  const referer = req.headers.referer || "";
-  const isSalesRoute = referer.includes("/sales") || referer.includes("/billing") || referer.includes("/pos");
-  const branchFilterId = isSalesRoute ? branchId : null;
+  const {
+    status,
+    productType,
+    search,
+    page,
+    limit,
+    branchId: requestedBranchId,
+    summary,
+  } = req.query;
 
   const result = await workspaceProductService.getWorkspaceProducts(
     req.workspaceId,
-    { status, productType, search, branchId: branchFilterId },
-    { page, limit },
+    { status, productType, search, branchId: requestedBranchId || null },
+    {
+      page,
+      limit,
+      ...(summary
+        ? {
+            select:
+              "_id workspaceProductCode productType name manufacturer pack category productForm status",
+            summary: true,
+          }
+        : {}),
+    },
   );
 
   return res
