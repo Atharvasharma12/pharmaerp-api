@@ -22,6 +22,7 @@ import cashDenominationRepository from "../../../finance/treasury/cash-managemen
 import SalesInvoice from "../models/invoice.model.js";
 import GstLedger from "../../../finance/gst-ledger/models/gstLedger.model.js";
 import JournalVoucher from "../../../finance/journal-vouchers/models/journalVoucher.model.js";
+import branchCashRepository from "../../../finance/treasury/cash-management/branch-cash/repositories/branchCash.repository.js";
 import CashTransaction from "../../../finance/treasury/cash-management/cash-transactions/models/cashTransaction.model.js";
 import BankTransaction from "../../../finance/treasury/bank-management/bank-transactions/models/bankTransaction.model.js";
 
@@ -29,6 +30,38 @@ import BankTransaction from "../../../finance/treasury/bank-management/bank-tran
  * Validates that all cash payments have explicit denomination breakdowns
  * and that received - returned exactly equals the cash amount.
  */
+
+const revertCashTransactionsForInvoice = async (invoiceNo, companyId, userId, session) => {
+  const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
+  for (const ct of cashTxns) {
+    if (ct.cashDenominationId) {
+      const denomRecord = await mongoose.model("CashDenomination").findOne({ _id: ct.cashDenominationId }).session(session);
+      if (denomRecord) {
+        const processedDenominations = denomRecord.denominations || [];
+        const partition = ct.cashPartition || "running";
+        const branchId = ct.branchId;
+        const ctDirection = ct.direction;
+        
+        if (ctDirection === "CREDIT") {
+          if (partition === "running") {
+            await branchCashRepository.subtractRunningDenominations(branchId, companyId, processedDenominations, userId, { session });
+          } else {
+            await branchCashRepository.subtractFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
+          }
+        } else {
+          if (partition === "running") {
+            await branchCashRepository.addRunningDenominations(branchId, companyId, processedDenominations, userId, { session });
+          } else {
+            await branchCashRepository.addFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
+          }
+        }
+        await mongoose.model("CashDenomination").deleteOne({ _id: denomRecord._id }, { session });
+      }
+    }
+  }
+  await CashTransaction.deleteMany({ referenceNumber: invoiceNo }, { session });
+};
+
 const validateCashDenominations = (saleData) => {
   const isCashMethod = String(saleData.paymentMethod || "").toLowerCase() === "cash";
   const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
@@ -780,8 +813,8 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
     // 2. Delete GSTR-1 entry
     await GstLedger.deleteMany({ voucherId: oldInvoice._id }, { session });
 
-    // 3. Delete Cash Transactions
-    await CashTransaction.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
+    // 3. Delete Cash Transactions & Revert Denominations
+    await revertCashTransactionsForInvoice(oldInvoice.invoiceNo, companyId, user?._id || user?.id, session);
 
     // 4. Delete Bank Transactions
     await BankTransaction.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
@@ -856,9 +889,92 @@ const getAllCustomerSales = async (companyId, workspaceId, branchId = null, pagi
   };
 };
 
+
+const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const invoice = await SalesInvoice.findOne({ _id: invoiceId, companyId, workspaceId }).session(session);
+
+    if (!invoice) {
+      throw new ApiError(404, "Invoice not found");
+    }
+
+    if (invoice.status === "Cancelled") {
+      throw new ApiError(400, "Invoice is already cancelled");
+    }
+
+    // 1. Revert Inventory Qty for all items
+    if (invoice.items && invoice.items.length > 0) {
+      const batchOps = [];
+      const facilityOps = [];
+      const resolvedBranchId = invoice.branchId || null;
+
+      for (const item of invoice.items) {
+        const qtyToRevert = Number(item.qty || 0);
+        if (qtyToRevert <= 0) continue;
+        
+        const rawBatchId = item.batchId || item.batch_id || null;
+        const productId = item.productId || item.product_id;
+
+        if (rawBatchId) {
+          batchOps.push({
+            updateOne: {
+              filter: { _id: rawBatchId },
+              update: { $inc: { batchQty: qtyToRevert } }
+            }
+          });
+        }
+
+        if (productId && resolvedBranchId) {
+          facilityOps.push({
+            updateOne: {
+              filter: { product_id: productId, facility_id: resolvedBranchId },
+              update: { $inc: { total_qty_available: qtyToRevert, qoh: qtyToRevert, atp: qtyToRevert } }
+            }
+          });
+        }
+      }
+
+      if (batchOps.length > 0) {
+        await mongoose.model('Batch').bulkWrite(batchOps, { session });
+      }
+      if (facilityOps.length > 0) {
+        await mongoose.model('ProductFacility').bulkWrite(facilityOps, { session });
+      }
+    }
+
+    // 2. Delete GSTR-1 entry
+    await GstLedger.deleteMany({ voucherId: invoice._id }, { session });
+
+    // 3. Delete Cash Transactions & Revert Denominations
+    await revertCashTransactionsForInvoice(invoice.invoiceNo, companyId, user?._id || user?.id, session);
+
+    // 4. Delete Bank Transactions
+    await BankTransaction.deleteMany({ referenceNumber: invoice.invoiceNo }, { session });
+
+    // 5. Delete Journal Vouchers
+    await JournalVoucher.deleteMany({ referenceNumber: invoice.invoiceNo }, { session });
+
+    // 6. Update invoice status
+    invoice.status = "Cancelled";
+    await invoice.save({ session });
+
+    await session.commitTransaction();
+    return invoice;
+  } catch (error) {
+    await session.abortTransaction();
+    throw error;
+  } finally {
+    session.endSession();
+  }
+};
+
 export default {
   recordCustomerSale,
   updateCustomerSale,
+  cancelCustomerSale,
   getCustomerSales,
   getAllCustomerSales,
 };

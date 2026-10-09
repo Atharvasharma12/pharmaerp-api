@@ -215,21 +215,49 @@ const getWorkspaceProducts = async (workspaceId, filters = {}, options = {}) => 
 
   if (safeProducts.length > 0) {
     const productIds = safeProducts.map(p => p._id);
-    const facilityQuery = { workspaceId, product_id: { $in: productIds } };
     if (filters.branchId) {
-      facilityQuery.facility_id = filters.branchId;
+      const branchBatchStock = await Batch.aggregate([
+        {
+          $match: {
+            workspaceId: new mongoose.Types.ObjectId(workspaceId),
+            branch_id: new mongoose.Types.ObjectId(filters.branchId),
+            product: { $in: productIds },
+            isDeleted: false,
+            batchQty: { $gt: 0 },
+          },
+        },
+        {
+          $group: {
+            _id: "$product",
+            stock: { $sum: "$batchQty" },
+          },
+        },
+      ]);
+      const stockMap = new Map(
+        branchBatchStock.map((entry) => [entry._id.toString(), entry.stock]),
+      );
+
+      safeProducts.forEach((product) => {
+        product.stock = stockMap.get(product._id.toString()) || 0;
+      });
+    } else if (!options.summary) {
+      const facilities = await ProductFacility.find({
+        workspaceId,
+        product_id: { $in: productIds },
+        isDeleted: false,
+      }).lean();
+      const stockMap = {};
+      facilities.forEach((facility) => {
+        const productId = facility.product_id.toString();
+        stockMap[productId] =
+          (stockMap[productId] || 0) +
+          (facility.qoh ?? facility.total_qty_available ?? 0);
+      });
+
+      safeProducts.forEach((product) => {
+        product.stock = stockMap[product._id.toString()] || 0;
+      });
     }
-
-    const facilities = await ProductFacility.find(facilityQuery).lean();
-    const stockMap = {};
-    facilities.forEach(f => {
-      const pId = f.product_id.toString();
-      stockMap[pId] = (stockMap[pId] || 0) + (f.qoh || f.total_qty_available || 0);
-    });
-
-    safeProducts.forEach(p => {
-      p.stock = stockMap[p._id.toString()] || 0;
-    });
   }
 
   return {
@@ -1550,4 +1578,3 @@ export default {
   importWorkspaceProducts,
   importWorkspaceProductsGst,
 };
-
