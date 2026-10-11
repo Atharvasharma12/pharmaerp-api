@@ -112,18 +112,27 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
   const query = {
     workspaceId: shift.workspaceId,
     companyId: shift.companyId,
-    createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime },
     isDeleted: false,
+    $or: [
+      { shiftId: shift._id },
+      { createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime } },
+    ],
   };
   
   if (shift.branchId) {
     query.branchId = shift.branchId;
   }
 
-  const invoices = await SalesInvoice.find(query);
+  const invoices = await SalesInvoice.find(query).populate("customerId", "name phone");
 
   let invoiceCount = 0;
   let cashInvoiceCount = 0;
+  let splitInvoiceCount = 0;
+  let splitNet = 0;
+  let splitCashAmount = 0;
+  let splitUpiAmount = 0;
+  let pureCashAmount = 0;
+  let pureUpiAmount = 0;
   let netSales = 0;
   let paymentQrCount = 0;
   let qrNet = 0;
@@ -131,18 +140,104 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
   let returnCount = 0; // stubbed until SalesReturn is built
   let returnAmount = 0;
 
-  // Per-UPI breakdown: { [paymentQrId]: { transactionCount, totalAmount } }
+  // Cancelled metrics tracking
+  let cancelledInvoiceCount = 0;
+  let cancelledSalesTotal = 0;
+  let cancelledCashTotal = 0;
+  let cancelledUpiTotal = 0;
+  let cancelledSplitTotal = 0;
+  const cancelledInvoices = [];
+  const cancelledBreakdown = {
+    cash: { count: 0, amount: 0 },
+    upi: { count: 0, amount: 0 },
+    split: { count: 0, amount: 0 },
+    card: { count: 0, amount: 0 },
+    wallet: { count: 0, amount: 0 },
+    other: { count: 0, amount: 0 },
+  };
+
+  // Per-UPI breakdown: { [paymentQrId]: { transactionCount, totalAmount, invoiceIds: Set } }
   const upiBreakdownRaw = {};
 
-  const _trackUpi = (paymentQrId, amount) => {
+  const _trackUpi = (paymentQrId, amount, invoiceId, isSplit = false) => {
     const key = paymentQrId ? String(paymentQrId) : "unattributed";
-    if (!upiBreakdownRaw[key]) upiBreakdownRaw[key] = { transactionCount: 0, totalAmount: 0 };
+    if (!upiBreakdownRaw[key]) {
+      upiBreakdownRaw[key] = {
+        transactionCount: 0,
+        totalAmount: 0,
+        invoiceIds: new Set(),
+        pureBillCount: 0,
+        splitBillCount: 0,
+      };
+    }
     upiBreakdownRaw[key].transactionCount++;
-    upiBreakdownRaw[key].totalAmount += amount;
+    upiBreakdownRaw[key].totalAmount += (Number(amount) || 0);
+    if (invoiceId) {
+      upiBreakdownRaw[key].invoiceIds.add(String(invoiceId));
+    }
+    if (isSplit) {
+      upiBreakdownRaw[key].splitBillCount++;
+    } else {
+      upiBreakdownRaw[key].pureBillCount++;
+    }
   };
 
   for (const inv of invoices) {
-    // If we model returns as negative grandTotals in the future:
+    if (inv.status === "Cancelled") {
+      cancelledInvoiceCount += 1;
+      const billTotal = Number(inv.grandTotal || 0);
+      cancelledSalesTotal += billTotal;
+      const isSplit = inv.paymentMethod === "Split";
+      const pMethod = String(inv.paymentMethod || "CASH").toUpperCase();
+
+      if (isSplit) {
+        cancelledSplitTotal += billTotal;
+        cancelledBreakdown.split.count += 1;
+        cancelledBreakdown.split.amount += billTotal;
+        if (Array.isArray(inv.payments)) {
+          for (const p of inv.payments) {
+            const pt = String(p.paymentType || p.mode || "").toUpperCase();
+            const amt = Number(p.amount || 0);
+            if (pt.includes("UPI") || pt.includes("QR")) {
+              cancelledUpiTotal += amt;
+            } else if (pt.includes("CASH")) {
+              cancelledCashTotal += amt;
+            }
+          }
+        }
+      } else if (pMethod.includes("UPI") || pMethod.includes("QR")) {
+        cancelledUpiTotal += billTotal;
+        cancelledBreakdown.upi.count += 1;
+        cancelledBreakdown.upi.amount += billTotal;
+      } else if (pMethod.includes("CASH")) {
+        cancelledCashTotal += billTotal;
+        cancelledBreakdown.cash.count += 1;
+        cancelledBreakdown.cash.amount += billTotal;
+      } else if (pMethod.includes("CARD")) {
+        cancelledBreakdown.card.count += 1;
+        cancelledBreakdown.card.amount += billTotal;
+      } else if (pMethod.includes("WALLET")) {
+        cancelledBreakdown.wallet.count += 1;
+        cancelledBreakdown.wallet.amount += billTotal;
+      } else {
+        cancelledBreakdown.other.count += 1;
+        cancelledBreakdown.other.amount += billTotal;
+      }
+
+      cancelledInvoices.push({
+        invoiceId: inv._id,
+        invoiceNo: inv.invoiceNo,
+        grandTotal: billTotal,
+        paymentMethod: inv.paymentMethod || "Cash",
+        payments: inv.payments || [],
+        cancelledAt: inv.cancelledAt || inv.updatedAt || new Date(),
+        cancelledBy: inv.cancelledBy || null,
+        customerName: inv.customerId?.name || "Walk-in Customer",
+      });
+      continue;
+    }
+
+    // Active sales logic
     if (inv.grandTotal < 0) {
       returnCount++;
       returnAmount += Math.abs(inv.grandTotal);
@@ -151,59 +246,142 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
       netSales += inv.grandTotal;
     }
 
-    if (inv.paymentMethod === "Split" && Array.isArray(inv.payments)) {
-      let hasUpi = false;
-      let hasCash = false;
-      for (const p of inv.payments) {
-        const pType = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
-        if (pType.includes("UPI") || pType.includes("QR")) {
-          hasUpi = true;
-          qrNet += (p.amount || 0);
-          _trackUpi(p.paymentQrId, p.amount || 0);
-        } else if (pType.includes("CASH")) {
-          hasCash = true;
-          cashNet += (p.amount || 0);
-        } else if (!pType.includes("CARD") && !pType.includes("WALLET") && !pType.includes("CREDIT")) {
-          hasCash = true;
-          cashNet += (p.amount || 0);
+    if (inv.paymentMethod === "Split") {
+      splitInvoiceCount++;
+      splitNet += inv.grandTotal || 0;
+      let billSplitCash = 0;
+      let billSplitUpi = 0;
+      if (Array.isArray(inv.payments) && inv.payments.length > 0) {
+        for (const p of inv.payments) {
+          const pType = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
+          const amt = Number(p.amount || 0);
+          if (pType.includes("UPI") || pType.includes("QR")) {
+            billSplitUpi += amt;
+            _trackUpi(p.paymentQrId || inv.paymentQrId, amt, inv._id, true);
+          } else if (pType.includes("CASH")) {
+            billSplitCash += amt;
+          } else if (!pType.includes("CARD") && !pType.includes("WALLET") && !pType.includes("CREDIT")) {
+            billSplitCash += amt;
+          }
         }
+      } else {
+        const tendered = Number(inv.cashTendered || 0);
+        billSplitCash = Math.min(Number(inv.grandTotal || 0), tendered);
+        billSplitUpi = Math.max(0, Number(inv.grandTotal || 0) - billSplitCash);
       }
-      if (hasUpi) paymentQrCount++;
-      if (hasCash) cashInvoiceCount++;
+      splitCashAmount += billSplitCash;
+      splitUpiAmount += billSplitUpi;
+      cashNet += billSplitCash;
+      qrNet += billSplitUpi;
+      // Note: splitInvoiceCount tracks split bills separately; pure cashInvoiceCount and paymentQrCount are NOT incremented
     } else {
       const pMethod = inv.paymentMethod ? inv.paymentMethod.toUpperCase() : "CASH";
 
       if (pMethod.includes("UPI") || pMethod.includes("QR")) {
         paymentQrCount++;
-        qrNet += inv.grandTotal;
-        _trackUpi(inv.paymentQrId, inv.grandTotal);
+        const amt = Number(inv.grandTotal || 0);
+        pureUpiAmount += amt;
+        qrNet += amt;
+        _trackUpi(inv.paymentQrId, amt, inv._id, false);
       } else if (pMethod.includes("CASH")) {
         cashInvoiceCount++;
-        cashNet += (inv.cashTendered - inv.changeDue > 0) ? (inv.cashTendered - inv.changeDue) : inv.grandTotal;
+        const amt = (inv.cashTendered - inv.changeDue > 0) ? (inv.cashTendered - inv.changeDue) : Number(inv.grandTotal || 0);
+        pureCashAmount += amt;
+        cashNet += amt;
       } else {
         cashInvoiceCount++;
-        cashNet += inv.grandTotal;
+        const amt = Number(inv.grandTotal || 0);
+        pureCashAmount += amt;
+        cashNet += amt;
       }
     }
   }
 
-  // Enrich upiBreakdown with PaymentQr metadata
+  // Enrich upiBreakdown with PaymentQr & BankAccount metadata
   const qrIds = Object.keys(upiBreakdownRaw).filter(k => k !== "unattributed");
   let upiBreakdown = [];
   if (qrIds.length > 0) {
-    const qrDocs = await PaymentQr.find({ _id: { $in: qrIds } }).select("upiId label provider").lean();
+    const qrDocs = await PaymentQr.find({ _id: { $in: qrIds } })
+      .populate({
+        path: "bankAccountId",
+        select: "accountName accountNumber ifscCode bankMasterId",
+        populate: { path: "bankMasterId", select: "name shortName" },
+      })
+      .lean();
     const qrMap = {};
     for (const qr of qrDocs) qrMap[String(qr._id)] = qr;
 
     upiBreakdown = Object.entries(upiBreakdownRaw).map(([key, data]) => {
+      const pureBillCount = data.pureBillCount || 0;
+      const splitBillCount = data.splitBillCount || 0;
+      const totalBillsForQr = (pureBillCount + splitBillCount) || (data.invoiceIds ? data.invoiceIds.size : data.transactionCount);
       if (key === "unattributed") {
-        return { paymentQrId: null, upiId: "Unattributed", label: "Legacy / Untracked", provider: null, ...data };
+        return {
+          paymentQrId: null,
+          upiId: "Unattributed",
+          label: "Legacy / Untracked UPI",
+          provider: null,
+          bankAccountId: null,
+          bankName: "Unlinked Bank",
+          accountName: "Direct / Legacy UPI",
+          accountNumber: "",
+          qrImageUrl: null,
+          transactionCount: data.transactionCount,
+          billCount: totalBillsForQr,
+          pureBillCount,
+          splitBillCount,
+          totalAmount: data.totalAmount,
+        };
       }
       const qr = qrMap[key] || {};
-      return { paymentQrId: key, upiId: qr.upiId || key, label: qr.label || key, provider: qr.provider || null, ...data };
+      const bankAcct = qr.bankAccountId || {};
+      const bankMaster = bankAcct.bankMasterId || {};
+      const bankName = bankMaster.name || bankMaster.shortName || bankAcct.accountName || "Bank";
+      return {
+        paymentQrId: key,
+        upiId: qr.upiId || key,
+        label: qr.label || qr.upiId || "UPI QR",
+        provider: qr.provider || null,
+        bankAccountId: bankAcct._id || null,
+        bankName,
+        accountName: bankAcct.accountName || "",
+        accountNumber: bankAcct.accountNumber ? `••••${String(bankAcct.accountNumber).slice(-4)}` : "",
+        qrImageUrl: qr.qrImageUrl || null,
+        transactionCount: data.transactionCount,
+        billCount: totalBillsForQr,
+        pureBillCount,
+        splitBillCount,
+        totalAmount: data.totalAmount,
+      };
     });
   } else if (upiBreakdownRaw["unattributed"]) {
-    upiBreakdown = [{ paymentQrId: null, upiId: "Unattributed", label: "Legacy / Untracked", provider: null, ...upiBreakdownRaw["unattributed"] }];
+    const data = upiBreakdownRaw["unattributed"];
+    const pureBillCount = data.pureBillCount || 0;
+    const splitBillCount = data.splitBillCount || 0;
+    const totalBillsForQr = (pureBillCount + splitBillCount) || (data.invoiceIds ? data.invoiceIds.size : data.transactionCount);
+    upiBreakdown = [
+      {
+        paymentQrId: null,
+        upiId: "Unattributed",
+        label: "Legacy / Untracked UPI",
+        provider: null,
+        bankAccountId: null,
+        bankName: "Unlinked Bank",
+        accountName: "Direct / Legacy UPI",
+        accountNumber: "",
+        qrImageUrl: null,
+        transactionCount: data.transactionCount,
+        billCount: totalBillsForQr,
+        pureBillCount,
+        splitBillCount,
+        totalAmount: data.totalAmount,
+      },
+    ];
+  }
+
+  // Fallback to shift.upiBreakdown if closed and calculated list is empty
+  if (shift.status === "closed" && (!upiBreakdown || upiBreakdown.length === 0) && shift.upiBreakdown?.length > 0) {
+    upiBreakdown = shift.upiBreakdown;
   }
 
 
@@ -307,9 +485,13 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
     ...shift.toObject(),
     invoiceCount,
     cashInvoiceCount,
+    pureCashInvoices: cashInvoiceCount,
+    pureCashInvoiceCount: cashInvoiceCount,
     returnCount,
     expiryCount: 0,
     paymentQrCount,
+    pureUpiInvoices: paymentQrCount,
+    pureUpiInvoiceCount: paymentQrCount,
     invoiceAmount: netSales,
     returnAmount,
     expiryAmount: 0,
@@ -317,13 +499,28 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
     cashIn: cashNet,
     cashOut: 0,
     cashNet,
+    pureCashAmount,
+    splitCashAmount,
     qrNet,
+    pureUpiAmount,
+    splitUpiAmount,
+    splitInvoiceCount,
+    splitNet,
+    splitSalesTotal: splitNet,
     upiBreakdown,
     expectedClosingCashAmount,
     withdrawals,
     deposits,
     totalWithdrawals,
     totalDeposits,
+    // Cancelled metrics & breakdown
+    cancelledInvoiceCount: (shift.status === "closed" && shift.cancelledInvoiceCount != null) ? shift.cancelledInvoiceCount : cancelledInvoiceCount,
+    cancelledSalesTotal: (shift.status === "closed" && shift.cancelledSalesTotal != null) ? shift.cancelledSalesTotal : cancelledSalesTotal,
+    cancelledCashTotal: (shift.status === "closed" && shift.cancelledCashTotal != null) ? shift.cancelledCashTotal : cancelledCashTotal,
+    cancelledUpiTotal: (shift.status === "closed" && shift.cancelledUpiTotal != null) ? shift.cancelledUpiTotal : cancelledUpiTotal,
+    cancelledSplitTotal: (shift.status === "closed" && shift.cancelledSplitTotal != null) ? shift.cancelledSplitTotal : cancelledSplitTotal,
+    cancelledInvoices: (shift.status === "closed" && shift.cancelledInvoices?.length > 0) ? shift.cancelledInvoices : cancelledInvoices,
+    cancelledBreakdown: (shift.status === "closed" && shift.cancelledBreakdown?.cash) ? shift.cancelledBreakdown : cancelledBreakdown,
   };
 
   res.status(200).json({ success: true, data: summary });

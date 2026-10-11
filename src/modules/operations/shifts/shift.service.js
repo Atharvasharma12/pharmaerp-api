@@ -3,12 +3,15 @@ import { DayClosing } from "../day-closings/dayClosing.model.js";
 import { BusinessDay } from "../business-days/businessDay.model.js";
 import { getOpenBusinessDay } from "../business-days/businessDay.service.js";
 import SalesInvoice from "../../sales/invoices/models/invoice.model.js";
+import BankTransaction from "../../finance/treasury/bank-management/bank-transactions/models/bankTransaction.model.js";
 import branchCashService from "../../finance/treasury/cash-management/branch-cash/services/branchCash.service.js";
 import ApiError from "../../../utils/ApiError.js";
 import { getTimePeriod, periodIdToLabel } from "../../../utils/timePeriod.js";
 import { getBusinessDateRange } from "../../../utils/businessDate.js";
 
 import branchCashRepository from "../../finance/treasury/cash-management/branch-cash/repositories/branchCash.repository.js";
+import journalPostingService from "../../finance/journal-vouchers/services/journalPosting.service.js";
+import PaymentQr from "../../finance/treasury/payment-qr/models/paymentQr.model.js";
 
 export const openShift = async (data) => {
   const { workspaceId, companyId, branchId, date } = data;
@@ -125,44 +128,184 @@ export const closeShift = async (
 
   const frozenAmount = totalCash - safeCarry;
 
-  // ── Calculate expected cash dynamically ──────────────────────────────────
+  // ── Calculate expected cash and sales totals dynamically ─────────────────
   const query = {
     workspaceId: shift.workspaceId,
     companyId: shift.companyId,
-    createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: new Date() },
     isDeleted: false,
+    $or: [
+      { shiftId: shift._id },
+      { createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: new Date() } },
+    ],
   };
 
   if (shift.branchId) query.branchId = shift.branchId;
 
-  const invoices = await SalesInvoice.find(query);
+  const invoices = await SalesInvoice.find(query).populate("customerId", "name phone");
 
-  const totalCashSales = invoices.reduce((sum, inv) => {
-    if (inv.paymentMethod === "Split" && Array.isArray(inv.payments)) {
-      const cashPayments = inv.payments.filter((p) => {
-        const pt = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
-        return (
-          pt.includes("CASH") ||
-          (!pt.includes("UPI") &&
-            !pt.includes("QR") &&
-            !pt.includes("CARD") &&
-            !pt.includes("WALLET") &&
-            !pt.includes("CREDIT"))
-        );
-      });
-      return sum + cashPayments.reduce((s, p) => s + (p.amount || 0), 0);
-    } else {
-      const pMethod = inv.paymentMethod ? inv.paymentMethod.toUpperCase() : "CASH";
-      if (pMethod.includes("UPI") || pMethod.includes("QR")) {
-        return sum;
-      }
-      const cashCollected =
-        inv.cashTendered - inv.changeDue > 0
-          ? inv.cashTendered - inv.changeDue
-          : inv.grandTotal || 0;
-      return sum + cashCollected;
+  let totalCashSales = 0;
+  let upiSalesTotal = 0;
+  let splitSalesTotal = 0;
+  let splitInvoiceCount = 0;
+  let splitCashAmount = 0;
+  let splitUpiAmount = 0;
+  let pureCashAmount = 0;
+  let pureUpiAmount = 0;
+  let pureCashCount = 0;
+  let pureUpiCount = 0;
+
+  // Cancelled metrics tracking
+  let cancelledInvoiceCount = 0;
+  let cancelledSalesTotal = 0;
+  let cancelledCashTotal = 0;
+  let cancelledUpiTotal = 0;
+  let cancelledSplitTotal = 0;
+  const cancelledInvoices = [];
+  const cancelledBreakdown = {
+    cash: { count: 0, amount: 0 },
+    upi: { count: 0, amount: 0 },
+    split: { count: 0, amount: 0 },
+    card: { count: 0, amount: 0 },
+    wallet: { count: 0, amount: 0 },
+    other: { count: 0, amount: 0 },
+  };
+
+  // Per-UPI breakdown tracking: { [qrId]: { transactionCount, totalAmount, invoiceIds: Set } }
+  const upiBreakdownRaw = {};
+  const _trackUpi = (qrId, amount, invoiceId, isSplit = false) => {
+    const key = qrId ? String(qrId) : "unattributed";
+    if (!upiBreakdownRaw[key]) {
+      upiBreakdownRaw[key] = {
+        transactionCount: 0,
+        totalAmount: 0,
+        invoiceIds: new Set(),
+        pureBillCount: 0,
+        splitBillCount: 0,
+      };
     }
-  }, 0);
+    upiBreakdownRaw[key].transactionCount += 1;
+    upiBreakdownRaw[key].totalAmount += Number(amount) || 0;
+    if (invoiceId) {
+      upiBreakdownRaw[key].invoiceIds.add(String(invoiceId));
+    }
+    if (isSplit) {
+      upiBreakdownRaw[key].splitBillCount++;
+    } else {
+      upiBreakdownRaw[key].pureBillCount++;
+    }
+  };
+
+  for (const inv of invoices) {
+    if (inv.status === "Cancelled") {
+      cancelledInvoiceCount += 1;
+      const billTotal = Number(inv.grandTotal || 0);
+      cancelledSalesTotal += billTotal;
+      const isSplit = inv.paymentMethod === "Split";
+      const pMethod = String(inv.paymentMethod || "CASH").toUpperCase();
+
+      if (isSplit) {
+        cancelledSplitTotal += billTotal;
+        cancelledBreakdown.split.count += 1;
+        cancelledBreakdown.split.amount += billTotal;
+        if (Array.isArray(inv.payments)) {
+          for (const p of inv.payments) {
+            const pt = String(p.paymentType || p.mode || "").toUpperCase();
+            const amt = Number(p.amount || 0);
+            if (pt.includes("UPI") || pt.includes("QR")) {
+              cancelledUpiTotal += amt;
+            } else if (pt.includes("CASH")) {
+              cancelledCashTotal += amt;
+            }
+          }
+        }
+      } else if (pMethod.includes("UPI") || pMethod.includes("QR")) {
+        cancelledUpiTotal += billTotal;
+        cancelledBreakdown.upi.count += 1;
+        cancelledBreakdown.upi.amount += billTotal;
+      } else if (pMethod.includes("CASH")) {
+        cancelledCashTotal += billTotal;
+        cancelledBreakdown.cash.count += 1;
+        cancelledBreakdown.cash.amount += billTotal;
+      } else if (pMethod.includes("CARD")) {
+        cancelledBreakdown.card.count += 1;
+        cancelledBreakdown.card.amount += billTotal;
+      } else if (pMethod.includes("WALLET")) {
+        cancelledBreakdown.wallet.count += 1;
+        cancelledBreakdown.wallet.amount += billTotal;
+      } else {
+        cancelledBreakdown.other.count += 1;
+        cancelledBreakdown.other.amount += billTotal;
+      }
+
+      cancelledInvoices.push({
+        invoiceId: inv._id,
+        invoiceNo: inv.invoiceNo,
+        grandTotal: billTotal,
+        paymentMethod: inv.paymentMethod || "Cash",
+        payments: inv.payments || [],
+        cancelledAt: inv.cancelledAt || inv.updatedAt || new Date(),
+        cancelledBy: inv.cancelledBy || null,
+        customerName: inv.customerId?.name || "Walk-in Customer",
+      });
+      continue;
+    }
+
+    const isSplit = inv.paymentMethod === "Split";
+    if (isSplit) {
+      splitInvoiceCount += 1;
+      splitSalesTotal += inv.grandTotal || 0;
+
+      let billSplitCash = 0;
+      let billSplitUpi = 0;
+      if (Array.isArray(inv.payments) && inv.payments.length > 0) {
+        for (const p of inv.payments) {
+          const pt = String(p.paymentType || p.mode || "").toUpperCase();
+          const amt = Number(p.amount) || 0;
+          if (pt.includes("UPI") || pt.includes("QR")) {
+            billSplitUpi += amt;
+            upiSalesTotal += amt;
+            _trackUpi(p.paymentQrId || inv.paymentQrId, amt, inv._id, true);
+          } else if (
+            pt.includes("CASH") ||
+            (!pt.includes("CARD") && !pt.includes("WALLET") && !pt.includes("CREDIT"))
+          ) {
+            billSplitCash += amt;
+            totalCashSales += amt;
+          }
+        }
+      } else {
+        const tendered = Number(inv.cashTendered || 0);
+        billSplitCash = Math.min(Number(inv.grandTotal || 0), tendered);
+        billSplitUpi = Math.max(0, Number(inv.grandTotal || 0) - billSplitCash);
+        totalCashSales += billSplitCash;
+        upiSalesTotal += billSplitUpi;
+      }
+      splitCashAmount += billSplitCash;
+      splitUpiAmount += billSplitUpi;
+    } else {
+      const pMethod = String(inv.paymentMethod || "CASH").toUpperCase();
+      if (pMethod.includes("UPI") || pMethod.includes("QR")) {
+        pureUpiCount += 1;
+        const amt = inv.grandTotal || 0;
+        pureUpiAmount += amt;
+        upiSalesTotal += amt;
+        _trackUpi(inv.paymentQrId, amt, inv._id, false);
+      } else if (pMethod.includes("CASH")) {
+        pureCashCount += 1;
+        const cashCollected =
+          inv.cashTendered - inv.changeDue > 0
+            ? inv.cashTendered - inv.changeDue
+            : inv.grandTotal || 0;
+        pureCashAmount += cashCollected;
+        totalCashSales += cashCollected;
+      } else {
+        pureCashCount += 1;
+        const amt = inv.grandTotal || 0;
+        pureCashAmount += amt;
+        totalCashSales += amt;
+      }
+    }
+  }
 
   // Compute manual deposit / withdrawal totals already recorded on the shift
   // (these are populated by branchCash.service when deposit/withdraw APIs are called
@@ -280,6 +423,106 @@ export const closeShift = async (
   shift.branchRunningCashAtClose = branchRunningCashAtClose;
   shift.branchFrozenCashAtClose = branchFrozenCashAtClose;
   shift.cashSalesTotal = totalCashSales; // persisted for day-closing aggregation
+  shift.upiSalesTotal = upiSalesTotal;
+  shift.splitSalesTotal = splitSalesTotal;
+  shift.splitInvoiceCount = splitInvoiceCount;
+  shift.splitCashAmount = splitCashAmount;
+  shift.splitUpiAmount = splitUpiAmount;
+  shift.pureCashAmount = pureCashAmount;
+  shift.pureUpiAmount = pureUpiAmount;
+  shift.cashInvoiceCount = pureCashCount;
+  shift.paymentQrCount = pureUpiCount;
+  shift.cancelledInvoiceCount = cancelledInvoiceCount;
+  shift.cancelledSalesTotal = cancelledSalesTotal;
+  shift.cancelledCashTotal = cancelledCashTotal;
+  shift.cancelledUpiTotal = cancelledUpiTotal;
+  shift.cancelledSplitTotal = cancelledSplitTotal;
+  shift.cancelledInvoices = cancelledInvoices;
+  shift.cancelledBreakdown = cancelledBreakdown;
+
+  // ── Build and persist enriched per-QR / per-Bank UPI breakdown ─────────────
+  const qrIds = Object.keys(upiBreakdownRaw).filter((k) => k !== "unattributed");
+  let upiBreakdown = [];
+  if (qrIds.length > 0) {
+    const qrDocs = await PaymentQr.find({ _id: { $in: qrIds } })
+      .populate({
+        path: "bankAccountId",
+        select: "accountName accountNumber ifscCode bankMasterId",
+        populate: { path: "bankMasterId", select: "name shortName" },
+      })
+      .lean();
+    const qrMap = {};
+    for (const qr of qrDocs) qrMap[String(qr._id)] = qr;
+
+    upiBreakdown = Object.entries(upiBreakdownRaw).map(([key, data]) => {
+      const pureBillCount = data.pureBillCount || 0;
+      const splitBillCount = data.splitBillCount || 0;
+      const totalBillsForQr = (pureBillCount + splitBillCount) || (data.invoiceIds ? data.invoiceIds.size : data.transactionCount);
+      if (key === "unattributed") {
+        return {
+          paymentQrId: null,
+          upiId: "Unattributed",
+          label: "Legacy / Untracked UPI",
+          provider: null,
+          bankAccountId: null,
+          bankName: "Unlinked Bank",
+          accountName: "Direct / Legacy UPI",
+          accountNumber: "",
+          qrImageUrl: null,
+          transactionCount: data.transactionCount,
+          billCount: totalBillsForQr,
+          pureBillCount,
+          splitBillCount,
+          totalAmount: data.totalAmount,
+        };
+      }
+      const qr = qrMap[key] || {};
+      const bankAcct = qr.bankAccountId || {};
+      const bankMaster = bankAcct.bankMasterId || {};
+      const bankName = bankMaster.name || bankMaster.shortName || bankAcct.accountName || "Bank";
+      return {
+        paymentQrId: qr._id || key,
+        upiId: qr.upiId || key,
+        label: qr.label || qr.upiId || "UPI QR",
+        provider: qr.provider || null,
+        bankAccountId: bankAcct._id || null,
+        bankName,
+        accountName: bankAcct.accountName || "",
+        accountNumber: bankAcct.accountNumber ? `••••${String(bankAcct.accountNumber).slice(-4)}` : "",
+        qrImageUrl: qr.qrImageUrl || null,
+        transactionCount: data.transactionCount,
+        billCount: totalBillsForQr,
+        pureBillCount,
+        splitBillCount,
+        totalAmount: data.totalAmount,
+      };
+    });
+  } else if (upiBreakdownRaw["unattributed"]) {
+    const data = upiBreakdownRaw["unattributed"];
+    const pureBillCount = data.pureBillCount || 0;
+    const splitBillCount = data.splitBillCount || 0;
+    const totalBillsForQr = (pureBillCount + splitBillCount) || (data.invoiceIds ? data.invoiceIds.size : data.transactionCount);
+    upiBreakdown = [
+      {
+        paymentQrId: null,
+        upiId: "Unattributed",
+        label: "Legacy / Untracked UPI",
+        provider: null,
+        bankAccountId: null,
+        bankName: "Unlinked Bank",
+        accountName: "Direct / Legacy UPI",
+        accountNumber: "",
+        qrImageUrl: null,
+        transactionCount: data.transactionCount,
+        billCount: totalBillsForQr,
+        pureBillCount,
+        splitBillCount,
+        totalAmount: data.totalAmount,
+      },
+    ];
+  }
+  shift.upiBreakdown = upiBreakdown;
+
   // Kept for backward compat, zeroed since fund transfers are deprecated
   shift.totalFundWithdrawals = 0;
   shift.totalFundDeposits = 0;
@@ -313,6 +556,45 @@ export const closeShift = async (
 
   shift.shiftName = sameNameCount > 0 ? `${baseName} ${sameNameCount + 1}` : baseName;
   shift.closePeriod = closePeriod.id;
+
+  // Flush PENDING UPI BankTransactions & Post their Journal Vouchers
+  // (commits held amounts directly to the respective bank accounts for non-cancelled invoices)
+  const invoiceNos = invoices
+    .filter((inv) => inv.status !== "Cancelled")
+    .map((inv) => inv.invoiceNo)
+    .filter(Boolean);
+  try {
+    const pendingBankTxs = await BankTransaction.find({
+      companyId: shift.companyId,
+      workspaceId: shift.workspaceId,
+      status: "PENDING_SHIFT_CLOSE",
+      $or: [
+        { shiftId: shift._id },
+        ...(invoiceNos.length > 0 ? [{ referenceNumber: { $in: invoiceNos } }] : []),
+      ],
+    });
+
+    for (const bt of pendingBankTxs) {
+      if (bt.journalVoucherId) {
+        try {
+          await journalPostingService.postJournalVoucher(
+            bt.journalVoucherId,
+            shift.companyId,
+            shift.workspaceId,
+            userId
+          );
+        } catch (postErr) {
+          console.error(`[Shift] Error posting JV ${bt.journalVoucherId} for BT ${bt._id}:`, postErr);
+        }
+      }
+      bt.status = "POSTED";
+      bt.postedAt = now;
+      bt.postedBy = userId;
+      await bt.save();
+    }
+  } catch (btFlushErr) {
+    console.error("[Shift] Error flushing pending UPI bank transactions:", btFlushErr);
+  }
 
   await shift.save();
   return shift;

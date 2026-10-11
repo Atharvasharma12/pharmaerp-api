@@ -90,6 +90,14 @@ const bankTransactionSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Linked shift (e.g. for POS sales transactions held until shift close)
+    shiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Shift",
+      default: null,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: Object.values(BANK_TRANSACTION_STATUS),
@@ -180,6 +188,11 @@ bankTransactionSchema.index({
   direction: 1,
   status: 1,
   isDeleted: 1,
+});
+
+bankTransactionSchema.index({
+  shiftId: 1,
+  status: 1,
 });
 
 const BankTransaction =

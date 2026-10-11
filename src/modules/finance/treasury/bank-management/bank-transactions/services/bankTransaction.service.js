@@ -15,6 +15,7 @@ import journalLineRepository from "../../../../journal-vouchers/repositories/jou
 import journalPostingService from "../../../../journal-vouchers/services/journalPosting.service.js";
 import journalCancellationService from "../../../../journal-vouchers/services/journalCancellation.service.js";
 import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
+import { VOUCHER_STATUS } from "../../../../journal-vouchers/constants/voucherStatus.constant.js";
 import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
 
 /**
@@ -265,7 +266,9 @@ const createBankTransaction = async (
       ];
     }
 
-    // 6. Create journal voucher
+    const isPendingShiftClose = payload.status === BANK_TRANSACTION_STATUS.PENDING_SHIFT_CLOSE;
+
+    // 6. Create journal voucher (DRAFT if held for shift close, else POSTED)
     const journalVoucher = await journalVoucherRepository.createVoucher(
       {
         workspaceId,
@@ -278,6 +281,7 @@ const createBankTransaction = async (
         totalDebit: amount,
         totalCredit: amount,
         createdBy: userId,
+        status: isPendingShiftClose ? VOUCHER_STATUS.DRAFT : VOUCHER_STATUS.POSTED,
       },
       { session },
     );
@@ -289,14 +293,16 @@ const createBankTransaction = async (
     }));
     await journalLineRepository.createLines(linesWithVoucher, { session });
 
-    // 8. Post the voucher immediately
-    await journalPostingService.postJournalVoucher(
-      journalVoucher._id,
-      companyId,
-      workspaceId,
-      userId,
-      { session },
-    );
+    // 8. Post the voucher immediately ONLY if not held for shift close
+    if (!isPendingShiftClose) {
+      await journalPostingService.postJournalVoucher(
+        journalVoucher._id,
+        companyId,
+        workspaceId,
+        userId,
+        { session },
+      );
+    }
 
     // 9. Save the Bank Transaction record
     const txPayload = {
@@ -312,9 +318,10 @@ const createBankTransaction = async (
       narration: narration || null,
       counterpartyAccountId: offsetLedgerAccountId,
       journalVoucherId: journalVoucher._id,
-      status: BANK_TRANSACTION_STATUS.POSTED,
-      postedAt: new Date(),
-      postedBy: userId,
+      shiftId: payload.shiftId || null,
+      status: payload.status || BANK_TRANSACTION_STATUS.POSTED,
+      postedAt: payload.status === BANK_TRANSACTION_STATUS.PENDING_SHIFT_CLOSE ? null : new Date(),
+      postedBy: payload.status === BANK_TRANSACTION_STATUS.PENDING_SHIFT_CLOSE ? null : userId,
       createdBy: userId,
     };
 
