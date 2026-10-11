@@ -16,8 +16,11 @@ const calculateShiftSummary = async (shift) => {
   const query = {
     workspaceId: shift.workspaceId,
     companyId: shift.companyId,
-    createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime },
     isDeleted: false,
+    $or: [
+      { shiftId: shift._id },
+      { createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime } },
+    ],
   };
   
   if (shift.branchId) query.branchId = shift.branchId;
@@ -63,8 +66,7 @@ const calculateShiftSummary = async (shift) => {
           cashNet += (p.amount || 0);
         }
       }
-      if (hasUpi) paymentQrCount++;
-      if (hasCash) cashInvoiceCount++;
+      // Note: split invoices have their own separate tracking and should not inflate pure cash/UPI counts
     } else {
       const pMethod = inv.paymentMethod ? inv.paymentMethod.toUpperCase() : "CASH";
       if (pMethod.includes("UPI") || pMethod.includes("QR")) {
@@ -114,6 +116,8 @@ const calculateShiftSummary = async (shift) => {
     qrNet,
     upiBreakdown,
     expectedClosingCashAmount,
+    cancelledInvoiceCount: shift.cancelledInvoiceCount || 0,
+    cancelledSalesTotal: shift.cancelledSalesTotal || 0,
   };
 };
 

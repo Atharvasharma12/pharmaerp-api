@@ -5,6 +5,7 @@ import {
   getAllCustomerSales,
   updateCustomerSale,
   cancelCustomerSale,
+  getNextInvoiceNumber,
 } from "../controllers/invoice.controller.js";
 
 import authMiddleware from "../../../../middlewares/auth.middleware.js";
@@ -19,6 +20,7 @@ router.use(workspaceContextMiddleware);
 router.use(companyContextMiddleware);
 
 // Routes
+router.get("/next-number", getNextInvoiceNumber);
 router.get("/", getAllCustomerSales);
 router.get("/customer/:customerId", getCustomerSales);
 router.post("/customer/:customerId?", recordCustomerSale);

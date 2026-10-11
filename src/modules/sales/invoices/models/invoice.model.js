@@ -31,6 +31,12 @@ const invoiceSchema = new mongoose.Schema(
       ref: "FinancialPeriod",
       default: null,
     },
+    shiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Shift",
+      default: null,
+      index: true,
+    },
     invoiceNo: {
       type: String,
       required: true,
@@ -84,9 +90,30 @@ const invoiceSchema = new mongoose.Schema(
       type: Array,
       default: [],
     },
+    denominations: {
+      type: Array,
+      default: [],
+    },
+    returnedDenominations: {
+      type: Array,
+      default: [],
+    },
     status: {
       type: String,
       default: "Paid",
+    },
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    cancelReason: {
+      type: String,
+      default: null,
     },
     items: {
       type: Array,
@@ -113,6 +140,18 @@ const invoiceSchema = new mongoose.Schema(
       default: null,
     },
     createdByEmail: {
+      type: String,
+      default: null,
+    },
+    updatedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      default: null,
+    },
+    updatedByName: {
+      type: String,
+      default: null,
+    },
+    updatedByEmail: {
       type: String,
       default: null,
     },

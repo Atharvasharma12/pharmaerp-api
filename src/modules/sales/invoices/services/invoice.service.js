@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import invoiceRepository from "../repositories/invoice.repository.js";
+import { getBranchInitials } from "../../../../utils/branchInitials.js";
 import customerRepository from "../../../parties/customers/repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
@@ -25,6 +26,7 @@ import JournalVoucher from "../../../finance/journal-vouchers/models/journalVouc
 import branchCashRepository from "../../../finance/treasury/cash-management/branch-cash/repositories/branchCash.repository.js";
 import CashTransaction from "../../../finance/treasury/cash-management/cash-transactions/models/cashTransaction.model.js";
 import BankTransaction from "../../../finance/treasury/bank-management/bank-transactions/models/bankTransaction.model.js";
+import { Shift } from "../../../operations/shifts/shift.model.js";
 
 /**
  * Validates that all cash payments have explicit denomination breakdowns
@@ -151,6 +153,556 @@ const validateCashDenominations = (saleData) => {
   }
 };
 
+/**
+ * Helper to revert inventory for an invoice (add quantities back to Batch & ProductFacility)
+ */
+const revertInvoiceInventory = async (items, branchId, session) => {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const batchOps = [];
+  const facilityOps = [];
+  const resolvedBranchId = branchId || null;
+
+  for (const item of items) {
+    const qtyToRevert = Number(item.qty || 0);
+    if (qtyToRevert <= 0) continue;
+
+    const rawBatchId = item.batchId || item.batch_id || (item.batch && item.batch._id) || item.batch;
+    const productId = item.productId || item.product_id || item.workspaceProductId || item.id;
+
+    if (rawBatchId) {
+      batchOps.push({
+        updateOne: {
+          filter: { _id: rawBatchId },
+          update: { $inc: { batchQty: qtyToRevert } },
+        },
+      });
+    }
+
+    if (productId && resolvedBranchId) {
+      facilityOps.push({
+        updateOne: {
+          filter: { product_id: productId, facility_id: resolvedBranchId },
+          update: { $inc: { total_qty_available: qtyToRevert, qoh: qtyToRevert, atp: qtyToRevert } },
+        },
+      });
+    }
+  }
+
+  if (batchOps.length > 0) {
+    await Batch.bulkWrite(batchOps, { session });
+  }
+  if (facilityOps.length > 0) {
+    await ProductFacility.bulkWrite(facilityOps, { session });
+  }
+};
+
+/**
+ * Helper to deduct inventory for an invoice (deduct quantities from Batch & ProductFacility)
+ */
+const deductInvoiceInventory = async (items, branchId, session) => {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const batchOps = [];
+  const facilityOps = [];
+  const resolvedBranchId = branchId || null;
+
+  for (const item of items) {
+    const qtyToDeduct = Number(item.qty || 0);
+    if (qtyToDeduct <= 0) continue;
+
+    const productId = item.productId || item.product_id || item.workspaceProductId || item.id;
+    const rawBatchId = item.batchId || item.batch_id || (item.batch && item.batch._id) || item.batch;
+
+    if (rawBatchId) {
+      batchOps.push({
+        updateOne: {
+          filter: { _id: rawBatchId },
+          update: { $inc: { batchQty: -qtyToDeduct } },
+        },
+      });
+    }
+
+    if (productId && resolvedBranchId) {
+      facilityOps.push({
+        updateOne: {
+          filter: { product_id: productId, facility_id: resolvedBranchId },
+          update: { $inc: { total_qty_available: -qtyToDeduct, qoh: -qtyToDeduct, atp: -qtyToDeduct } },
+        },
+      });
+    }
+  }
+
+  if (batchOps.length > 0) {
+    await Batch.bulkWrite(batchOps, { session });
+  }
+  if (facilityOps.length > 0) {
+    await ProductFacility.bulkWrite(facilityOps, { session });
+  }
+};
+
+/**
+ * Helper to delete all financial & treasury entries associated with an invoice (GSTR-1, Cash, Bank, JVs)
+ */
+const cleanInvoiceAccountingEntries = async (invoiceId, invoiceNo, companyId, userId, session) => {
+  // 1. Delete GSTR-1 entry
+  await GstLedger.deleteMany({ voucherId: invoiceId }, { session });
+
+  // 2. Delete Cash Transactions & Revert Denominations
+  await revertCashTransactionsForInvoice(invoiceNo, companyId, userId, session);
+
+  // 3. Delete Bank Transactions & Linked Journal Vouchers
+  const bankTxQuery = {
+    $or: [
+      { referenceNumber: invoiceNo },
+      { narration: { $regex: invoiceNo } },
+    ],
+  };
+  const relatedBankTxs = await BankTransaction.find(bankTxQuery).session(session);
+  const btJvIds = relatedBankTxs.map((bt) => bt.journalVoucherId).filter(Boolean);
+  if (btJvIds.length > 0) {
+    await JournalVoucher.deleteMany({ _id: { $in: btJvIds } }, { session });
+    await mongoose.model("JournalLine").deleteMany({ voucherId: { $in: btJvIds } }, { session });
+  }
+  await BankTransaction.deleteMany(bankTxQuery, { session });
+
+  // 4. Delete any remaining Journal Vouchers linked to this invoice
+  const jvQuery = {
+    $or: [
+      { referenceNumber: invoiceNo },
+      { narration: { $regex: invoiceNo } },
+    ],
+  };
+  const relatedJvs = await JournalVoucher.find(jvQuery).session(session);
+  const remainingJvIds = relatedJvs.map((j) => j._id);
+  if (remainingJvIds.length > 0) {
+    await mongoose.model("JournalLine").deleteMany({ voucherId: { $in: remainingJvIds } }, { session });
+    await JournalVoucher.deleteMany({ _id: { $in: remainingJvIds } }, { session });
+  }
+};
+
+/**
+ * Helper to post all financial accounting, tax ledgers, cash drawer and bank transactions
+ */
+const postSaleAccounting = async ({
+  invoice,
+  saleData,
+  customer,
+  company,
+  resolvedBranchId,
+  resolvedPaymentQrId,
+  salesAccountsResult,
+  cashAccountsResult,
+  bankAccountsResult,
+  primaryBankAccount,
+  defaultBankAccount,
+  companyId,
+  workspaceId,
+  user,
+  session,
+}) => {
+  // Concurrently resolve any missing reference accounts/company
+  const [
+    resolvedCompany,
+    resolvedSalesAccounts,
+    resolvedCashAccounts,
+    resolvedBankAccounts,
+    resolvedPrimaryBank,
+    resolvedDefaultBank,
+  ] = await Promise.all([
+    company ? Promise.resolve(company) : Company.findOne({ _id: companyId, workspaceId }).session(session),
+    salesAccountsResult ? Promise.resolve(salesAccountsResult) : accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "SALES" }),
+    cashAccountsResult ? Promise.resolve(cashAccountsResult) : accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "CASH" }),
+    bankAccountsResult ? Promise.resolve(bankAccountsResult) : accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "BANK" }),
+    primaryBankAccount !== undefined ? Promise.resolve(primaryBankAccount) : BankAccount.findOne({ companyId, workspaceId, isDeleted: false, isActive: true, isPrimary: true }).session(session),
+    defaultBankAccount !== undefined ? Promise.resolve(defaultBankAccount) : BankAccount.findOne({ companyId, workspaceId, isDeleted: false, isActive: true }).session(session),
+  ]);
+
+  // 1. Auto-create GSTR-1 Entry for GST Ledger
+  try {
+    const totalGst = Number(invoice.tax || saleData.tax || 0);
+    const halfGst = totalGst / 2;
+    const taxableAmt = Number(
+      saleData.taxableAmount !== undefined
+        ? saleData.taxableAmount
+        : (invoice.subtotal || 0) - (invoice.discount || 0)
+    );
+
+    const companyGstin = resolvedCompany?.gstin || "";
+    const customerGstin = customer?.gstNumber || "";
+    const isIgst = companyGstin && customerGstin && companyGstin.substring(0, 2) !== customerGstin.substring(0, 2);
+
+    await gstLedgerRepository.createGstLedgerEntry({
+      workspaceId: invoice.workspaceId,
+      companyId: invoice.companyId,
+      partyId: customer._id,
+      voucherId: invoice._id,
+      voucherNumber: invoice.invoiceNo,
+      voucherDate: invoice.date ? new Date(invoice.date) : new Date(),
+      gstType: "GSTR-1",
+      taxableAmount: taxableAmt,
+      cgst: isIgst ? 0 : halfGst,
+      sgst: isIgst ? 0 : halfGst,
+      igst: isIgst ? totalGst : 0,
+      totalAmount: Number(invoice.grandTotal || 0),
+      narration: `Sale Bill ${invoice.invoiceNo} (${invoice.billingMode}) - Customer: ${customer.name || "Customer"}`,
+    }, { session });
+  } catch (gstErr) {
+    console.error("Failed to auto-create GSTR-1 entry for sale bill:", gstErr);
+  }
+
+  // 2. Auto-create Journal Vouchers for Sale and Payments
+  try {
+    const isCashPaid = (String(invoice.paymentMethod).toLowerCase() === "cash" || Number(invoice.cashTendered) > 0) && String(invoice.status).toLowerCase() === "paid" && Number(invoice.grandTotal) > 0;
+    const isUpiPaid = String(invoice.paymentMethod).toLowerCase() === "upi" && String(invoice.status).toLowerCase() === "paid" && Number(invoice.grandTotal) > 0;
+
+    let salesAccount = null;
+    if (resolvedSalesAccounts?.accounts && resolvedSalesAccounts.accounts.length > 0) {
+      const accounts = resolvedSalesAccounts.accounts;
+      salesAccount = accounts.find(a => a.accountCode === "SALES-REVENUE") 
+                  || accounts.find(a => String(a.accountName).toLowerCase().includes("revenue")) 
+                  || accounts[0];
+    }
+
+    if (salesAccount) {
+      const paymentsList = Array.isArray(saleData.payments) && saleData.payments.length > 0 
+        ? [...saleData.payments]
+        : (Array.isArray(invoice.payments) && invoice.payments.length > 0 ? [...invoice.payments] : []);
+
+      if (isCashPaid && paymentsList.length === 0) {
+        paymentsList.push({
+          paymentType: "cash",
+          amount: invoice.grandTotal,
+          denominations: Array.isArray(saleData.denominations) ? saleData.denominations : (invoice.denominations || []),
+          returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : (invoice.returnedDenominations || [])
+        });
+      } else if (isUpiPaid && paymentsList.length === 0) {
+        paymentsList.push({
+          paymentType: "upi",
+          amount: invoice.grandTotal
+        });
+      }
+
+      let needsSaleJv = customer.ledgerAccountId ? 1 : 0;
+      let needsReceiptJv = 0;
+      let needsCashTx = 0;
+
+      for (const p of paymentsList) {
+        if (String(p.paymentType || p.mode).toLowerCase() === "cash") {
+          needsReceiptJv += 1;
+          needsCashTx += 1; // CASH_IN
+          let changeAmount = 0;
+          const returnedList = p.returnedDenominations || saleData.returnedDenominations || invoice.returnedDenominations;
+          if (Array.isArray(returnedList) && returnedList.length > 0) {
+            changeAmount = returnedList.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+          }
+          if (changeAmount > 0) {
+            needsReceiptJv += 1; 
+            needsCashTx += 1; // CASH_OUT
+          }
+        } else if (String(p.paymentType || p.mode).toLowerCase() === "upi") {
+          needsReceiptJv += 1; // fallback JV
+        }
+      }
+
+      const salePromises = [];
+      const receiptPromises = [];
+      
+      if (needsSaleJv) salePromises.push(voucherNumberService.generateVoucherNumber(invoice.companyId, invoice.workspaceId, "SALE", { session }));
+      for (let i = 0; i < needsReceiptJv; i++) {
+        receiptPromises.push(voucherNumberService.generateVoucherNumber(invoice.companyId, invoice.workspaceId, "JOURNAL", { session }));
+      }
+
+      let baseCashTx = null;
+      let baseCount = null;
+      if (needsCashTx > 0) {
+        baseCashTx = await cashTransactionRepository.getNextTransactionNumber(invoice.companyId, invoice.workspaceId, { session });
+        baseCount = await cashDenominationRepository.getNextCountNumber(invoice.companyId, invoice.workspaceId, { session });
+      }
+
+      const [saleRes, receiptRes] = await Promise.all([
+        Promise.all(salePromises),
+        Promise.all(receiptPromises)
+      ]);
+
+      const cashTxRes = [];
+      const countRes = [];
+      
+      if (needsCashTx > 0 && baseCashTx && baseCount) {
+        const txParts = baseCashTx.split("-");
+        const txPrefix = txParts.slice(0, 2).join("-") + "-";
+        const txSeq = parseInt(txParts[txParts.length - 1]) || 1;
+
+        const countParts = baseCount.split("-");
+        const countPrefix = countParts.slice(0, 2).join("-") + "-";
+        const countSeq = parseInt(countParts[countParts.length - 1]) || 1;
+
+        for (let i = 0; i < needsCashTx; i++) {
+          cashTxRes.push(`${txPrefix}${String(txSeq + i).padStart(5, "0")}`);
+          countRes.push(`${countPrefix}${String(countSeq + i).padStart(5, "0")}`);
+        }
+      }
+
+      let receiptIdx = 0, cashTxIdx = 0, countIdx = 0;
+      const preSaleJv = needsSaleJv ? saleRes[0] : null;
+      const nextReceiptJv = () => receiptRes[receiptIdx++];
+      const nextCashTx = () => cashTxRes[cashTxIdx++];
+      const nextCount = () => countRes[countIdx++];
+
+      // 1. If customer has a ledger account, first create the SALE JV (Customer -> Sales)
+      if (customer.ledgerAccountId && preSaleJv) {
+        const saleJvPayload = {
+          voucherNumber: preSaleJv,
+          voucherDate: invoice.date || new Date(),
+          voucherType: "SALE",
+          referenceNumber: invoice.invoiceNo,
+          narration: `Sale against Invoice ${invoice.invoiceNo}`,
+          status: "POSTED",
+          lines: [
+            {
+              accountId: customer.ledgerAccountId,
+              debit: invoice.grandTotal,
+              credit: 0,
+              narration: `Amount due for Invoice ${invoice.invoiceNo}`
+            },
+            {
+              accountId: salesAccount._id,
+              debit: 0,
+              credit: invoice.grandTotal,
+              narration: `Sales from Invoice ${invoice.invoiceNo}`
+            }
+          ]
+        };
+        
+        try {
+          await journalVoucherService.createJournalVoucher(
+            invoice.workspaceId,
+            invoice.companyId,
+            user?._id,
+            saleJvPayload,
+            { session }
+          );
+        } catch (jvErr) {
+          console.error("--- FAILED TO CREATE SALES JV ---", jvErr);
+        }
+      }
+
+      const receiptCounterpartyId = customer.ledgerAccountId || salesAccount._id;
+      const receiptNarrationSuffix = customer.ledgerAccountId ? "from Customer" : "Sale";
+
+      for (const payment of paymentsList) {
+        const paymentType = String(payment.paymentType || payment.mode || "").toLowerCase();
+        const amount = Number(payment.amount || 0);
+        
+        if (amount <= 0) continue;
+
+        if (paymentType === "cash") {
+          let cashLedgerAccountId = null;
+          if (resolvedCashAccounts?.accounts && resolvedCashAccounts.accounts.length > 0) {
+            const accounts = resolvedCashAccounts.accounts;
+            const bestCash = accounts.find(a => a.accountCode === "PETTY-CASH") 
+                          || accounts.find(a => String(a.accountName).toLowerCase().includes("cash"))
+                          || accounts[0];
+            cashLedgerAccountId = bestCash._id;
+          }
+
+          if (cashLedgerAccountId) {
+            let txSuccess = false;
+            try {
+              let receivedDenoms = Array.isArray(payment.denominations) && payment.denominations.length > 0
+                ? payment.denominations
+                : (Array.isArray(saleData.denominations) && saleData.denominations.length > 0 ? saleData.denominations : (invoice.denominations || []));
+              let returnedDenoms = Array.isArray(payment.returnedDenominations) && payment.returnedDenominations.length > 0
+                ? payment.returnedDenominations
+                : (Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : (invoice.returnedDenominations || []));
+              
+              let receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+
+              if (receivedAmount === 0 && receivedDenoms.length === 0) {
+                throw new ApiError(400, "Cash denominations are required for cash payments.");
+              }
+
+              let changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
+
+              // 1. Process CASH_IN for exact received amount
+              const cashInPayload = {
+                transactionNumber: nextCashTx(),
+                voucherNumber: nextReceiptJv(),
+                countNumber: nextCount(),
+                transactionDate: invoice.date || new Date(),
+                branchId: resolvedBranchId || invoice.branchId,
+                partition: "running",
+                transactionType: "CASH_IN",
+                direction: "CREDIT",
+                amount: receivedAmount,
+                referenceNumber: invoice.invoiceNo,
+                narration: `Cash Received ${receiptNarrationSuffix} for Invoice ${invoice.invoiceNo}`,
+                counterpartyAccountId: receiptCounterpartyId,
+                denominations: receivedDenoms,
+              };
+
+              await cashTransactionService.createCashTransaction(
+                invoice.workspaceId,
+                invoice.companyId,
+                user?._id,
+                cashInPayload,
+                { session }
+              );
+
+              // 2. Process CASH_OUT if change was given
+              if (changeAmount > 0) {
+                const cashOutPayload = {
+                  transactionNumber: nextCashTx(),
+                  voucherNumber: nextReceiptJv(),
+                  countNumber: nextCount(),
+                  transactionDate: invoice.date || new Date(),
+                  branchId: resolvedBranchId || invoice.branchId,
+                  partition: "running",
+                  transactionType: "CASH_OUT",
+                  direction: "DEBIT",
+                  amount: changeAmount,
+                  referenceNumber: invoice.invoiceNo,
+                  narration: `Change Returned for Invoice ${invoice.invoiceNo}`,
+                  counterpartyAccountId: receiptCounterpartyId,
+                  denominations: returnedDenoms,
+                };
+
+                await cashTransactionService.createCashTransaction(
+                  invoice.workspaceId,
+                  invoice.companyId,
+                  user?._id,
+                  cashOutPayload,
+                  { session }
+                );
+              }
+
+              txSuccess = true;
+            } catch (ctErr) {
+              console.error("Failed to create cash transactions in treasury, falling back to JV:", ctErr);
+            }
+
+            if (!txSuccess) {
+              const fallbackJvPayload = {
+                voucherNumber: nextReceiptJv(),
+                voucherDate: invoice.date || new Date(),
+                voucherType: "RECEIPT",
+                referenceNumber: invoice.invoiceNo,
+                narration: `Cash ${receiptNarrationSuffix} for Invoice ${invoice.invoiceNo}`,
+                status: "POSTED",
+                lines: [
+                  {
+                    accountId: cashLedgerAccountId,
+                    debit: amount,
+                    credit: 0,
+                    narration: `Cash Received for Invoice ${invoice.invoiceNo}`
+                  },
+                  {
+                    accountId: receiptCounterpartyId,
+                    debit: 0,
+                    credit: amount,
+                    narration: `Offset for Invoice ${invoice.invoiceNo}`
+                  }
+                ]
+              };
+              
+              await journalVoucherService.createJournalVoucher(
+                invoice.workspaceId,
+                invoice.companyId,
+                user?._id,
+                fallbackJvPayload,
+                { session }
+              );
+            }
+          }
+        } else if (paymentType === "upi") {
+          let bankAccount = null;
+          const qrIdToLookup = payment.paymentQrId || resolvedPaymentQrId || invoice.paymentQrId;
+          if (qrIdToLookup) {
+            const paymentQr = await PaymentQr.findById(qrIdToLookup).session(session);
+            if (paymentQr && paymentQr.bankAccountId) {
+              bankAccount = await BankAccount.findOne({ _id: paymentQr.bankAccountId, isDeleted: false, isActive: true }).session(session);
+            }
+          }
+          
+          if (!bankAccount) {
+            bankAccount = resolvedPrimaryBank || resolvedDefaultBank;
+          }
+
+          const shouldHoldForShift = Boolean(invoice.shiftId);
+          let txSuccess = false;
+
+          if (bankAccount) {
+            try {
+              const bankTxPayload = {
+                transactionDate: invoice.date || new Date(),
+                bankAccountId: bankAccount._id,
+                transactionType: "UPI",
+                direction: "CREDIT",
+                amount: amount,
+                referenceNumber: payment.txnRefNo || payment.referenceNo || invoice.invoiceNo,
+                narration: `UPI ${receiptNarrationSuffix} for Invoice ${invoice.invoiceNo}`,
+                counterpartyAccountId: receiptCounterpartyId,
+                shiftId: invoice.shiftId || null,
+                status: shouldHoldForShift ? "PENDING_SHIFT_CLOSE" : "POSTED",
+              };
+              
+              await bankTransactionService.createBankTransaction(
+                invoice.workspaceId,
+                invoice.companyId,
+                user?._id,
+                bankTxPayload,
+                { session }
+              );
+              txSuccess = true;
+            } catch (btErr) {
+              console.error("Failed to create bank transaction, falling back to JV:", btErr);
+            }
+          }
+          
+          if (!txSuccess) {
+            let bankLedgerAccountId = bankAccount?.ledgerAccountId;
+            if (!bankLedgerAccountId && resolvedBankAccounts?.accounts && resolvedBankAccounts.accounts.length > 0) {
+              bankLedgerAccountId = resolvedBankAccounts.accounts[0]._id;
+            }
+            if (bankLedgerAccountId) {
+              const fallbackUpiJvPayload = {
+                voucherNumber: nextReceiptJv(),
+                voucherDate: invoice.date || new Date(),
+                voucherType: "RECEIPT",
+                referenceNumber: payment.txnRefNo || payment.referenceNo || invoice.invoiceNo,
+                narration: `UPI ${receiptNarrationSuffix} for Invoice ${invoice.invoiceNo}`,
+                status: shouldHoldForShift ? "DRAFT" : "POSTED",
+                lines: [
+                  {
+                    accountId: bankLedgerAccountId,
+                    debit: amount,
+                    credit: 0,
+                    narration: `UPI Received for Invoice ${invoice.invoiceNo}`
+                  },
+                  {
+                    accountId: receiptCounterpartyId,
+                    debit: 0,
+                    credit: amount,
+                    narration: `Offset for Invoice ${invoice.invoiceNo}`
+                  }
+                ]
+              };
+              
+              await journalVoucherService.createJournalVoucher(
+                invoice.workspaceId,
+                invoice.companyId,
+                user?._id,
+                fallbackUpiJvPayload,
+                { session }
+              );
+            }
+          }
+        }
+      }
+    }
+  } catch (jvErr) {
+    console.error("Error generating journal vouchers for sale bill:", jvErr);
+  }
+};
+
 const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, user = null, existingSession = null) => {
   // Enforce mandatory cash denomination breakdown
   validateCashDenominations(saleData);
@@ -180,15 +732,12 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     } else {
       earlyFyString = `${(year - 1).toString().slice(-2)}${year.toString().slice(-2)}`;
     }
-    const earlyBranchCode = "BR01"; // Fallback, will adjust later if needed
-    const invoicePrefix = `${earlyBranchCode}-${earlyFyString}-`;
 
     // Fetch all required reference data concurrently to eliminate sequential network latency
     const [
       customer,
       activeBranches,
       periods,
-      lastInvoice,
       company,
       salesAccountsResult,
       cashAccountsResult,
@@ -199,7 +748,6 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       customerRepository.findCustomerById(customerId, companyId, workspaceId),
       branchRepository.getCompanyBranches(companyId),
       financialPeriodRepository.getPeriods(workspaceId, companyId, { isCurrent: true, all: true }),
-      invoiceRepository.getLatestInvoiceByPrefix(companyId, workspaceId, invoicePrefix),
       Company.findOne({ _id: companyId, workspaceId }),
       accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "SALES" }),
       accountRepository.getAccounts(workspaceId, companyId, { accountCategory: "CASH" }),
@@ -212,12 +760,23 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     throw new ApiError(404, "Customer not found");
   }
 
+  // Resolve target branch and derive branch initials
   let resolvedBranchId = saleData.branchId || null;
-  let branchCode = "BR01";
-  if (!resolvedBranchId && Array.isArray(activeBranches) && activeBranches.length > 0) {
-    resolvedBranchId = activeBranches[0]._id;
-    branchCode = activeBranches[0].branchCode || branchCode;
+  let targetBranch = null;
+
+  if (Array.isArray(activeBranches) && activeBranches.length > 0) {
+    if (resolvedBranchId) {
+      targetBranch = activeBranches.find(
+        (b) => b._id && b._id.toString() === resolvedBranchId.toString()
+      ) || null;
+    }
+    if (!targetBranch) {
+      targetBranch = activeBranches[0];
+      resolvedBranchId = targetBranch._id;
+    }
   }
+
+  const branchInitials = getBranchInitials(targetBranch);
 
   let period = periods.periods && periods.periods[0];
   const financialPeriodId = period ? period._id : null;
@@ -229,23 +788,36 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
   }
 
-  const finalInvoicePrefix = `${branchCode}-${fyString}-`;
+  const finalInvoicePrefix = `${branchInitials}-${fyString}-`;
+
+  // Fetch the latest invoice strictly scoped to this branch and this branch prefix
+  const lastInvoice = await invoiceRepository.getLatestInvoiceByPrefix(
+    companyId,
+    workspaceId,
+    finalInvoicePrefix,
+    resolvedBranchId
+  );
+
   let sequenceNo = 1;
-  
   if (lastInvoice && lastInvoice.invoiceNo && lastInvoice.invoiceNo.startsWith(finalInvoicePrefix)) {
     const parts = lastInvoice.invoiceNo.split('-');
     if (parts.length >= 3) {
-      const lastSeq = parseInt(parts[2], 10);
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
       if (!isNaN(lastSeq)) {
         sequenceNo = lastSeq + 1;
       }
     }
   }
 
-  const generatedInvoiceNo = `${finalInvoicePrefix}${sequenceNo.toString().padStart(4, '0')}`;
-
-  const isAutoGenerated = saleData.invoiceNo && (saleData.invoiceNo.startsWith("RET-INV") || saleData.invoiceNo.startsWith("TAX-INV"));
-  const finalInvoiceNo = isAutoGenerated ? generatedInvoiceNo : (saleData.invoiceNo || generatedInvoiceNo);
+  // Ensure generated invoice number never collides with any existing invoice in this branch
+  let candidateSeq = sequenceNo;
+  let finalInvoiceNo = `${finalInvoicePrefix}${candidateSeq.toString().padStart(4, '0')}`;
+  let collision = await invoiceRepository.getInvoiceByInvoiceNo(companyId, workspaceId, finalInvoiceNo, resolvedBranchId);
+  while (collision) {
+    candidateSeq += 1;
+    finalInvoiceNo = `${finalInvoicePrefix}${candidateSeq.toString().padStart(4, '0')}`;
+    collision = await invoiceRepository.getInvoiceByInvoiceNo(companyId, workspaceId, finalInvoiceNo, resolvedBranchId);
+  }
 
   // Resolve paymentQrId for UPI attribution:
   // - For single-method UPI: use top-level saleData.paymentQrId
@@ -261,8 +833,20 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     );
     if (upiPayment) resolvedPaymentQrId = upiPayment.paymentQrId;
   } else if (paymentMethodUpper.includes("UPI") || paymentMethodUpper.includes("QR")) {
-    // Single-method UPI without explicit paymentQrId — keep null (unattributed)
     resolvedPaymentQrId = null;
+  }
+
+  // Auto-resolve active open shift for branch if not explicitly provided
+  let resolvedShiftId = saleData.shiftId || null;
+  if (!resolvedShiftId && resolvedBranchId) {
+    const activeOpenShift = await Shift.findOne({
+      companyId: companyId || customer.companyId,
+      branchId: resolvedBranchId,
+      status: "open",
+    }).session(session);
+    if (activeOpenShift) {
+      resolvedShiftId = activeOpenShift._id;
+    }
   }
 
   const newSale = {
@@ -273,6 +857,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     invoiceNo: finalInvoiceNo,
     date: saleData.date || new Date(),
     financialPeriodId,
+    shiftId: resolvedShiftId || null,
     billingMode: saleData.billingMode || "B2C",
     subtotal: saleData.subtotal || 0,
     discount: saleData.discount || 0,
@@ -284,6 +869,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     paymentQrId: resolvedPaymentQrId || null,
     payments: Array.isArray(saleData.payments) ? saleData.payments : [],
     denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
+    returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : [],
     status: saleData.status || "Paid",
     items: Array.isArray(saleData.items) ? saleData.items : [],
     doctor: saleData.doctor || null,
@@ -297,444 +883,28 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
   const savedInvoice = await invoiceRepository.createInvoice(newSale, { session });
   _logTime('Invoice created in DB');
 
-  // Deduct inventory from Batch and ProductFacility using bulkWrite for O(1) queries
-  if (Array.isArray(newSale.items) && newSale.items.length > 0) {
-    const batchOps = [];
-    const facilityOps = [];
+  // Deduct inventory from Batch and ProductFacility
+  await deductInvoiceInventory(newSale.items, resolvedBranchId, session);
+  _logTime('Inventory bulk write completed');
 
-    for (const item of newSale.items) {
-      const qtyToDeduct = Number(item.qty) || 0;
-      if (qtyToDeduct <= 0) continue;
-
-      const productId = item.productId || item.workspaceProductId || item.id;
-      const rawBatchId = item.batchId || (item.batch && item.batch._id) || item.batch;
-
-      if (rawBatchId) {
-        batchOps.push({
-          updateOne: {
-            filter: { _id: rawBatchId },
-            update: { $inc: { batchQty: -qtyToDeduct } }
-          }
-        });
-      }
-
-      if (productId && resolvedBranchId) {
-        facilityOps.push({
-          updateOne: {
-            filter: { product_id: productId, facility_id: resolvedBranchId },
-            update: { $inc: { total_qty_available: -qtyToDeduct, qoh: -qtyToDeduct, atp: -qtyToDeduct } }
-          }
-        });
-      }
-    }
-
-    if (batchOps.length > 0) {
-      await Batch.bulkWrite(batchOps, { session });
-    }
-    if (facilityOps.length > 0) {
-      await ProductFacility.bulkWrite(facilityOps, { session });
-    }
-    _logTime('Inventory bulk write completed');
-  }
-
-  // Auto-create GSTR-1 Entry for GST Ledger
-  try {
-    const totalGst = Number(newSale.tax || saleData.tax || 0);
-    const halfGst = totalGst / 2;
-    const taxableAmt = Number(
-      saleData.taxableAmount !== undefined
-        ? saleData.taxableAmount
-        : (newSale.subtotal || 0) - (newSale.discount || 0)
-    );
-
-    const companyGstin = company?.gstin || "";
-    const customerGstin = customer?.gstNumber || "";
-    const isIgst = companyGstin && customerGstin && companyGstin.substring(0, 2) !== customerGstin.substring(0, 2);
-
-    await gstLedgerRepository.createGstLedgerEntry({
-      workspaceId: newSale.workspaceId,
-      companyId: newSale.companyId,
-      partyId: customer._id,
-      voucherId: savedInvoice._id,
-      voucherNumber: newSale.invoiceNo,
-      voucherDate: newSale.date ? new Date(newSale.date) : new Date(),
-      gstType: "GSTR-1",
-      taxableAmount: taxableAmt,
-      cgst: isIgst ? 0 : halfGst,
-      sgst: isIgst ? 0 : halfGst,
-      igst: isIgst ? totalGst : 0,
-      totalAmount: Number(newSale.grandTotal || 0),
-      narration: `Sale Bill ${newSale.invoiceNo} (${newSale.billingMode}) - Customer: ${customer.name || "Customer"}`,
-    }, { session });
-    _logTime('GST Ledger entry created');
-  } catch (gstErr) {
-    console.error("Failed to auto-create GSTR-1 entry for sale bill:", gstErr);
-  }
-
-  // Auto-create Journal Vouchers for Sale and Payment
-  try {
-    const isCashPaid = (String(newSale.paymentMethod).toLowerCase() === "cash" || newSale.cashTendered > 0) && String(newSale.status).toLowerCase() === "paid" && newSale.grandTotal > 0;
-    const isUpiPaid = String(newSale.paymentMethod).toLowerCase() === "upi" && String(newSale.status).toLowerCase() === "paid" && newSale.grandTotal > 0;
-
-
-
-    let salesAccount = null;
-    if (salesAccountsResult.accounts && salesAccountsResult.accounts.length > 0) {
-      const accounts = salesAccountsResult.accounts;
-      salesAccount = accounts.find(a => a.accountCode === "SALES-REVENUE") 
-                  || accounts.find(a => String(a.accountName).toLowerCase().includes("revenue")) 
-                  || accounts[0];
-    }
-
-    if (salesAccount) {
-      // Pre-calculate how many sequences we need to generate to run them in ONE concurrent burst
-      let needsSaleJv = customer.ledgerAccountId ? 1 : 0;
-      let needsReceiptJv = 0;
-      let needsCashTx = 0;
-
-      const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
-      let prePayments = [...paymentsList];
-      if (isCashPaid && prePayments.length === 0) prePayments.push({paymentType: 'cash', amount: newSale.grandTotal});
-      else if (isUpiPaid && prePayments.length === 0) prePayments.push({paymentType: 'upi', amount: newSale.grandTotal});
-
-      for (const p of prePayments) {
-        if (String(p.paymentType || p.mode).toLowerCase() === "cash") {
-           needsReceiptJv += 1;
-           needsCashTx += 1; // CASH_IN
-           let changeAmount = 0;
-           if (Array.isArray(p.returnedDenominations) && p.returnedDenominations.length > 0) {
-             changeAmount = p.returnedDenominations.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-           }
-           if (changeAmount > 0) {
-             needsReceiptJv += 1; 
-             needsCashTx += 1; // CASH_OUT
-           }
-        } else if (String(p.paymentType || p.mode).toLowerCase() === "upi") {
-           needsReceiptJv += 1; // fallback JV
-        }
-      }
-
-      // Fire voucher sequence queries simultaneously (they use safe $inc)
-      const salePromises = [];
-      const receiptPromises = [];
-      
-      if (needsSaleJv) salePromises.push(voucherNumberService.generateVoucherNumber(newSale.companyId, newSale.workspaceId, "SALE", { session }));
-      for(let i=0; i<needsReceiptJv; i++) receiptPromises.push(voucherNumberService.generateVoucherNumber(newSale.companyId, newSale.workspaceId, "JOURNAL", { session }));
-
-      // For cashTx and count, fetch once from DB and increment locally to avoid uncommitted race conditions
-      let baseCashTx = null;
-      let baseCount = null;
-      if (needsCashTx > 0) {
-         baseCashTx = await cashTransactionRepository.getNextTransactionNumber(newSale.companyId, newSale.workspaceId, { session });
-         baseCount = await cashDenominationRepository.getNextCountNumber(newSale.companyId, newSale.workspaceId, { session });
-      }
-
-      const [saleRes, receiptRes] = await Promise.all([
-        Promise.all(salePromises),
-        Promise.all(receiptPromises)
-      ]);
-
-      const cashTxRes = [];
-      const countRes = [];
-      
-      if (needsCashTx > 0) {
-        const txParts = baseCashTx.split("-");
-        const txPrefix = txParts.slice(0, 2).join("-") + "-";
-        const txSeq = parseInt(txParts[txParts.length - 1]) || 1;
-
-        const countParts = baseCount.split("-");
-        const countPrefix = countParts.slice(0, 2).join("-") + "-";
-        const countSeq = parseInt(countParts[countParts.length - 1]) || 1;
-
-        for (let i = 0; i < needsCashTx; i++) {
-          cashTxRes.push(`${txPrefix}${String(txSeq + i).padStart(5, "0")}`);
-          countRes.push(`${countPrefix}${String(countSeq + i).padStart(5, "0")}`);
-        }
-      }
-      
-      let saleIdx = 0, receiptIdx = 0, cashTxIdx = 0, countIdx = 0;
-      
-      const preSaleJv = needsSaleJv ? saleRes[0] : null;
-      const nextReceiptJv = () => receiptRes[receiptIdx++];
-      const nextCashTx = () => cashTxRes[cashTxIdx++];
-      const nextCount = () => countRes[countIdx++];
-
-      // 1. If customer has a ledger account, first create the SALE JV (Customer -> Sales)
-      if (customer.ledgerAccountId) {
-        const saleJvPayload = {
-          voucherNumber: preSaleJv,
-          voucherDate: newSale.date,
-          voucherType: "SALE",
-          referenceNumber: newSale.invoiceNo,
-          narration: `Sale against Invoice ${newSale.invoiceNo}`,
-          status: "POSTED",
-          lines: [
-            {
-              accountId: customer.ledgerAccountId,
-              debit: newSale.grandTotal,
-              credit: 0,
-              narration: `Amount due for Invoice ${newSale.invoiceNo}`
-            },
-            {
-              accountId: salesAccount._id,
-              debit: 0,
-              credit: newSale.grandTotal,
-              narration: `Sales from Invoice ${newSale.invoiceNo}`
-            }
-          ]
-        };
-        
-        try {
-          await journalVoucherService.createJournalVoucher(
-            newSale.workspaceId,
-            newSale.companyId,
-            user?._id,
-            saleJvPayload,
-            { session }
-          );
-        } catch (jvErr) {
-          console.error("--- FAILED TO CREATE SALES JV ---", jvErr);
-        }
-        _logTime('Sale Journal Voucher created');
-      }
-
-      // 2. Determine counterparty for the receipt (Customer if they have an account, otherwise Sales directly)
-      const receiptCounterpartyId = customer.ledgerAccountId || salesAccount._id;
-      const receiptNarrationSuffix = customer.ledgerAccountId ? "from Customer" : "Sale";
-
-      if (isCashPaid && !saleData.payments) {
-        saleData.payments = [{
-          paymentType: "cash",
-          amount: newSale.grandTotal,
-          denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
-          returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : []
-        }];
-      } else if (isUpiPaid && !saleData.payments) {
-        saleData.payments = [{
-          paymentType: "upi",
-          amount: newSale.grandTotal
-        }];
-      }
-
-      for (const payment of paymentsList) {
-        const paymentType = String(payment.paymentType || payment.mode || "").toLowerCase();
-        const amount = Number(payment.amount || 0);
-        
-        if (amount <= 0) continue;
-
-        if (paymentType === "cash") {
-          // --- CASH RECEIPT ---
-          // Transactions are routed directly to BranchCash (running partition)
-          let cashLedgerAccountId = null;
-            if (cashAccountsResult.accounts && cashAccountsResult.accounts.length > 0) {
-              const accounts = cashAccountsResult.accounts;
-              const bestCash = accounts.find(a => a.accountCode === "PETTY-CASH") 
-                            || accounts.find(a => String(a.accountName).toLowerCase().includes("cash"))
-                            || accounts[0];
-              cashLedgerAccountId = bestCash._id;
-            }
-
-          if (cashLedgerAccountId) {
-            let txSuccess = false;
-              try {
-                // Determine received vs returned based on validated denominations payload
-                let receivedDenoms = Array.isArray(payment.denominations) && payment.denominations.length > 0
-                  ? payment.denominations
-                  : (Array.isArray(saleData.denominations) ? saleData.denominations : []);
-                let returnedDenoms = Array.isArray(payment.returnedDenominations)
-                  ? payment.returnedDenominations
-                  : [];
-                let receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-
-                if (receivedAmount === 0 && receivedDenoms.length === 0) {
-                  throw new ApiError(400, "Cash denominations are required for cash payments.");
-                }
-
-                let changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
-
-                // 1. Process CASH_IN for exact received amount
-                const cashInPayload = {
-                  transactionNumber: nextCashTx(),
-                  voucherNumber: nextReceiptJv(),
-                  countNumber: nextCount(),
-                  transactionDate: newSale.date || new Date(),
-                  branchId: resolvedBranchId,
-                  partition: "running",
-                  transactionType: "CASH_IN",
-                  direction: "CREDIT",
-                  amount: receivedAmount,
-                  referenceNumber: newSale.invoiceNo,
-                  narration: `Cash Received ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
-                  counterpartyAccountId: receiptCounterpartyId,
-                  denominations: receivedDenoms,
-                };
-                
-                console.log("Creating CASH_IN:", JSON.stringify(cashInPayload, null, 2));
-
-                await cashTransactionService.createCashTransaction(
-                  newSale.workspaceId,
-                  newSale.companyId,
-                  user?._id,
-                  cashInPayload,
-                  { session }
-                );
-
-                // 2. Process CASH_OUT if change was given
-                if (changeAmount > 0) {
-                  const cashOutPayload = {
-                    transactionNumber: nextCashTx(),
-                    voucherNumber: nextReceiptJv(),
-                    countNumber: nextCount(),
-                    transactionDate: newSale.date || new Date(),
-                    branchId: resolvedBranchId,
-                    partition: "running",
-                    transactionType: "CASH_OUT",
-                    direction: "DEBIT",
-                    amount: changeAmount,
-                    referenceNumber: newSale.invoiceNo,
-                    narration: `Change Returned for Invoice ${newSale.invoiceNo}`,
-                    counterpartyAccountId: receiptCounterpartyId, // Returning money to customer
-                    denominations: returnedDenoms,
-                  };
-
-                  console.log("Creating CASH_OUT:", JSON.stringify(cashOutPayload, null, 2));
-
-                  await cashTransactionService.createCashTransaction(
-                    newSale.workspaceId,
-                    newSale.companyId,
-                    user?._id,
-                    cashOutPayload,
-                    { session }
-                  );
-                }
-
-                txSuccess = true;
-              } catch (ctErr) {
-                console.error("Failed to create cash transactions in treasury, falling back to JV:", ctErr);
-                import('fs').then(fs => fs.writeFileSync('c:\\Users\\Intel\\Desktop\\erp\\erp-backend\\scratch-err.txt', ctErr.stack || ctErr.message || String(ctErr)));
-              }
-            
-            
-            if (!txSuccess) {
-              const fallbackJvPayload = {
-                voucherNumber: nextReceiptJv(),
-                voucherDate: newSale.date || new Date(),
-                voucherType: "RECEIPT",
-                referenceNumber: newSale.invoiceNo,
-                narration: `Cash ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
-                status: "POSTED",
-                lines: [
-                  {
-                    accountId: cashLedgerAccountId,
-                    debit: amount,
-                    credit: 0,
-                    narration: `Cash Received for Invoice ${newSale.invoiceNo}`
-                  },
-                  {
-                    accountId: receiptCounterpartyId,
-                    debit: 0,
-                    credit: amount,
-                    narration: `Offset for Invoice ${newSale.invoiceNo}`
-                  }
-                ]
-              };
-              
-              await journalVoucherService.createJournalVoucher(
-                newSale.workspaceId,
-                newSale.companyId,
-                user?._id,
-                fallbackJvPayload,
-                { session }
-              );
-            }
-          }
-        } else if (paymentType === "upi") {
-          // --- UPI RECEIPT ---
-          let bankAccount = null;
-          
-          const qrIdToLookup = payment.paymentQrId || resolvedPaymentQrId;
-          if (qrIdToLookup) {
-             const paymentQr = await PaymentQr.findById(qrIdToLookup).session(session);
-             if (paymentQr && paymentQr.bankAccountId) {
-                bankAccount = await BankAccount.findOne({ _id: paymentQr.bankAccountId, isDeleted: false, isActive: true }).session(session);
-             }
-          }
-          
-          if (!bankAccount) {
-            bankAccount = primaryBankAccount || defaultBankAccount;
-          }
-
-          let txSuccess = false;
-          if (bankAccount) {
-            try {
-              const bankTxPayload = {
-                transactionDate: newSale.date || new Date(),
-                bankAccountId: bankAccount._id,
-                transactionType: "UPI",
-                direction: "CREDIT",
-                amount: amount,
-                referenceNumber: payment.txnRefNo || payment.referenceNo || newSale.invoiceNo,
-                narration: `UPI ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
-                counterpartyAccountId: receiptCounterpartyId
-              };
-              
-              await bankTransactionService.createBankTransaction(
-                newSale.workspaceId,
-                newSale.companyId,
-                user?._id,
-                bankTxPayload,
-                { session }
-              );
-              txSuccess = true;
-            } catch (btErr) {
-              console.error("Failed to create bank transaction, falling back to JV:", btErr);
-            }
-          }
-          
-          if (!txSuccess) {
-            let bankLedgerAccountId = bankAccount?.ledgerAccountId;
-            if (!bankLedgerAccountId && bankAccountsResult && bankAccountsResult.accounts && bankAccountsResult.accounts.length > 0) {
-              bankLedgerAccountId = bankAccountsResult.accounts[0]._id;
-            }
-            if (bankLedgerAccountId) {
-              const fallbackUpiJvPayload = {
-                voucherNumber: nextReceiptJv(),
-                voucherDate: newSale.date || new Date(),
-                voucherType: "RECEIPT",
-                referenceNumber: payment.txnRefNo || payment.referenceNo || newSale.invoiceNo,
-                narration: `UPI ${receiptNarrationSuffix} for Invoice ${newSale.invoiceNo}`,
-                status: "POSTED",
-                lines: [
-                  {
-                    accountId: bankLedgerAccountId,
-                    debit: amount,
-                    credit: 0,
-                    narration: `UPI Received for Invoice ${newSale.invoiceNo}`
-                  },
-                  {
-                    accountId: receiptCounterpartyId,
-                    debit: 0,
-                    credit: amount,
-                    narration: `Offset for Invoice ${newSale.invoiceNo}`
-                  }
-                ]
-              };
-              
-              await journalVoucherService.createJournalVoucher(
-                newSale.workspaceId,
-                newSale.companyId,
-                user?._id,
-                fallbackUpiJvPayload,
-                { session }
-              );
-            }
-          }
-        }
-      }
-    }
-  } catch (jvErr) {
-    console.error("Error generating journal vouchers for sale bill:", jvErr);
-  }
+  // Post financial accounting, GST ledger, cash drawer, and bank transactions
+  await postSaleAccounting({
+    invoice: savedInvoice,
+    saleData,
+    customer,
+    company,
+    resolvedBranchId,
+    resolvedPaymentQrId,
+    salesAccountsResult,
+    cashAccountsResult,
+    bankAccountsResult,
+    primaryBankAccount,
+    defaultBankAccount,
+    companyId,
+    workspaceId,
+    user,
+    session,
+  });
   _logTime('All payments processed');
 
     if (!existingSession) {
@@ -764,78 +934,120 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
   session.startTransaction();
 
   try {
-    const oldInvoice = await invoiceRepository.getInvoiceById(invoiceId, companyId, workspaceId, session);
-    if (!oldInvoice) {
+    const existingInvoice = await SalesInvoice.findOne({
+      _id: invoiceId,
+      companyId,
+      workspaceId,
+      isDeleted: false,
+    }).session(session);
+
+    if (!existingInvoice) {
       throw new ApiError(404, "Invoice not found");
     }
 
-    // 1. Revert Inventory (Add quantities back)
-    if (Array.isArray(oldInvoice.items) && oldInvoice.items.length > 0) {
-      const batchOps = [];
-      const facilityOps = [];
-      const resolvedBranchId = oldInvoice.branchId;
+    if (existingInvoice.status === "Cancelled") {
+      throw new ApiError(400, "Cannot edit a cancelled invoice");
+    }
 
-      for (const item of oldInvoice.items) {
-        const qtyToRevert = Number(item.qty) || 0;
-        if (qtyToRevert <= 0) continue;
-
-        const productId = item.productId || item.workspaceProductId || item.id;
-        const rawBatchId = item.batchId || (item.batch && item.batch._id) || item.batch;
-
-        if (rawBatchId) {
-          batchOps.push({
-            updateOne: {
-              filter: { _id: rawBatchId },
-              update: { $inc: { batchQty: qtyToRevert } }
-            }
-          });
-        }
-
-        if (productId && resolvedBranchId) {
-          facilityOps.push({
-            updateOne: {
-              filter: { product_id: productId, facility_id: resolvedBranchId },
-              update: { $inc: { total_qty_available: qtyToRevert, qoh: qtyToRevert, atp: qtyToRevert } }
-            }
-          });
-        }
-      }
-
-      if (batchOps.length > 0) {
-        // Need to import Batch and ProductFacility
-        await mongoose.model('Batch').bulkWrite(batchOps, { session });
-      }
-      if (facilityOps.length > 0) {
-        await mongoose.model('ProductFacility').bulkWrite(facilityOps, { session });
+    // Shift-gate check: Only allow update if shift is open (or invoice has no shift assigned)
+    if (existingInvoice.shiftId) {
+      const shift = await Shift.findById(existingInvoice.shiftId).session(session);
+      if (shift && shift.status !== "open") {
+        throw new ApiError(403, "Cannot edit an invoice after its shift is closed");
       }
     }
 
-    // 2. Delete GSTR-1 entry
-    await GstLedger.deleteMany({ voucherId: oldInvoice._id }, { session });
+    // Enforce cash denominations validation if payment involves cash
+    validateCashDenominations(saleData);
 
-    // 3. Delete Cash Transactions & Revert Denominations
-    await revertCashTransactionsForInvoice(oldInvoice.invoiceNo, companyId, user?._id || user?.id, session);
+    const targetCustomerId = customerId || saleData.customerId || existingInvoice.customerId;
+    const customer = await customerRepository.findCustomerById(targetCustomerId, companyId, workspaceId);
+    if (!customer) {
+      throw new ApiError(404, "Customer not found");
+    }
 
-    // 4. Delete Bank Transactions
-    await BankTransaction.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
+    // 1. Revert Old Inventory (Add quantities back)
+    await revertInvoiceInventory(existingInvoice.items, existingInvoice.branchId, session);
 
-    // 5. Delete Journal Vouchers
-    await JournalVoucher.deleteMany({ referenceNumber: oldInvoice.invoiceNo }, { session });
+    // 2. Resolve branch and deduct New Inventory
+    const resolvedBranchId = saleData.branchId || existingInvoice.branchId;
+    await deductInvoiceInventory(saleData.items, resolvedBranchId, session);
 
-    // 6. Delete old invoice
-    await SalesInvoice.deleteOne({ _id: oldInvoice._id }, { session });
+    // 3. Clean up old accounting & treasury entries (GSTR-1, Cash Transactions, Bank Transactions, JVs)
+    await cleanInvoiceAccountingEntries(
+      existingInvoice._id,
+      existingInvoice.invoiceNo,
+      companyId,
+      user?._id || user?.id,
+      session
+    );
 
-    // Keep original invoice No and date
-    saleData.invoiceNo = oldInvoice.invoiceNo;
-    saleData.date = oldInvoice.date;
+    // 4. Resolve paymentQrId for UPI attribution
+    let resolvedPaymentQrId = null;
+    const paymentMethodUpper = String(saleData.paymentMethod || "").toUpperCase();
+    if (saleData.paymentQrId) {
+      resolvedPaymentQrId = saleData.paymentQrId;
+    } else if (Array.isArray(saleData.payments)) {
+      const upiPayment = saleData.payments.find(p =>
+        String(p.paymentType || "").toUpperCase().includes("UPI") && p.paymentQrId
+      );
+      if (upiPayment) resolvedPaymentQrId = upiPayment.paymentQrId;
+    } else if (paymentMethodUpper.includes("UPI") || paymentMethodUpper.includes("QR")) {
+      resolvedPaymentQrId = null;
+    }
 
-    // 7. Record the new sale in the same session
-    const updatedInvoice = await recordCustomerSale(customerId, saleData, companyId, workspaceId, user, session);
+    // 5. Update existing invoice document in place (DO NOT DELETE, PRESERVE _id AND invoiceNo)
+    existingInvoice.customerId = customer._id;
+    if (resolvedBranchId) {
+      existingInvoice.branchId = resolvedBranchId;
+    }
+    if (saleData.shiftId) {
+      existingInvoice.shiftId = saleData.shiftId;
+    }
+    if (saleData.billingMode) {
+      existingInvoice.billingMode = saleData.billingMode;
+    }
+    existingInvoice.subtotal = Number(saleData.subtotal !== undefined ? saleData.subtotal : existingInvoice.subtotal);
+    existingInvoice.discount = Number(saleData.discount !== undefined ? saleData.discount : existingInvoice.discount);
+    existingInvoice.tax = Number(saleData.tax !== undefined ? saleData.tax : existingInvoice.tax);
+    existingInvoice.grandTotal = Number(saleData.grandTotal !== undefined ? saleData.grandTotal : existingInvoice.grandTotal);
+    existingInvoice.cashTendered = Number(saleData.cashTendered !== undefined ? saleData.cashTendered : existingInvoice.cashTendered);
+    existingInvoice.changeDue = Number(saleData.changeDue !== undefined ? saleData.changeDue : existingInvoice.changeDue);
+    existingInvoice.paymentMethod = saleData.paymentMethod || existingInvoice.paymentMethod || "Cash";
+    existingInvoice.paymentQrId = resolvedPaymentQrId;
+    existingInvoice.payments = Array.isArray(saleData.payments) ? saleData.payments : existingInvoice.payments;
+    existingInvoice.denominations = Array.isArray(saleData.denominations) ? saleData.denominations : existingInvoice.denominations;
+    existingInvoice.returnedDenominations = Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : existingInvoice.returnedDenominations;
+    existingInvoice.status = saleData.status || existingInvoice.status || "Paid";
+    existingInvoice.items = Array.isArray(saleData.items) ? saleData.items : existingInvoice.items;
+    if (saleData.doctor !== undefined) existingInvoice.doctor = saleData.doctor;
+    if (saleData.notes !== undefined) existingInvoice.notes = saleData.notes;
+    existingInvoice.updatedAt = new Date();
+    if (user?._id) {
+      existingInvoice.updatedBy = user._id;
+      existingInvoice.updatedByName = user.name || null;
+      existingInvoice.updatedByEmail = user.email || null;
+    }
+
+    await existingInvoice.save({ session });
+
+    // 6. Post new accounting & treasury entries
+    await postSaleAccounting({
+      invoice: existingInvoice,
+      saleData,
+      customer,
+      resolvedBranchId,
+      resolvedPaymentQrId,
+      companyId,
+      workspaceId,
+      user,
+      session,
+    });
 
     await session.commitTransaction();
     session.endSession();
 
-    return updatedInvoice;
+    return existingInvoice;
   } catch (error) {
     try {
       await session.abortTransaction();
@@ -871,11 +1083,11 @@ const getCustomerSales = async (customerId, companyId, workspaceId, branchId = n
   };
 };
 
-const getAllCustomerSales = async (companyId, workspaceId, branchId = null, pagination = {}) => {
+const getAllCustomerSales = async (companyId, workspaceId, filters = {}, pagination = {}) => {
   const result = await invoiceRepository.getAllInvoices(
     companyId,
     workspaceId,
-    { branchId },
+    filters,
     pagination
   );
 
@@ -886,11 +1098,12 @@ const getAllCustomerSales = async (companyId, workspaceId, branchId = null, pagi
       page: result.page,
       limit: result.limit,
     },
+    summary: result.summary,
   };
 };
 
 
-const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user) => {
+const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cancelReason = null) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -905,60 +1118,34 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user) => {
       throw new ApiError(400, "Invoice is already cancelled");
     }
 
-    // 1. Revert Inventory Qty for all items
-    if (invoice.items && invoice.items.length > 0) {
-      const batchOps = [];
-      const facilityOps = [];
-      const resolvedBranchId = invoice.branchId || null;
-
-      for (const item of invoice.items) {
-        const qtyToRevert = Number(item.qty || 0);
-        if (qtyToRevert <= 0) continue;
-        
-        const rawBatchId = item.batchId || item.batch_id || null;
-        const productId = item.productId || item.product_id;
-
-        if (rawBatchId) {
-          batchOps.push({
-            updateOne: {
-              filter: { _id: rawBatchId },
-              update: { $inc: { batchQty: qtyToRevert } }
-            }
-          });
-        }
-
-        if (productId && resolvedBranchId) {
-          facilityOps.push({
-            updateOne: {
-              filter: { product_id: productId, facility_id: resolvedBranchId },
-              update: { $inc: { total_qty_available: qtyToRevert, qoh: qtyToRevert, atp: qtyToRevert } }
-            }
-          });
-        }
+    // Shift-gate check: Only allow cancellation if shift is open (or invoice has no shift assigned)
+    const { Shift } = await import("../../../operations/shifts/shift.model.js");
+    let shift = null;
+    if (invoice.shiftId) {
+      shift = await Shift.findById(invoice.shiftId).session(session);
+      if (shift && shift.status !== "open") {
+        throw new ApiError(403, "Cannot cancel an invoice after its shift is closed");
       }
-
-      if (batchOps.length > 0) {
-        await mongoose.model('Batch').bulkWrite(batchOps, { session });
-      }
-      if (facilityOps.length > 0) {
-        await mongoose.model('ProductFacility').bulkWrite(facilityOps, { session });
+    } else if (invoice.branchId) {
+      // If invoice has no shiftId, check if there is an active open shift at this branch and link it
+      const openShift = await Shift.findOne({ branchId: invoice.branchId, status: "open" }).session(session);
+      if (openShift) {
+        invoice.shiftId = openShift._id;
+        shift = openShift;
       }
     }
 
-    // 2. Delete GSTR-1 entry
-    await GstLedger.deleteMany({ voucherId: invoice._id }, { session });
+    // 1. Revert Inventory Qty for all items
+    await revertInvoiceInventory(invoice.items, invoice.branchId, session);
 
-    // 3. Delete Cash Transactions & Revert Denominations
-    await revertCashTransactionsForInvoice(invoice.invoiceNo, companyId, user?._id || user?.id, session);
+    // 2. Clean up accounting entries (GSTR-1, Cash Transactions, Bank Transactions, JVs)
+    await cleanInvoiceAccountingEntries(invoice._id, invoice.invoiceNo, companyId, user?._id || user?.id, session);
 
-    // 4. Delete Bank Transactions
-    await BankTransaction.deleteMany({ referenceNumber: invoice.invoiceNo }, { session });
-
-    // 5. Delete Journal Vouchers
-    await JournalVoucher.deleteMany({ referenceNumber: invoice.invoiceNo }, { session });
-
-    // 6. Update invoice status
+    // 6. Update invoice status & cancellation audit fields
     invoice.status = "Cancelled";
+    invoice.cancelledAt = new Date();
+    invoice.cancelledBy = user?._id || user?.id || null;
+    if (cancelReason) invoice.cancelReason = cancelReason;
     await invoice.save({ session });
 
     await session.commitTransaction();
@@ -971,10 +1158,92 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user) => {
   }
 };
 
+const getNextInvoiceNumber = async (companyId, workspaceId, branchId, date = new Date()) => {
+  const saleDateObj = date ? new Date(date) : new Date();
+  let earlyFyString = "";
+  const month = saleDateObj.getMonth();
+  const year = saleDateObj.getFullYear();
+  if (month >= 3) {
+    earlyFyString = `${year.toString().slice(-2)}${(year + 1).toString().slice(-2)}`;
+  } else {
+    earlyFyString = `${(year - 1).toString().slice(-2)}${year.toString().slice(-2)}`;
+  }
+
+  const [activeBranches, periods] = await Promise.all([
+    branchRepository.getCompanyBranches(companyId),
+    financialPeriodRepository.getPeriods(workspaceId, companyId, { isCurrent: true, all: true }),
+  ]);
+
+  let resolvedBranchId = branchId || null;
+  let targetBranch = null;
+
+  if (Array.isArray(activeBranches) && activeBranches.length > 0) {
+    if (resolvedBranchId) {
+      targetBranch = activeBranches.find(
+        (b) => b._id && b._id.toString() === resolvedBranchId.toString()
+      ) || null;
+    }
+    if (!targetBranch) {
+      targetBranch = activeBranches[0];
+      resolvedBranchId = targetBranch._id;
+    }
+  }
+
+  const branchInitials = getBranchInitials(targetBranch);
+
+  let period = periods.periods && periods.periods[0];
+  let fyString = earlyFyString;
+  if (period && period.startDate && period.endDate) {
+    const startYear = new Date(period.startDate).getFullYear();
+    const endYear = new Date(period.endDate).getFullYear();
+    fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
+  }
+
+  const finalInvoicePrefix = `${branchInitials}-${fyString}-`;
+
+  const lastInvoice = await invoiceRepository.getLatestInvoiceByPrefix(
+    companyId,
+    workspaceId,
+    finalInvoicePrefix,
+    resolvedBranchId
+  );
+
+  let sequenceNo = 1;
+  if (lastInvoice && lastInvoice.invoiceNo && lastInvoice.invoiceNo.startsWith(finalInvoicePrefix)) {
+    const parts = lastInvoice.invoiceNo.split('-');
+    if (parts.length >= 3) {
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastSeq)) {
+        sequenceNo = lastSeq + 1;
+      }
+    }
+  }
+
+  let candidateSeq = sequenceNo;
+  let nextInvoiceNo = `${finalInvoicePrefix}${candidateSeq.toString().padStart(4, '0')}`;
+  let collision = await invoiceRepository.getInvoiceByInvoiceNo(companyId, workspaceId, nextInvoiceNo, resolvedBranchId);
+  while (collision) {
+    candidateSeq += 1;
+    nextInvoiceNo = `${finalInvoicePrefix}${candidateSeq.toString().padStart(4, '0')}`;
+    collision = await invoiceRepository.getInvoiceByInvoiceNo(companyId, workspaceId, nextInvoiceNo, resolvedBranchId);
+  }
+
+  return {
+    nextInvoiceNo,
+    nextInvoiceNumber: nextInvoiceNo,
+    prefix: finalInvoicePrefix,
+    sequenceNo: candidateSeq,
+    branchId: resolvedBranchId,
+    branchInitials,
+    fyString,
+  };
+};
+
 export default {
   recordCustomerSale,
   updateCustomerSale,
   cancelCustomerSale,
   getCustomerSales,
   getAllCustomerSales,
+  getNextInvoiceNumber,
 };

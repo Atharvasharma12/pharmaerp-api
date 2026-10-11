@@ -207,6 +207,146 @@ const shiftSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    // Total UPI collected from sales during this shift (populated at shift close).
+    upiSalesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Total Split payment invoices amount (populated at shift close).
+    splitSalesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Count of Split invoices (populated at shift close).
+    splitInvoiceCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Split Cash and UPI portion breakdown
+    splitCashAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    splitUpiAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    pureCashAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    pureUpiAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    cashInvoiceCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    paymentQrCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Per-QR and per-Bank UPI collections breakdown (populated at shift close)
+    upiBreakdown: [
+      {
+        paymentQrId: { type: mongoose.Schema.Types.ObjectId, ref: "PaymentQr", default: null },
+        upiId: { type: String, default: "" },
+        label: { type: String, default: "" },
+        provider: { type: String, default: null },
+        bankAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "BankAccount", default: null },
+        bankName: { type: String, default: "" },
+        accountName: { type: String, default: "" },
+        accountNumber: { type: String, default: "" },
+        qrImageUrl: { type: String, default: null },
+        transactionCount: { type: Number, default: 0 },
+        billCount: { type: Number, default: 0 },
+        pureBillCount: { type: Number, default: 0 },
+        splitBillCount: { type: Number, default: 0 },
+        totalAmount: { type: Number, default: 0 },
+      }
+    ],
+
+    // ── Cancelled Bills Tracking ──────────────────────────────────────────
+    // Total count of invoices cancelled in this shift
+    cancelledInvoiceCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Total gross amount of invoices cancelled in this shift
+    cancelledSalesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Total cash cancelled in this shift
+    cancelledCashTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Total UPI cancelled in this shift
+    cancelledUpiTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Total Split payment invoices cancelled in this shift
+    cancelledSplitTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Detailed list of invoices cancelled in this shift
+    cancelledInvoices: [
+      {
+        invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "SalesInvoice", default: null },
+        invoiceNo: { type: String, default: "" },
+        grandTotal: { type: Number, default: 0 },
+        paymentMethod: { type: String, default: "Cash" },
+        payments: { type: Array, default: [] },
+        cancelledAt: { type: Date, default: Date.now },
+        cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        customerName: { type: String, default: "" },
+      }
+    ],
+    // Payment method breakdown of cancelled bills
+    cancelledBreakdown: {
+      cash: {
+        count: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+      upi: {
+        count: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+      split: {
+        count: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+      card: {
+        count: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+      wallet: {
+        count: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+      other: {
+        count: { type: Number, default: 0 },
+        amount: { type: Number, default: 0 },
+      },
+    },
   },
   { timestamps: true }
 );

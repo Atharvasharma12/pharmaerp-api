@@ -24,8 +24,11 @@ const calculateShiftSummary = async (shift) => {
   const query = {
     workspaceId: shift.workspaceId,
     companyId: shift.companyId,
-    createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime },
     isDeleted: false,
+    $or: [
+      { shiftId: shift._id },
+      { createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime } },
+    ],
   };
 
   if (shift.branchId) query.branchId = shift.branchId;
@@ -38,6 +41,12 @@ const calculateShiftSummary = async (shift) => {
   let paymentQrCount = 0;
   let qrNet = 0;
   let cashNet = 0;
+  let splitInvoiceCount = 0;
+  let splitNet = 0;
+  let splitCashAmount = 0;
+  let splitUpiAmount = 0;
+  let pureCashAmount = 0;
+  let pureUpiAmount = 0;
 
   const upiBreakdownRaw = {};
 
@@ -53,39 +62,53 @@ const calculateShiftSummary = async (shift) => {
     invoiceCount++;
     netSales += inv.grandTotal;
 
-    if (inv.paymentMethod === "Split" && Array.isArray(inv.payments)) {
-      let hasUpi = false;
-      let hasCash = false;
-      for (const p of inv.payments) {
-        const pType = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
-        if (pType.includes("UPI") || pType.includes("QR")) {
-          hasUpi = true;
-          qrNet += p.amount || 0;
-          _trackUpi(p.paymentQrId, p.amount || 0);
-        } else if (pType.includes("CASH")) {
-          hasCash = true;
-          cashNet += p.amount || 0;
-        } else if (!pType.includes("CARD") && !pType.includes("WALLET") && !pType.includes("CREDIT")) {
-          hasCash = true;
-          cashNet += p.amount || 0;
+    if (inv.paymentMethod === "Split") {
+      splitInvoiceCount++;
+      splitNet += inv.grandTotal || 0;
+      let billSplitCash = 0;
+      let billSplitUpi = 0;
+      if (Array.isArray(inv.payments) && inv.payments.length > 0) {
+        for (const p of inv.payments) {
+          const pType = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
+          const amt = Number(p.amount || 0);
+          if (pType.includes("UPI") || pType.includes("QR")) {
+            billSplitUpi += amt;
+            _trackUpi(p.paymentQrId || inv.paymentQrId, amt);
+          } else if (pType.includes("CASH")) {
+            billSplitCash += amt;
+          } else if (!pType.includes("CARD") && !pType.includes("WALLET") && !pType.includes("CREDIT")) {
+            billSplitCash += amt;
+          }
         }
+      } else {
+        const tendered = Number(inv.cashTendered || 0);
+        billSplitCash = Math.min(Number(inv.grandTotal || 0), tendered);
+        billSplitUpi = Math.max(0, Number(inv.grandTotal || 0) - billSplitCash);
       }
-      if (hasUpi) paymentQrCount++;
-      if (hasCash) cashInvoiceCount++;
+      splitCashAmount += billSplitCash;
+      splitUpiAmount += billSplitUpi;
+      cashNet += billSplitCash;
+      qrNet += billSplitUpi;
     } else {
       const pMethod = inv.paymentMethod ? inv.paymentMethod.toUpperCase() : "CASH";
       if (pMethod.includes("UPI") || pMethod.includes("QR")) {
         paymentQrCount++;
-        qrNet += inv.grandTotal;
-        _trackUpi(inv.paymentQrId, inv.grandTotal);
+        const amt = Number(inv.grandTotal || 0);
+        pureUpiAmount += amt;
+        qrNet += amt;
+        _trackUpi(inv.paymentQrId, amt);
       } else if (pMethod.includes("CASH")) {
         cashInvoiceCount++;
-        cashNet += inv.cashTendered - inv.changeDue > 0
-          ? inv.cashTendered - inv.changeDue
-          : inv.grandTotal;
+        const amt = (inv.cashTendered - inv.changeDue > 0)
+          ? (inv.cashTendered - inv.changeDue)
+          : Number(inv.grandTotal || 0);
+        pureCashAmount += amt;
+        cashNet += amt;
       } else {
         cashInvoiceCount++;
-        cashNet += inv.grandTotal;
+        const amt = Number(inv.grandTotal || 0);
+        pureCashAmount += amt;
+        cashNet += amt;
       }
     }
   }
@@ -129,11 +152,19 @@ const calculateShiftSummary = async (shift) => {
     invoiceCount,
     cashInvoiceCount,
     paymentQrCount,
+    splitInvoiceCount,
+    splitNet,
+    splitCashAmount,
+    splitUpiAmount,
+    pureCashAmount,
+    pureUpiAmount,
     netSales,
     cashNet,
     qrNet,
     upiBreakdown,
     expectedClosingCashAmount,
+    cancelledInvoiceCount: shift.cancelledInvoiceCount || 0,
+    cancelledSalesTotal: shift.cancelledSalesTotal || 0,
   };
 };
 

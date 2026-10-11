@@ -55,11 +55,23 @@ export const getAllCustomerSales = asyncHandler(async (req, res) => {
 
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
+  
+  const filters = {
+    branchId,
+    shiftId: req.query.shiftId,
+    searchQuery: req.query.search,
+    status: req.query.status,
+    paymentMethod: req.query.paymentMethod,
+    startDate: req.query.startDate,
+    endDate: req.query.endDate,
+    sortBy: req.query.sortBy,
+    sortOrder: req.query.sortOrder,
+  };
 
   const result = await invoiceService.getAllCustomerSales(
     req.companyId,
     req.workspaceId,
-    branchId,
+    filters,
     { page, limit }
   );
 
@@ -92,14 +104,35 @@ export const updateCustomerSale = asyncHandler(async (req, res) => {
 
 
 export const cancelCustomerSale = asyncHandler(async (req, res) => {
+  const cancelReason = req.body?.reason || req.body?.cancelReason || null;
   const result = await invoiceService.cancelCustomerSale(
     req.params.invoiceId,
     req.companyId,
     req.workspaceId,
-    req.user
+    req.user,
+    cancelReason
   );
 
   return res
     .status(200)
     .json(new ApiResponse(200, "Customer sale cancelled successfully", result));
+});
+
+export const getNextInvoiceNumber = asyncHandler(async (req, res) => {
+  const branchId =
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    req.query.branchId ||
+    null;
+
+  const result = await invoiceService.getNextInvoiceNumber(
+    req.companyId,
+    req.workspaceId,
+    branchId,
+    req.query.date || new Date()
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Next invoice number generated successfully", result));
 });
