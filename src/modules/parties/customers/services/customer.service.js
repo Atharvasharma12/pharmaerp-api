@@ -18,6 +18,8 @@ import accountRepository from "../../../finance/chart-of-accounts/repositories/a
 import accountGroupRepository from "../../../finance/chart-of-accounts/repositories/accountGroup.repository.js";
 import openingBalanceService from "../../../finance/opening-balances/services/openingBalance.service.js";
 import ledgerService from "../../../finance/ledger/services/ledger.service.js";
+import customerAdvanceService from "./customerAdvance.service.js";
+import CustomerCreditTransaction from "../models/customerCreditTransaction.model.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -189,6 +191,8 @@ const getCustomers = async (workspaceId, companyId, query = {}) => {
         obj.outstandingAmount = obj.openingBalance || 0;
         obj.balanceType = obj.openingBalanceType || "dr";
       }
+      obj.advanceBalance = Number(obj.advanceBalance || 0);
+      obj.creditOutstanding = Number(obj.creditOutstanding || 0);
       return obj;
     }),
     total: result.total,
@@ -209,7 +213,42 @@ const getCustomerById = async (customerId, companyId, workspaceId) => {
     throw new ApiError(404, "Customer not found");
   }
 
-  return customer.toSafeObject();
+  const safeCustomer = customer.toSafeObject();
+
+  try {
+    const [advanceBalance, pendingCredits] = await Promise.all([
+      customerAdvanceService.getAdvanceBalance(customerId, companyId, workspaceId),
+      CustomerCreditTransaction.find({
+        customerId,
+        companyId,
+        workspaceId,
+        status: { $in: ["PENDING", "PARTIAL"] },
+      }).select("balanceDue dueDate").lean(),
+    ]);
+
+    const creditOutstanding = (pendingCredits || []).reduce(
+      (sum, c) => sum + Number(c.balanceDue || 0),
+      0
+    );
+
+    const now = new Date();
+    const overdueCount = (pendingCredits || []).filter(
+      (c) => c.dueDate && new Date(c.dueDate) < now
+    ).length;
+
+    safeCustomer.advanceBalance = Math.round(advanceBalance * 100) / 100;
+    safeCustomer.creditOutstanding = Math.round(creditOutstanding * 100) / 100;
+    safeCustomer.availableCredit = Math.max(0, (customer.creditLimit || 0) - creditOutstanding);
+    safeCustomer.overdueCount = overdueCount;
+  } catch (err) {
+    console.warn("Failed to attach credit/advance summary to customer:", err.message);
+    safeCustomer.advanceBalance = 0;
+    safeCustomer.creditOutstanding = 0;
+    safeCustomer.availableCredit = customer.creditLimit || 0;
+    safeCustomer.overdueCount = 0;
+  }
+
+  return safeCustomer;
 };
 
 const updateCustomer = async (

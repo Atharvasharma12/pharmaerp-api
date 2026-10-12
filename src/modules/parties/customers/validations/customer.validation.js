@@ -163,3 +163,56 @@ export const getCustomersQuerySchema = Joi.object({
   page: Joi.number().integer().min(1).default(1).optional(),
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),
 });
+
+export const receiveAdvanceSchema = Joi.object({
+  amount: Joi.number().positive().required(),
+  paymentMethod: Joi.string().valid("Cash", "UPI").default("Cash"),
+  paymentDetails: Joi.object().optional(),
+  cashTendered: Joi.number().min(0).optional(),
+  changeDue: Joi.number().min(0).optional(),
+  paymentQrId: objectId.allow(null, "").optional(),
+  denominations: Joi.array().items(Joi.object({ denomination: Joi.number().required(), quantity: Joi.number().required() })).optional(),
+  returnedDenominations: Joi.array().items(Joi.object({ denomination: Joi.number().required(), quantity: Joi.number().required() })).optional(),
+  branchId: objectId.allow(null).optional(),
+  shiftId: objectId.allow(null).optional(),
+  narration: Joi.string().trim().max(500).allow("", null).optional(),
+  date: Joi.date().optional(),
+});
+
+export const settleCreditSchema = Joi.object({
+  settlements: Joi.array()
+    .items(
+      Joi.object({
+        creditTransactionId: objectId.optional(),
+        id: objectId.optional(),
+        invoiceId: objectId.optional(),
+        amount: Joi.number().positive().required(),
+      })
+    )
+    .min(1)
+    .required(),
+  paymentMethod: Joi.string().valid("Cash", "UPI", "Advance").required(),
+  paymentDetails: Joi.object().optional(),
+  cashTendered: Joi.number().min(0).optional(),
+  changeDue: Joi.number().min(0).optional(),
+  paymentQrId: objectId.allow(null, "").optional(),
+  denominations: Joi.array().items(Joi.object({ denomination: Joi.number().required(), quantity: Joi.number().required() })).optional(),
+  returnedDenominations: Joi.array().items(Joi.object({ denomination: Joi.number().required(), quantity: Joi.number().required() })).optional(),
+  branchId: objectId.allow(null).optional(),
+  shiftId: objectId.allow(null).optional(),
+  narration: Joi.string().trim().max(500).allow("", null).optional(),
+  date: Joi.date().optional(),
+});
+
+export const getTransactionsQuerySchema = Joi.object({
+  status: Joi.string().optional(),
+  fromDate: Joi.date().optional(),
+  toDate: Joi.date().optional(),
+  page: Joi.number().integer().min(1).default(1).optional(),
+  limit: Joi.number().integer().min(1).max(100).default(50).optional(),
+});
+
+export const getStatementQuerySchema = Joi.object({
+  fromDate: Joi.date().optional(),
+  toDate: Joi.date().optional(),
+});

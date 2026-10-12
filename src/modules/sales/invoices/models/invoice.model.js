@@ -102,6 +102,25 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: "Paid",
     },
+    creditDueDate: {
+      type: Date,
+      default: null,
+    },
+    creditStatus: {
+      type: String,
+      enum: ["NA", "PENDING", "PARTIAL", "SETTLED"],
+      default: "NA",
+      index: true,
+    },
+    creditPaidAmount: {
+      type: Number,
+      default: 0,
+    },
+    creditTransactionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CustomerCreditTransaction",
+      default: null,
+    },
     cancelledAt: {
       type: Date,
       default: null,

@@ -8,6 +8,7 @@ import FundTransfer from "../../finance/treasury/fund-transfers/models/fundTrans
 import { FUND_TRANSFER_STATUS } from "../../finance/treasury/fund-transfers/constants/fundTransfer.constant.js";
 import PaymentQr from "../../finance/treasury/payment-qr/models/paymentQr.model.js";
 import BranchCash from "../../finance/treasury/cash-management/branch-cash/models/branchCash.model.js";
+import CustomerAdvanceTransaction from "../../parties/customers/models/customerAdvanceTransaction.model.js";
 import { getTimePeriod } from "../../../utils/timePeriod.js";
 import { getBusinessDateRange } from "../../../utils/businessDate.js";
 
@@ -137,6 +138,10 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
   let paymentQrCount = 0;
   let qrNet = 0;
   let cashNet = 0;
+  let creditSalesTotal = 0;
+  let creditInvoiceCount = 0;
+  let advanceSalesTotal = 0;
+  let advanceInvoiceCount = 0;
   let returnCount = 0; // stubbed until SalesReturn is built
   let returnAmount = 0;
 
@@ -251,6 +256,8 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
       splitNet += inv.grandTotal || 0;
       let billSplitCash = 0;
       let billSplitUpi = 0;
+      let hasCreditInBill = false;
+      let hasAdvanceInBill = false;
       if (Array.isArray(inv.payments) && inv.payments.length > 0) {
         for (const p of inv.payments) {
           const pType = p.paymentType ? p.paymentType.toUpperCase() : "CASH";
@@ -258,9 +265,15 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
           if (pType.includes("UPI") || pType.includes("QR")) {
             billSplitUpi += amt;
             _trackUpi(p.paymentQrId || inv.paymentQrId, amt, inv._id, true);
+          } else if (pType.includes("CREDIT")) {
+            creditSalesTotal += amt;
+            hasCreditInBill = true;
+          } else if (pType.includes("ADVANCE") || pType.includes("WALLET")) {
+            advanceSalesTotal += amt;
+            hasAdvanceInBill = true;
           } else if (pType.includes("CASH")) {
             billSplitCash += amt;
-          } else if (!pType.includes("CARD") && !pType.includes("WALLET") && !pType.includes("CREDIT")) {
+          } else if (!pType.includes("CARD")) {
             billSplitCash += amt;
           }
         }
@@ -269,6 +282,8 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
         billSplitCash = Math.min(Number(inv.grandTotal || 0), tendered);
         billSplitUpi = Math.max(0, Number(inv.grandTotal || 0) - billSplitCash);
       }
+      if (hasCreditInBill) creditInvoiceCount++;
+      if (hasAdvanceInBill) advanceInvoiceCount++;
       splitCashAmount += billSplitCash;
       splitUpiAmount += billSplitUpi;
       cashNet += billSplitCash;
@@ -288,6 +303,14 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
         const amt = (inv.cashTendered - inv.changeDue > 0) ? (inv.cashTendered - inv.changeDue) : Number(inv.grandTotal || 0);
         pureCashAmount += amt;
         cashNet += amt;
+      } else if (pMethod.includes("CREDIT")) {
+        creditInvoiceCount++;
+        const amt = Number(inv.grandTotal || 0);
+        creditSalesTotal += amt;
+      } else if (pMethod.includes("ADVANCE")) {
+        advanceInvoiceCount++;
+        const amt = Number(inv.grandTotal || 0);
+        advanceSalesTotal += amt;
       } else {
         cashInvoiceCount++;
         const amt = Number(inv.grandTotal || 0);
@@ -385,7 +408,200 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
   }
 
 
-  const expectedClosingCashAmount_raw = (shift.openingFloatAmount || 0) + cashNet;
+  // ── Customer Advance & Credit Settlement Tracking for this Shift ─────────
+  let advanceCashTotal = 0;
+  let advanceCashTendered = 0;
+  let advanceChangeDue = 0;
+  let advanceCashCount = 0;
+  let advanceUpiTotal = 0;
+  let advanceUpiCount = 0;
+
+  let creditCashTotal = 0;
+  let creditCashTendered = 0;
+  let creditChangeDue = 0;
+  let creditCashCount = 0;
+  let creditUpiTotal = 0;
+  let creditUpiCount = 0;
+
+  const advCreditUpiRaw = {};
+
+  const _trackAdvCreditUpi = (paymentQrId, amount, sourceType) => {
+    const key = paymentQrId ? String(paymentQrId) : "unattributed";
+    if (!advCreditUpiRaw[key]) {
+      advCreditUpiRaw[key] = {
+        paymentQrId: paymentQrId || null,
+        transactionCount: 0,
+        totalAmount: 0,
+        advanceCount: 0,
+        advanceAmount: 0,
+        creditCount: 0,
+        creditAmount: 0,
+        sourceType,
+      };
+    }
+    advCreditUpiRaw[key].transactionCount++;
+    advCreditUpiRaw[key].totalAmount += Number(amount) || 0;
+    if (sourceType === "ADVANCE") {
+      advCreditUpiRaw[key].advanceCount++;
+      advCreditUpiRaw[key].advanceAmount += Number(amount) || 0;
+    } else if (sourceType === "CREDIT") {
+      advCreditUpiRaw[key].creditCount++;
+      advCreditUpiRaw[key].creditAmount += Number(amount) || 0;
+    }
+    if (advCreditUpiRaw[key].advanceCount > 0 && advCreditUpiRaw[key].creditCount > 0) {
+      advCreditUpiRaw[key].sourceType = "MIXED";
+    }
+  };
+
+  const advanceTxs = await CustomerAdvanceTransaction.find({
+    workspaceId: shift.workspaceId,
+    companyId: shift.companyId,
+    status: "ACTIVE",
+    isDeleted: false,
+    $or: [
+      { shiftId: shift._id },
+      { createdAt: { $gte: shift.openedAt || shift.createdAt, $lte: shiftEndTime } },
+    ],
+  }).populate("customerId", "name phone").lean();
+
+  for (const tx of advanceTxs) {
+    const isReceipt = tx.type === "RECEIPT" || tx.type === "ADVANCE_RECEIVED";
+    const isCreditSettled = tx.type === "CREDIT_SETTLED" || tx.type === "SETTLEMENT";
+    const pMethod = String(tx.paymentMethod || "Cash").toUpperCase();
+    const amt = Number(tx.amount || 0);
+    const tendered = Number(tx.cashTendered || amt);
+    const change = Number(tx.changeDue || 0);
+
+    if (isReceipt) {
+      if (pMethod.includes("UPI") || pMethod.includes("QR")) {
+        advanceUpiTotal += amt;
+        advanceUpiCount++;
+        _trackAdvCreditUpi(tx.paymentQrId, amt, "ADVANCE");
+      } else if (pMethod.includes("CASH")) {
+        advanceCashTotal += amt;
+        advanceCashTendered += tendered;
+        advanceChangeDue += change;
+        advanceCashCount++;
+      }
+    } else if (isCreditSettled) {
+      if (pMethod.includes("UPI") || pMethod.includes("QR")) {
+        creditUpiTotal += amt;
+        creditUpiCount++;
+        _trackAdvCreditUpi(tx.paymentQrId, amt, "CREDIT");
+      } else if (pMethod.includes("CASH")) {
+        creditCashTotal += amt;
+        creditCashTendered += tendered;
+        creditChangeDue += change;
+        creditCashCount++;
+      }
+    }
+  }
+
+  // Fallbacks for closed shifts where fields were already persisted on the Shift doc
+  if (shift.status === "closed") {
+    if (advanceCashTotal === 0 && shift.advanceCashTotal) advanceCashTotal = shift.advanceCashTotal;
+    if (advanceCashCount === 0 && shift.advanceCashCount) advanceCashCount = shift.advanceCashCount;
+    if (advanceUpiTotal === 0 && shift.advanceUpiTotal) advanceUpiTotal = shift.advanceUpiTotal;
+    if (advanceUpiCount === 0 && shift.advanceUpiCount) advanceUpiCount = shift.advanceUpiCount;
+    if (creditCashTotal === 0 && shift.creditCashTotal) creditCashTotal = shift.creditCashTotal;
+    if (creditCashCount === 0 && shift.creditCashCount) creditCashCount = shift.creditCashCount;
+    if (creditUpiTotal === 0 && shift.creditUpiTotal) creditUpiTotal = shift.creditUpiTotal;
+    if (creditUpiCount === 0 && shift.creditUpiCount) creditUpiCount = shift.creditUpiCount;
+  }
+
+  // Enrich advanceCreditUpiBreakdown with PaymentQr & BankAccount metadata
+  const advQrIds = Object.keys(advCreditUpiRaw).filter((k) => k !== "unattributed");
+  let advanceCreditUpiBreakdown = [];
+  if (advQrIds.length > 0) {
+    const qrDocs = await PaymentQr.find({ _id: { $in: advQrIds } })
+      .populate({
+        path: "bankAccountId",
+        select: "accountName accountNumber ifscCode bankMasterId",
+        populate: { path: "bankMasterId", select: "name shortName" },
+      })
+      .lean();
+    const qrMap = {};
+    for (const qr of qrDocs) qrMap[String(qr._id)] = qr;
+
+    advanceCreditUpiBreakdown = Object.entries(advCreditUpiRaw).map(([key, data]) => {
+      if (key === "unattributed") {
+        return {
+          paymentQrId: null,
+          upiId: "Unattributed",
+          label: "Legacy / Untracked UPI",
+          provider: null,
+          bankAccountId: null,
+          bankName: "Unlinked Bank",
+          accountName: "Direct / Legacy UPI",
+          accountNumber: "",
+          qrImageUrl: null,
+          transactionCount: data.transactionCount,
+          totalAmount: data.totalAmount,
+          advanceCount: data.advanceCount,
+          advanceAmount: data.advanceAmount,
+          creditCount: data.creditCount,
+          creditAmount: data.creditAmount,
+          sourceType: data.sourceType,
+        };
+      }
+      const qr = qrMap[key] || {};
+      const bankAcct = qr.bankAccountId || {};
+      const bankMaster = bankAcct.bankMasterId || {};
+      const bankName = bankMaster.name || bankMaster.shortName || bankAcct.accountName || "Bank";
+      return {
+        paymentQrId: key,
+        upiId: qr.upiId || key,
+        label: qr.label || qr.upiId || "UPI QR",
+        provider: qr.provider || null,
+        bankAccountId: bankAcct._id || null,
+        bankName,
+        accountName: bankAcct.accountName || "",
+        accountNumber: bankAcct.accountNumber ? `••••${String(bankAcct.accountNumber).slice(-4)}` : "",
+        qrImageUrl: qr.qrImageUrl || null,
+        transactionCount: data.transactionCount,
+        totalAmount: data.totalAmount,
+        advanceCount: data.advanceCount,
+        advanceAmount: data.advanceAmount,
+        creditCount: data.creditCount,
+        creditAmount: data.creditAmount,
+        sourceType: data.sourceType,
+      };
+    });
+  } else if (advCreditUpiRaw["unattributed"]) {
+    const data = advCreditUpiRaw["unattributed"];
+    advanceCreditUpiBreakdown = [
+      {
+        paymentQrId: null,
+        upiId: "Unattributed",
+        label: "Legacy / Untracked UPI",
+        provider: null,
+        bankAccountId: null,
+        bankName: "Unlinked Bank",
+        accountName: "Direct / Legacy UPI",
+        accountNumber: "",
+        qrImageUrl: null,
+        transactionCount: data.transactionCount,
+        totalAmount: data.totalAmount,
+        advanceCount: data.advanceCount,
+        advanceAmount: data.advanceAmount,
+        creditCount: data.creditCount,
+        creditAmount: data.creditAmount,
+        sourceType: data.sourceType,
+      },
+    ];
+  }
+
+  // Fallback to shift.advanceCreditUpiBreakdown if closed and calculated list is empty
+  if (
+    shift.status === "closed" &&
+    (!advanceCreditUpiBreakdown || advanceCreditUpiBreakdown.length === 0) &&
+    shift.advanceCreditUpiBreakdown?.length > 0
+  ) {
+    advanceCreditUpiBreakdown = shift.advanceCreditUpiBreakdown;
+  }
+
+  const expectedClosingCashAmount_raw =
+    (shift.openingFloatAmount || 0) + cashNet + advanceCashTotal + creditCashTotal;
 
   // Query fund transfers linked to this shift
   let withdrawals = [];
@@ -507,6 +723,10 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
     splitInvoiceCount,
     splitNet,
     splitSalesTotal: splitNet,
+    creditSalesTotal: (shift.status === "closed" && shift.creditSalesTotal != null) ? shift.creditSalesTotal : creditSalesTotal,
+    creditInvoiceCount: (shift.status === "closed" && shift.creditInvoiceCount != null) ? shift.creditInvoiceCount : creditInvoiceCount,
+    advanceSalesTotal: (shift.status === "closed" && shift.advanceSalesTotal != null) ? shift.advanceSalesTotal : advanceSalesTotal,
+    advanceInvoiceCount: (shift.status === "closed" && shift.advanceInvoiceCount != null) ? shift.advanceInvoiceCount : advanceInvoiceCount,
     upiBreakdown,
     expectedClosingCashAmount,
     withdrawals,
@@ -521,6 +741,25 @@ export const getShiftSummary = asyncHandler(async (req, res, next) => {
     cancelledSplitTotal: (shift.status === "closed" && shift.cancelledSplitTotal != null) ? shift.cancelledSplitTotal : cancelledSplitTotal,
     cancelledInvoices: (shift.status === "closed" && shift.cancelledInvoices?.length > 0) ? shift.cancelledInvoices : cancelledInvoices,
     cancelledBreakdown: (shift.status === "closed" && shift.cancelledBreakdown?.cash) ? shift.cancelledBreakdown : cancelledBreakdown,
+    // Customer Advance & Credit Settlement additions
+    advanceCashTotal,
+    advanceCashTendered,
+    advanceChangeDue,
+    advanceCashCount,
+    advanceUpiTotal,
+    advanceUpiCount,
+    totalAdvanceReceived: advanceCashTotal + advanceUpiTotal,
+    totalAdvanceReceivedCount: advanceCashCount + advanceUpiCount,
+    creditCashTotal,
+    creditCashTendered,
+    creditChangeDue,
+    creditCashCount,
+    creditUpiTotal,
+    creditUpiCount,
+    totalCustomerPaymentsCash: advanceCashTotal + creditCashTotal,
+    totalCustomerPaymentsUpi: advanceUpiTotal + creditUpiTotal,
+    totalCustomerPaymentsCount: advanceCashCount + advanceUpiCount + creditCashCount + creditUpiCount,
+    advanceCreditUpiBreakdown,
   };
 
   res.status(200).json({ success: true, data: summary });

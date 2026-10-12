@@ -127,7 +127,9 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
   ]);
 
   // Calculate overall stats for the filtered query (ignoring pagination)
-  const allFilteredCustomers = await Customer.find(query).select('ledgerAccountId status openingBalance openingBalanceType').lean();
+  const allFilteredCustomers = await Customer.find(query)
+    .select('ledgerAccountId status openingBalance openingBalanceType advanceBalance creditOutstanding')
+    .lean();
   
   const ledgerAccountIds = allFilteredCustomers
     .map(c => c.ledgerAccountId)
@@ -154,6 +156,7 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
 
   let totalCr = 0;
   let totalDr = 0;
+  let totalAdvance = 0;
   let active = 0;
   let inactive = 0;
   let blocked = 0;
@@ -163,6 +166,8 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
     if (s === "active") active++;
     else if (s === "inactive") inactive++;
     else if (s === "blocked") blocked++;
+
+    totalAdvance += Number(customer.advanceBalance || 0);
 
     const l = ledgerMap[customer.ledgerAccountId?.toString()] || { totalDebit: 0, totalCredit: 0 };
     
@@ -192,6 +197,7 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
   const stats = { 
     totalCr, 
     totalDr, 
+    totalAdvance,
     active, 
     inactive, 
     blocked,
@@ -217,6 +223,8 @@ const getCustomers = async (workspaceId, companyId, filters = {}, options = {}) 
     const net = totalDebit - totalCredit;
     doc.outstandingAmount = Math.abs(net);
     doc.balanceType = net >= 0 ? "dr" : "cr";
+    doc.advanceBalance = Number(doc.advanceBalance || 0);
+    doc.creditOutstanding = Number(doc.creditOutstanding || 0);
     
     // We also attach a 'toSafeObject' mock if the service expects it, but since we return plain objects, we can just delete __v
     delete doc.__v;

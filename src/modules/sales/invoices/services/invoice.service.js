@@ -23,10 +23,15 @@ import cashDenominationRepository from "../../../finance/treasury/cash-managemen
 import SalesInvoice from "../models/invoice.model.js";
 import GstLedger from "../../../finance/gst-ledger/models/gstLedger.model.js";
 import JournalVoucher from "../../../finance/journal-vouchers/models/journalVoucher.model.js";
+import Ledger from "../../../finance/ledger/models/ledger.model.js";
 import branchCashRepository from "../../../finance/treasury/cash-management/branch-cash/repositories/branchCash.repository.js";
 import CashTransaction from "../../../finance/treasury/cash-management/cash-transactions/models/cashTransaction.model.js";
 import BankTransaction from "../../../finance/treasury/bank-management/bank-transactions/models/bankTransaction.model.js";
 import { Shift } from "../../../operations/shifts/shift.model.js";
+import CustomerAdvanceTransaction from "../../../parties/customers/models/customerAdvanceTransaction.model.js";
+import CustomerCreditTransaction from "../../../parties/customers/models/customerCreditTransaction.model.js";
+import customerAdvanceService from "../../../parties/customers/services/customerAdvance.service.js";
+import { CUSTOMER_TRANSACTION_TYPE, CREDIT_STATUS } from "../../../parties/customers/constants/customer.constant.js";
 
 /**
  * Validates that all cash payments have explicit denomination breakdowns
@@ -65,8 +70,24 @@ const revertCashTransactionsForInvoice = async (invoiceNo, companyId, userId, se
 };
 
 const validateCashDenominations = (saleData) => {
-  const isCashMethod = String(saleData.paymentMethod || "").toLowerCase() === "cash";
   const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
+  const methodLower = String(saleData.paymentMethod || "").toLowerCase();
+  const isCreditMethod = methodLower === "credit";
+  const isAdvanceMethod = methodLower === "advance";
+
+  // Skip cash denomination check if entirely non-cash (Credit or Advance)
+  const allNonCash =
+    paymentsList.length > 0 &&
+    paymentsList.every((p) => {
+      const pType = String(p.paymentType || p.mode || "").toLowerCase();
+      return pType === "credit" || pType === "advance";
+    });
+
+  if (allNonCash || ((isCreditMethod || isAdvanceMethod) && paymentsList.length === 0)) {
+    return;
+  }
+
+  const isCashMethod = methodLower === "cash";
 
   const cashPayments = [];
 
@@ -261,6 +282,7 @@ const cleanInvoiceAccountingEntries = async (invoiceId, invoiceNo, companyId, us
   if (btJvIds.length > 0) {
     await JournalVoucher.deleteMany({ _id: { $in: btJvIds } }, { session });
     await mongoose.model("JournalLine").deleteMany({ voucherId: { $in: btJvIds } }, { session });
+    await Ledger.deleteMany({ voucherId: { $in: btJvIds } }, { session });
   }
   await BankTransaction.deleteMany(bankTxQuery, { session });
 
@@ -276,6 +298,7 @@ const cleanInvoiceAccountingEntries = async (invoiceId, invoiceNo, companyId, us
   if (remainingJvIds.length > 0) {
     await mongoose.model("JournalLine").deleteMany({ voucherId: { $in: remainingJvIds } }, { session });
     await JournalVoucher.deleteMany({ _id: { $in: remainingJvIds } }, { session });
+    await Ledger.deleteMany({ voucherId: { $in: remainingJvIds } }, { session });
   }
 };
 
@@ -361,11 +384,23 @@ const postSaleAccounting = async ({
                   || accounts.find(a => String(a.accountName).toLowerCase().includes("revenue")) 
                   || accounts[0];
     }
+    if (!salesAccount) {
+      salesAccount = await accountRepository.findAccountByCode(invoice.companyId, "SALES-REVENUE", { session });
+    }
+    if (!salesAccount) {
+      const anyIncome = await accountRepository.getAccounts(invoice.workspaceId, invoice.companyId, { accountNature: "INCOME" }, { session });
+      if (anyIncome?.accounts?.length > 0) {
+        salesAccount = anyIncome.accounts[0];
+      }
+    }
 
     if (salesAccount) {
       const paymentsList = Array.isArray(saleData.payments) && saleData.payments.length > 0 
         ? [...saleData.payments]
         : (Array.isArray(invoice.payments) && invoice.payments.length > 0 ? [...invoice.payments] : []);
+
+      const isAdvancePaid = String(invoice.paymentMethod).toLowerCase() === "advance";
+      const isCreditSale = String(invoice.paymentMethod).toLowerCase() === "credit" || String(invoice.status).toLowerCase() === "credit";
 
       if (isCashPaid && paymentsList.length === 0) {
         paymentsList.push({
@@ -379,9 +414,30 @@ const postSaleAccounting = async ({
           paymentType: "upi",
           amount: invoice.grandTotal
         });
+      } else if (isAdvancePaid && paymentsList.length === 0) {
+        paymentsList.push({
+          paymentType: "advance",
+          amount: invoice.grandTotal
+        });
+      } else if (isCreditSale && paymentsList.length === 0) {
+        paymentsList.push({
+          paymentType: "credit",
+          amount: invoice.grandTotal
+        });
       }
 
-      let needsSaleJv = customer.ledgerAccountId ? 1 : 0;
+      // Compute credit and advance portions
+      let creditPortion = 0;
+      let advancePortion = 0;
+      for (const p of paymentsList) {
+        const pType = String(p.paymentType || p.mode || "").toLowerCase();
+        if (pType === "credit") creditPortion += Number(p.amount || 0);
+        if (pType === "advance") advancePortion += Number(p.amount || 0);
+      }
+
+      // ONLY credit sales require booking a receivable (SALE JV: Customer Dr, Sales Cr)
+      // Pure Cash or UPI POS sales settle immediately and NEVER touch customer debtor ledger!
+      let needsSaleJv = (customer.ledgerAccountId && creditPortion > 0) ? 1 : 0;
       let needsReceiptJv = 0;
       let needsCashTx = 0;
 
@@ -400,6 +456,8 @@ const postSaleAccounting = async ({
           }
         } else if (String(p.paymentType || p.mode).toLowerCase() === "upi") {
           needsReceiptJv += 1; // fallback JV
+        } else if (String(p.paymentType || p.mode).toLowerCase() === "advance") {
+          needsReceiptJv += 1; // Customer Advance adjustment JV
         }
       }
 
@@ -447,26 +505,26 @@ const postSaleAccounting = async ({
       const nextCashTx = () => cashTxRes[cashTxIdx++];
       const nextCount = () => countRes[countIdx++];
 
-      // 1. If customer has a ledger account, first create the SALE JV (Customer -> Sales)
-      if (customer.ledgerAccountId && preSaleJv) {
+      // 1. If customer bought on credit, create the SALE JV (Customer -> Sales) for creditPortion ONLY
+      if (customer.ledgerAccountId && preSaleJv && creditPortion > 0) {
         const saleJvPayload = {
           voucherNumber: preSaleJv,
           voucherDate: invoice.date || new Date(),
           voucherType: "SALE",
           referenceNumber: invoice.invoiceNo,
-          narration: `Sale against Invoice ${invoice.invoiceNo}`,
+          narration: `Credit Sale against Invoice ${invoice.invoiceNo} for ${customer.name || "Customer"}`,
           status: "POSTED",
           lines: [
             {
               accountId: customer.ledgerAccountId,
-              debit: invoice.grandTotal,
+              debit: creditPortion,
               credit: 0,
-              narration: `Amount due for Invoice ${invoice.invoiceNo}`
+              narration: `Credit due for Invoice ${invoice.invoiceNo}`
             },
             {
               accountId: salesAccount._id,
               debit: 0,
-              credit: invoice.grandTotal,
+              credit: creditPortion,
               narration: `Sales from Invoice ${invoice.invoiceNo}`
             }
           ]
@@ -481,12 +539,14 @@ const postSaleAccounting = async ({
             { session }
           );
         } catch (jvErr) {
-          console.error("--- FAILED TO CREATE SALES JV ---", jvErr);
+          console.error("--- FAILED TO CREATE CREDIT SALES JV ---", jvErr);
         }
       }
 
-      const receiptCounterpartyId = customer.ledgerAccountId || salesAccount._id;
-      const receiptNarrationSuffix = customer.ledgerAccountId ? "from Customer" : "Sale";
+      // Point-of-sale instant settlements (Cash / UPI) and Advance offset directly against Sales Revenue!
+      // The customer personal debtor ledger is NEVER debited or credited for Cash or UPI sales.
+      const receiptCounterpartyId = salesAccount._id;
+      const receiptNarrationSuffix = "Sale";
 
       for (const payment of paymentsList) {
         const paymentType = String(payment.paymentType || payment.mode || "").toLowerCase();
@@ -695,6 +755,91 @@ const postSaleAccounting = async ({
               );
             }
           }
+        } else if (paymentType === "credit") {
+          // No treasury movement for credit sales.
+          // The SALE JV (Customer DR, Sales CR) already books the receivable.
+          // CustomerCreditTransaction is created in recordCustomerSale.
+        } else if (paymentType === "advance") {
+          let customerLedgerAccountId = customer?.ledgerAccountId;
+          if (!customerLedgerAccountId) {
+            const customerAccount = await customerAdvanceService.ensureCustomerLedgerAccount(
+              customer,
+              invoice.workspaceId,
+              invoice.companyId,
+              user?._id,
+              session
+            );
+            customerLedgerAccountId = customerAccount?._id;
+          }
+
+          const advanceJvPayload = {
+            voucherNumber: nextReceiptJv(),
+            voucherDate: invoice.date || new Date(),
+            voucherType: "CUSTOMER_RECEIPT",
+            referenceNumber: invoice.invoiceNo,
+            narration: `Payment from Customer Advance for Invoice ${invoice.invoiceNo}`,
+            status: "POSTED",
+            lines: [
+              {
+                accountId: customerLedgerAccountId,
+                debit: amount,
+                credit: 0,
+                narration: `Customer Advance applied to Invoice ${invoice.invoiceNo}`,
+              },
+              {
+                accountId: receiptCounterpartyId,
+                debit: 0,
+                credit: amount,
+                narration: `Sales from Invoice ${invoice.invoiceNo} (Customer Advance)`,
+              },
+            ],
+          };
+
+          const advJv = await journalVoucherService.createJournalVoucher(
+            invoice.workspaceId,
+            invoice.companyId,
+            user?._id,
+            advanceJvPayload,
+            { session }
+          );
+
+          const prevBalance = await customerAdvanceService.getAdvanceBalance(
+            customer._id,
+            invoice.companyId,
+            invoice.workspaceId,
+            session
+          );
+
+          await CustomerAdvanceTransaction.create(
+            [
+              {
+                workspaceId: invoice.workspaceId,
+                companyId: invoice.companyId,
+                branchId: resolvedBranchId || invoice.branchId,
+                customerId: customer._id,
+                type: CUSTOMER_TRANSACTION_TYPE.ADVANCE_SETTLED,
+                amount: amount,
+                balanceAfter: Math.max(0, Math.round((prevBalance - amount) * 100) / 100),
+                referenceType: "INVOICE",
+                referenceId: invoice._id,
+                referenceNumber: invoice.invoiceNo,
+                paymentMethod: "Advance",
+                journalVoucherId: advJv?._id || null,
+                shiftId: invoice.shiftId || null,
+                narration: `Advance applied against Invoice ${invoice.invoiceNo}`,
+                status: "ACTIVE",
+                createdBy: user?._id || null,
+              },
+            ],
+            { session }
+          );
+
+          // Decrement customer advance balance on Customer document
+          await Customer.findByIdAndUpdate(
+            customer._id,
+            { $inc: { advanceBalance: -amount } },
+            { session }
+          );
         }
       }
     }
@@ -849,6 +994,83 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     }
   }
 
+  // Compute credit and advance portions
+  const grandTotal = Number(saleData.grandTotal || 0);
+  const paymentsList = Array.isArray(saleData.payments) ? saleData.payments : [];
+  const primaryMethodLower = String(saleData.paymentMethod || "").toLowerCase();
+
+  let creditPortion = 0;
+  let advancePortion = 0;
+
+  if (paymentsList.length > 0) {
+    for (const p of paymentsList) {
+      const pType = String(p.paymentType || p.mode || "").toLowerCase();
+      if (pType === "credit") creditPortion += Number(p.amount || 0);
+      if (pType === "advance") advancePortion += Number(p.amount || 0);
+    }
+  } else {
+    if (primaryMethodLower === "credit") creditPortion = grandTotal;
+    if (primaryMethodLower === "advance") advancePortion = grandTotal;
+  }
+
+  // 1. Advance validation
+  if (advancePortion > 0) {
+    const availableAdvance = await customerAdvanceService.getAdvanceBalance(
+      customer._id,
+      companyId || customer.companyId,
+      workspaceId || customer.workspaceId,
+      session
+    );
+    if (availableAdvance < advancePortion - 0.01) {
+      throw new ApiError(
+        400,
+        `Insufficient advance balance for "${customer.name}". Available: ₹${availableAdvance.toFixed(2)}, Required: ₹${advancePortion.toFixed(2)}.`
+      );
+    }
+  }
+
+  // 2. Credit limit validation (atomic check inside session)
+  let creditDueDate = null;
+  if (creditPortion > 0) {
+    const customerLimit = Number(customer.creditLimit || 0);
+    if (customerLimit <= 0) {
+      throw new ApiError(
+        400,
+        `Credit sale is not allowed for customer "${customer.name}". Please configure a Credit Limit in customer profile.`
+      );
+    }
+
+    const existingCredits = await CustomerCreditTransaction.aggregate([
+      {
+        $match: {
+          customerId: customer._id,
+          companyId: new mongoose.Types.ObjectId(companyId || customer.companyId),
+          status: { $in: ["PENDING", "PARTIAL"] },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          totalDue: { $sum: "$balanceDue" },
+        },
+      },
+    ]).session(session);
+
+    const currentOutstanding = Number(existingCredits[0]?.totalDue || 0);
+    if (currentOutstanding + creditPortion > customerLimit + 0.01) {
+      throw new ApiError(
+        400,
+        `Credit limit exceeded for "${customer.name}". Current Outstanding: ₹${currentOutstanding.toFixed(2)}, This Bill Credit: ₹${creditPortion.toFixed(2)}, Allowed Limit: ₹${customerLimit.toFixed(2)}.`
+      );
+    }
+
+    const creditDays = Number(customer.creditDays) || 30;
+    creditDueDate = new Date(saleData.date || Date.now());
+    creditDueDate.setDate(creditDueDate.getDate() + creditDays);
+  }
+
+  const isAllCredit = creditPortion >= grandTotal - 0.01 && grandTotal > 0;
+
   const newSale = {
     workspaceId: workspaceId || customer.workspaceId,
     companyId: companyId || customer.companyId,
@@ -865,12 +1087,16 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     grandTotal: saleData.grandTotal || 0,
     cashTendered: saleData.cashTendered || 0,
     changeDue: saleData.changeDue || 0,
-    paymentMethod: saleData.paymentMethod || "Cash",
+    paymentMethod: saleData.paymentMethod || (isAllCredit ? "Credit" : "Cash"),
     paymentQrId: resolvedPaymentQrId || null,
     payments: Array.isArray(saleData.payments) ? saleData.payments : [],
     denominations: Array.isArray(saleData.denominations) ? saleData.denominations : [],
     returnedDenominations: Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : [],
-    status: saleData.status || "Paid",
+    status: creditPortion > 0 ? "Pending" : (saleData.status || "Paid"),
+    creditDueDate: creditDueDate || null,
+    creditStatus: creditPortion > 0 ? "PENDING" : "NA",
+    creditPaidAmount: 0,
+    creditTransactionId: null,
     items: Array.isArray(saleData.items) ? saleData.items : [],
     doctor: saleData.doctor || null,
     notes: saleData.notes || null,
@@ -882,6 +1108,34 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
 
   const savedInvoice = await invoiceRepository.createInvoice(newSale, { session });
   _logTime('Invoice created in DB');
+
+  // Create CustomerCreditTransaction if invoice has credit portion
+  if (creditPortion > 0) {
+    const [creditTx] = await CustomerCreditTransaction.create(
+      [
+        {
+          workspaceId: workspaceId || customer.workspaceId,
+          companyId: companyId || customer.companyId,
+          branchId: resolvedBranchId,
+          customerId: customer._id,
+          invoiceId: savedInvoice._id,
+          invoiceNo: savedInvoice.invoiceNo,
+          invoiceDate: savedInvoice.date || new Date(),
+          invoiceAmount: creditPortion,
+          paidAmount: 0,
+          balanceDue: creditPortion,
+          dueDate: creditDueDate,
+          status: "PENDING",
+          settlements: [],
+          createdBy: user?._id || null,
+        },
+      ],
+      { session }
+    );
+
+    savedInvoice.creditTransactionId = creditTx._id;
+    await savedInvoice.save({ session });
+  }
 
   // Deduct inventory from Batch and ProductFacility
   await deductInvoiceInventory(newSale.items, resolvedBranchId, session);
@@ -1018,7 +1272,8 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
     existingInvoice.payments = Array.isArray(saleData.payments) ? saleData.payments : existingInvoice.payments;
     existingInvoice.denominations = Array.isArray(saleData.denominations) ? saleData.denominations : existingInvoice.denominations;
     existingInvoice.returnedDenominations = Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : existingInvoice.returnedDenominations;
-    existingInvoice.status = saleData.status || existingInvoice.status || "Paid";
+    const isUnsettledCredit = existingInvoice.creditStatus === "PENDING" || existingInvoice.creditStatus === "PARTIAL" || String(saleData.paymentMethod || existingInvoice.paymentMethod).toLowerCase() === "credit";
+    existingInvoice.status = isUnsettledCredit && existingInvoice.creditStatus !== "SETTLED" ? "Pending" : (saleData.status || existingInvoice.status || "Paid");
     existingInvoice.items = Array.isArray(saleData.items) ? saleData.items : existingInvoice.items;
     if (saleData.doctor !== undefined) existingInvoice.doctor = saleData.doctor;
     if (saleData.notes !== undefined) existingInvoice.notes = saleData.notes;
@@ -1116,6 +1371,46 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
 
     if (invoice.status === "Cancelled") {
       throw new ApiError(400, "Invoice is already cancelled");
+    }
+
+    // Guardrail: Block cancellation of settled or partially settled credit invoices
+    if (
+      invoice.creditStatus === "SETTLED" ||
+      invoice.creditStatus === "PARTIAL" ||
+      Number(invoice.creditPaidAmount || 0) > 0
+    ) {
+      throw new ApiError(
+        400,
+        "Cannot cancel a partially or fully settled credit invoice. Please reverse all settlement receipts first."
+      );
+    }
+
+    // Cancel linked CustomerCreditTransaction if pending
+    if (invoice.creditTransactionId || invoice.creditStatus === "PENDING") {
+      await CustomerCreditTransaction.updateMany(
+        { invoiceId: invoice._id, status: "PENDING" },
+        { status: "CANCELLED" },
+        { session }
+      );
+    }
+
+    // Revert any advance deduction for this invoice to restore customer's advance balance
+    const advanceDeductions = await CustomerAdvanceTransaction.find({
+      referenceId: invoice._id,
+      type: CUSTOMER_TRANSACTION_TYPE.ADVANCE_SETTLED,
+      status: "ACTIVE",
+    }).session(session);
+
+    for (const adv of advanceDeductions) {
+      adv.status = "REVERSED";
+      await adv.save({ session });
+      if (invoice.customerId) {
+        await Customer.findByIdAndUpdate(
+          invoice.customerId,
+          { $inc: { advanceBalance: adv.amount } },
+          { session }
+        );
+      }
     }
 
     // Shift-gate check: Only allow cancellation if shift is open (or invoice has no shift assigned)
