@@ -1,6 +1,7 @@
 import asyncHandler from "../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../utils/ApiResponse.js";
 import customerService from "../services/customer.service.js";
+import customerAdvanceService from "../services/customerAdvance.service.js";
 import invoiceService from "../../../sales/invoices/services/invoice.service.js";
 
 export const createCustomer = asyncHandler(async (req, res) => {
@@ -230,3 +231,99 @@ export const importChunk = asyncHandler(async (req, res) => {
     })
   );
 });
+
+export const receiveAdvance = asyncHandler(async (req, res) => {
+  const result = await customerAdvanceService.receiveCustomerAdvance(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    {
+      customerId: req.params.customerId,
+      ...req.body,
+    }
+  );
+
+  return res
+    .status(201)
+    .json(new ApiResponse(201, "Customer advance received successfully", result));
+});
+
+export const getAdvanceBalance = asyncHandler(async (req, res) => {
+  const balance = await customerAdvanceService.getAdvanceBalance(
+    req.params.customerId,
+    req.companyId,
+    req.workspaceId
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer advance balance fetched successfully", { advanceBalance: balance }));
+});
+
+export const settleCredit = asyncHandler(async (req, res) => {
+  const result = await customerAdvanceService.settleCustomerCredit(
+    req.workspaceId,
+    req.companyId,
+    req.user._id,
+    {
+      customerId: req.params.customerId,
+      ...req.body,
+    }
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer credit settled successfully", result));
+});
+
+export const getCreditOutstanding = asyncHandler(async (req, res) => {
+  const result = await customerAdvanceService.getCreditOutstanding(
+    req.params.customerId,
+    req.companyId,
+    req.workspaceId,
+    req.query
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer credit outstanding fetched successfully", result));
+});
+
+export const getCustomerTransactions = asyncHandler(async (req, res) => {
+  const result = await customerAdvanceService.getCustomerTransactions(
+    req.params.customerId,
+    req.companyId,
+    req.workspaceId,
+    req.query
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer transactions fetched successfully", result));
+});
+
+export const getCustomerStatement = asyncHandler(async (req, res) => {
+  const result = await customerAdvanceService.getCustomerStatement(
+    req.params.customerId,
+    req.companyId,
+    req.workspaceId,
+    req.query
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Customer statement fetched successfully", result));
+});
+
+export const getAllPendingCredits = asyncHandler(async (req, res) => {
+  const result = await customerAdvanceService.getAllPendingCredits(
+    req.companyId,
+    req.workspaceId,
+    req.query
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "All pending credits fetched successfully", result));
+});
+

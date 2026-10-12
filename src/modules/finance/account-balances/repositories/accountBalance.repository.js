@@ -15,7 +15,10 @@ const findBalanceByAccountId = async (accountId, companyId, workspaceId) => {
     accountId,
     companyId,
     workspaceId,
-  }).populate("accountId", "accountName accountCode accountNature accountCategory");
+  }).populate(
+    "accountId",
+    "accountName accountCode accountNature accountCategory openingBalance openingBalanceType description isSystem isCustomer isSupplier"
+  );
 };
 
 const upsertBalance = async (
@@ -110,55 +113,88 @@ const getBalances = async (workspaceId, companyId, filters = {}, options = {}) =
     companyId,
   };
 
-  if (filters.balanceType) {
-    query.balanceType = filters.balanceType;
+  if (filters.balanceType && filters.balanceType !== "all") {
+    query.balanceType = String(filters.balanceType).toLowerCase();
   }
 
+  const accountFilter = {
+    workspaceId,
+    companyId,
+    isDeleted: false,
+  };
+  let shouldFilterAccounts = false;
+
+  // 1. Account Scope Filter (company/general default, customer, supplier, all)
+  const scope = (filters.accountScope || "company").toLowerCase();
+  if (scope === "company" || scope === "general") {
+    accountFilter.accountCategory = { $nin: ["CUSTOMER", "SUPPLIER"] };
+    shouldFilterAccounts = true;
+  } else if (scope === "customer") {
+    accountFilter.accountCategory = "CUSTOMER";
+    shouldFilterAccounts = true;
+  } else if (scope === "supplier") {
+    accountFilter.accountCategory = "SUPPLIER";
+    shouldFilterAccounts = true;
+  }
+
+  // 2. Explicit Account Category override
+  if (filters.accountCategory && filters.accountCategory !== "all") {
+    accountFilter.accountCategory = filters.accountCategory;
+    shouldFilterAccounts = true;
+  }
+
+  // 3. Search
   if (filters.search) {
     const searchRegex = new RegExp(filters.search.trim(), "i");
-    const matchingAccounts = await Account.find({
-      workspaceId,
-      companyId,
-      isDeleted: false,
-      $or: [
-        { accountName: searchRegex },
-        { accountCode: searchRegex },
-      ],
-    }).select("_id");
+    accountFilter.$or = [
+      { accountName: searchRegex },
+      { accountCode: searchRegex },
+    ];
+    shouldFilterAccounts = true;
+  }
 
+  // 4. Account Nature
+  if (filters.accountNature && filters.accountNature !== "all") {
+    accountFilter.accountNature = filters.accountNature;
+    shouldFilterAccounts = true;
+  }
+
+  if (shouldFilterAccounts) {
+    const matchingAccounts = await Account.find(accountFilter).select("_id");
     const matchingAccountIds = matchingAccounts.map((a) => a._id);
     query.accountId = { $in: matchingAccountIds };
   }
 
   // Branch isolation for Cash Accounts: STRICT whitelist approach
   if (filters.branchId) {
-    const Account = mongoose.model("Account");
-    const allCashAccounts = await Account.find({
+    const AccountModel = mongoose.model("Account");
+    const allCashAccounts = await AccountModel.find({
       companyId,
       isDeleted: false,
-      accountCategory: "CASH"
+      accountCategory: "CASH",
     }).select("_id");
-    const allCashAccountIds = allCashAccounts.map(a => a._id.toString());
+    const allCashAccountIds = allCashAccounts.map((a) => a._id.toString());
 
     const BranchCash = mongoose.model("BranchCash");
     const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
     const validBranchCashAccounts = await BranchCash.find({
       companyId,
       isActive: true,
-      branchId: targetBranchId
+      branchId: targetBranchId,
     }).select("ledgerAccountId");
     const validLedgerIds = validBranchCashAccounts
-      .map(c => c.ledgerAccountId?.toString())
+      .map((c) => c.ledgerAccountId?.toString())
       .filter(Boolean);
 
     const invalidLedgerIds = allCashAccountIds
-      .filter(id => !validLedgerIds.includes(id))
-      .map(id => new mongoose.Types.ObjectId(id));
+      .filter((id) => !validLedgerIds.includes(id))
+      .map((id) => new mongoose.Types.ObjectId(id));
 
     if (invalidLedgerIds.length > 0) {
-      if (query.accountId) {
-        // if accountId is already constrained by $in from search
-        query.accountId = { ...query.accountId, $nin: invalidLedgerIds };
+      if (query.accountId && Array.isArray(query.accountId.$in)) {
+        query.accountId.$in = query.accountId.$in.filter(
+          (id) => !invalidLedgerIds.some((inv) => inv.equals(id))
+        );
       } else {
         query.accountId = { $nin: invalidLedgerIds };
       }
@@ -175,19 +211,62 @@ const getBalances = async (workspaceId, companyId, filters = {}, options = {}) =
   }
 
   const page = Math.max(1, parseInt(options.page) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 20));
+  const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 10));
   const skip = (page - 1) * limit;
 
-  const [balances, total] = await Promise.all([
+  // Build match query for aggregation statistics
+  const aggMatch = {
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
+  };
+  if (query.balanceType) {
+    aggMatch.balanceType = query.balanceType;
+  }
+  if (query.accountId) {
+    aggMatch.accountId = query.accountId;
+  }
+
+  const [balances, total, statsAgg] = await Promise.all([
     AccountBalance.find(query)
       .populate("accountId", "accountName accountCode accountNature accountCategory")
       .sort(sort)
       .skip(skip)
       .limit(limit),
     AccountBalance.countDocuments(query),
+    AccountBalance.aggregate([
+      { $match: aggMatch },
+      {
+        $group: {
+          _id: null,
+          totalAccounts: { $sum: 1 },
+          totalDebit: { $sum: "$debitTotal" },
+          totalCredit: { $sum: "$creditTotal" },
+          drCount: { $sum: { $cond: [{ $eq: ["$balanceType", "dr"] }, 1, 0] } },
+          crCount: { $sum: { $cond: [{ $eq: ["$balanceType", "cr"] }, 1, 0] } },
+        },
+      },
+    ]),
   ]);
 
-  return { balances, total, page, limit };
+  // Handle post-sorting by account name if requested
+  if (options.sort && (options.sort.name || options.sort.accountName)) {
+    const order = (options.sort.name || options.sort.accountName) === 1 ? 1 : -1;
+    balances.sort((a, b) => {
+      const nameA = a.accountId?.accountName || "";
+      const nameB = b.accountId?.accountName || "";
+      return order * nameA.localeCompare(nameB);
+    });
+  }
+
+  const summary = statsAgg[0] || {
+    totalAccounts: total,
+    totalDebit: 0,
+    totalCredit: 0,
+    drCount: 0,
+    crCount: 0,
+  };
+
+  return { balances, total, page, limit, summary };
 };
 
 export default {

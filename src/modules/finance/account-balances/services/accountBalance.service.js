@@ -3,12 +3,16 @@ import accountBalanceRepository from "../repositories/accountBalance.repository.
 import accountRepository from "../../chart-of-accounts/repositories/account.repository.js";
 
 const getBalances = async (workspaceId, companyId, query = {}) => {
-  const { page, limit, sort, all, ...filters } = query;
+  const { page, limit, sort, sortBy, sortOrder, all, ...filters } = query;
+  let sortOption = sort;
+  if (!sortOption && sortBy) {
+    sortOption = { [sortBy]: sortOrder === "asc" ? 1 : -1 };
+  }
   const result = await accountBalanceRepository.getBalances(
     workspaceId,
     companyId,
     filters,
-    { page, limit, sort, all: all === "true" || all === true }
+    { page, limit, sort: sortOption, all: all === "true" || all === true }
   );
 
   return {
@@ -16,6 +20,7 @@ const getBalances = async (workspaceId, companyId, query = {}) => {
     total: result.total,
     page: result.page,
     limit: result.limit,
+    summary: result.summary,
   };
 };
 

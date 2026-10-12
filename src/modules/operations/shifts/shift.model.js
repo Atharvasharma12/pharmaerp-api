@@ -256,6 +256,26 @@ const shiftSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    creditSalesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditInvoiceCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceSalesTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceInvoiceCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
     // Per-QR and per-Bank UPI collections breakdown (populated at shift close)
     upiBreakdown: [
       {
@@ -273,6 +293,85 @@ const shiftSchema = new mongoose.Schema(
         pureBillCount: { type: Number, default: 0 },
         splitBillCount: { type: Number, default: 0 },
         totalAmount: { type: Number, default: 0 },
+      }
+    ],
+
+    // ── Customer Advance & Credit Settlement Tracking ──────────────────────
+    advanceCashTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceCashTendered: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceChangeDue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceUpiTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceCashCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    advanceUpiCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditCashTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditCashTendered: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditChangeDue: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditUpiTotal: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditCashCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    creditUpiCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    // Per-QR breakdown for Customer Advance & Credit UPI payments
+    advanceCreditUpiBreakdown: [
+      {
+        paymentQrId: { type: mongoose.Schema.Types.ObjectId, ref: "PaymentQr", default: null },
+        upiId: { type: String, default: "" },
+        label: { type: String, default: "" },
+        provider: { type: String, default: null },
+        bankAccountId: { type: mongoose.Schema.Types.ObjectId, ref: "BankAccount", default: null },
+        bankName: { type: String, default: "" },
+        accountName: { type: String, default: "" },
+        accountNumber: { type: String, default: "" },
+        qrImageUrl: { type: String, default: null },
+        transactionCount: { type: Number, default: 0 },
+        totalAmount: { type: Number, default: 0 },
+        sourceType: { type: String, enum: ["ADVANCE", "CREDIT", "MIXED"], default: "MIXED" },
       }
     ],
 

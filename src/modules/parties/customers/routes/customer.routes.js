@@ -18,6 +18,13 @@ import {
   previewImport,
   confirmImport,
   importChunk,
+  receiveAdvance,
+  getAdvanceBalance,
+  settleCredit,
+  getCreditOutstanding,
+  getCustomerTransactions,
+  getCustomerStatement,
+  getAllPendingCredits,
 } from "../controllers/customer.controller.js";
 
 import {
@@ -25,6 +32,10 @@ import {
   updateCustomerSchema,
   customerIdParamSchema,
   getCustomersQuerySchema,
+  receiveAdvanceSchema,
+  settleCreditSchema,
+  getTransactionsQuerySchema,
+  getStatementQuerySchema,
 } from "../validations/customer.validation.js";
 
 const router = Router();
@@ -47,6 +58,8 @@ router.post("/import/chunk", importChunk);
 router.post("/", validate(createCustomerSchema), createCustomer);
 
 router.get("/", validate(getCustomersQuerySchema, "query"), getCustomers);
+
+router.get("/credits/pending", getAllPendingCredits);
 
 router.get(
   "/:customerId",
@@ -80,7 +93,6 @@ router.get(
   getCustomerOutstanding,
 );
 
-
 router.get(
   "/:customerId/payments",
   validate(customerIdParamSchema, "params"),
@@ -92,5 +104,47 @@ router.get(
   validate(customerIdParamSchema, "params"),
   getCustomerSales,
 );
+
+// Advance & Credit APIs
+router.post(
+  "/:customerId/advance/receive",
+  validate(customerIdParamSchema, "params"),
+  validate(receiveAdvanceSchema),
+  receiveAdvance,
+);
+
+router.get(
+  "/:customerId/advance/balance",
+  validate(customerIdParamSchema, "params"),
+  getAdvanceBalance,
+);
+
+router.post(
+  "/:customerId/credit/settle",
+  validate(customerIdParamSchema, "params"),
+  validate(settleCreditSchema),
+  settleCredit,
+);
+
+router.get(
+  "/:customerId/credit/outstanding",
+  validate(customerIdParamSchema, "params"),
+  getCreditOutstanding,
+);
+
+router.get(
+  "/:customerId/transactions",
+  validate(customerIdParamSchema, "params"),
+  validate(getTransactionsQuerySchema, "query"),
+  getCustomerTransactions,
+);
+
+router.get(
+  "/:customerId/statement",
+  validate(customerIdParamSchema, "params"),
+  validate(getStatementQuerySchema, "query"),
+  getCustomerStatement,
+);
+
 
 export default router;

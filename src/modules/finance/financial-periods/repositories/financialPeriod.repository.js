@@ -64,13 +64,53 @@ const findPeriodByDate = async (
 
   const queryDate = new Date(date);
 
-  return FinancialPeriod.findOne({
+  let period = await FinancialPeriod.findOne({
     companyId,
     workspaceId,
     periodType,
     startDate: { $lte: queryDate },
     endDate: { $gte: queryDate },
   }).session(options.session || null);
+
+  if (!period && periodType === "YEAR") {
+    // Auto-provision standard Indian financial year (April 1 to March 31) if none exists
+    const month = queryDate.getMonth();
+    const year = queryDate.getFullYear();
+    const startYear = month >= 3 ? year : year - 1;
+    const endYear = startYear + 1;
+    const startDate = new Date(Date.UTC(startYear, 3, 1, 0, 0, 0, 0));
+    const endDate = new Date(Date.UTC(endYear, 2, 31, 23, 59, 59, 999));
+    const periodCode = `FY-${startYear}-${String(endYear).slice(-2)}`;
+
+    try {
+      const [newPeriod] = await FinancialPeriod.create(
+        [
+          {
+            workspaceId,
+            companyId,
+            periodCode,
+            periodType: "YEAR",
+            startDate,
+            endDate,
+            status: "OPEN",
+            isCurrent: true,
+          },
+        ],
+        { session: options.session || null }
+      );
+      period = newPeriod;
+    } catch {
+      period = await FinancialPeriod.findOne({
+        companyId,
+        workspaceId,
+        periodType,
+        startDate: { $lte: queryDate },
+        endDate: { $gte: queryDate },
+      }).session(options.session || null);
+    }
+  }
+
+  return period;
 };
 
 const getPeriods = async (

@@ -181,6 +181,20 @@ const customerSchema = new mongoose.Schema(
       default: CUSTOMER_OPENING_BALANCE_TYPE.DR,
     },
 
+    advanceBalance: {
+      type: Number,
+      min: [0, "Advance balance cannot be negative"],
+      default: 0,
+      index: true,
+    },
+
+    creditOutstanding: {
+      type: Number,
+      min: [0, "Credit outstanding cannot be negative"],
+      default: 0,
+      index: true,
+    },
+
     ledgerAccountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
