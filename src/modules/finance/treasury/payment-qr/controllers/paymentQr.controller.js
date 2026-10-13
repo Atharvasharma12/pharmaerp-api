@@ -4,11 +4,18 @@ import paymentQrService from "../services/paymentQr.service.js";
 import paymentQrStatsService from "../services/paymentQrStats.service.js";
 
 export const createPaymentQr = asyncHandler(async (req, res) => {
+  const branchId =
+    req.body.branchId ||
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    req.query.branchId ||
+    null;
+
   const paymentQr = await paymentQrService.createPaymentQr(
     req.workspaceId,
     req.companyId,
     req.user._id,
-    req.body,
+    { ...req.body, branchId },
   );
   return res
     .status(201)
@@ -16,10 +23,21 @@ export const createPaymentQr = asyncHandler(async (req, res) => {
 });
 
 export const getPaymentQrs = asyncHandler(async (req, res) => {
+  const branchId =
+    req.query.branchId ||
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    null;
+
+  const query = { ...req.query };
+  if (!query.branchId && branchId && branchId !== "all") {
+    query.branchId = branchId;
+  }
+
   const result = await paymentQrService.getPaymentQrs(
     req.workspaceId,
     req.companyId,
-    req.query,
+    query,
   );
   return res
     .status(200)

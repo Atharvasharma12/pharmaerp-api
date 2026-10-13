@@ -10,7 +10,7 @@ import customerRepository from "../repositories/customer.repository.js";
 import branchRepository from "../../../organization/branches/repositories/branch.repository.js";
 import gstLedgerRepository from "../../../finance/gst-ledger/repositories/gstLedger.repository.js";
 import financialPeriodRepository from "../../../finance/financial-periods/repositories/financialPeriod.repository.js";
-import { CUSTOMER_STATUS } from "../constants/customer.constant.js";
+import { CUSTOMER_STATUS, CUSTOMER_TRANSACTION_TYPE } from "../constants/customer.constant.js";
 import Customer from "../models/customer.model.js";
 import Batch from "../../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../../catalog/products/models/productFacility.model.js";
@@ -19,6 +19,7 @@ import accountGroupRepository from "../../../finance/chart-of-accounts/repositor
 import openingBalanceService from "../../../finance/opening-balances/services/openingBalance.service.js";
 import ledgerService from "../../../finance/ledger/services/ledger.service.js";
 import customerAdvanceService from "./customerAdvance.service.js";
+import CustomerAdvanceTransaction from "../models/customerAdvanceTransaction.model.js";
 import CustomerCreditTransaction from "../models/customerCreditTransaction.model.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
@@ -183,22 +184,174 @@ const getCustomers = async (workspaceId, companyId, query = {}) => {
     { page, limit, sort },
   );
 
+  const mappedCustomers = result.customers.map((c) => {
+    const obj = c.toSafeObject ? c.toSafeObject() : { ...c };
+    if (obj.outstandingAmount === undefined) {
+      obj.outstandingAmount = obj.openingBalance || 0;
+      obj.balanceType = obj.openingBalanceType || "dr";
+    }
+    obj.creditLimit = Number(obj.creditLimit || 0);
+    obj.advanceBalance = Number(obj.advanceBalance || 0);
+    obj.creditOutstanding = Number(obj.creditOutstanding || 0);
+    return obj;
+  });
+
+  const customerIds = mappedCustomers.map((c) => c._id).filter(Boolean);
+
+  if (customerIds.length > 0) {
+    try {
+      const [advanceAgg, creditAgg] = await Promise.all([
+        CustomerAdvanceTransaction.aggregate([
+          {
+            $match: {
+              customerId: { $in: customerIds },
+              companyId: new mongoose.Types.ObjectId(companyId),
+              workspaceId: new mongoose.Types.ObjectId(workspaceId),
+              status: "ACTIVE",
+            },
+          },
+          {
+            $group: {
+              _id: "$customerId",
+              received: {
+                $sum: {
+                  $cond: [{ $eq: ["$type", CUSTOMER_TRANSACTION_TYPE.ADVANCE_RECEIVED] }, "$amount", 0],
+                },
+              },
+              settled: {
+                $sum: {
+                  $cond: [
+                    {
+                      $in: [
+                        "$type",
+                        [CUSTOMER_TRANSACTION_TYPE.ADVANCE_SETTLED, CUSTOMER_TRANSACTION_TYPE.CREDIT_SETTLED],
+                      ],
+                    },
+                    "$amount",
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ]),
+        CustomerCreditTransaction.aggregate([
+          {
+            $match: {
+              customerId: { $in: customerIds },
+              companyId: new mongoose.Types.ObjectId(companyId),
+              workspaceId: new mongoose.Types.ObjectId(workspaceId),
+              status: { $in: ["PENDING", "PARTIAL"] },
+            },
+          },
+          {
+            $group: {
+              _id: "$customerId",
+              totalDue: { $sum: "$balanceDue" },
+            },
+          },
+        ]),
+      ]);
+
+      const advMap = new Map();
+      advanceAgg.forEach((a) => {
+        const bal = Math.max(0, Math.round(((a.received || 0) - (a.settled || 0)) * 100) / 100);
+        advMap.set(String(a._id), bal);
+      });
+
+      const creditMap = new Map();
+      creditAgg.forEach((c) => {
+        const due = Math.max(0, Math.round((c.totalDue || 0) * 100) / 100);
+        creditMap.set(String(c._id), due);
+      });
+
+      mappedCustomers.forEach((c) => {
+        const cId = String(c._id);
+        c.advanceBalance = advMap.get(cId) ?? 0;
+        c.creditOutstanding = creditMap.get(cId) ?? 0;
+        c.availableCredit = Math.max(0, (c.creditLimit || 0) - c.creditOutstanding);
+      });
+    } catch (err) {
+      console.warn("Failed to enrich real-time customer balances:", err.message);
+    }
+  }
+
+  // Enrich global stats with real-time global advance and credit totals
+  const stats = { ...(result.stats || {}) };
+  try {
+    const [globalAdvAgg, globalCreditAgg] = await Promise.all([
+      CustomerAdvanceTransaction.aggregate([
+        {
+          $match: {
+            companyId: new mongoose.Types.ObjectId(companyId),
+            workspaceId: new mongoose.Types.ObjectId(workspaceId),
+            status: "ACTIVE",
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            received: {
+              $sum: {
+                $cond: [{ $eq: ["$type", CUSTOMER_TRANSACTION_TYPE.ADVANCE_RECEIVED] }, "$amount", 0],
+              },
+            },
+            settled: {
+              $sum: {
+                $cond: [
+                  {
+                    $in: [
+                      "$type",
+                      [CUSTOMER_TRANSACTION_TYPE.ADVANCE_SETTLED, CUSTOMER_TRANSACTION_TYPE.CREDIT_SETTLED],
+                    ],
+                  },
+                  "$amount",
+                  0,
+                ],
+              },
+            },
+          },
+        },
+      ]),
+      CustomerCreditTransaction.aggregate([
+        {
+          $match: {
+            companyId: new mongoose.Types.ObjectId(companyId),
+            workspaceId: new mongoose.Types.ObjectId(workspaceId),
+            status: { $in: ["PENDING", "PARTIAL"] },
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            totalDue: { $sum: "$balanceDue" },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const realAdvance = Math.max(
+      0,
+      Math.round(((globalAdvAgg[0]?.received || 0) - (globalAdvAgg[0]?.settled || 0)) * 100) / 100
+    );
+    const realCreditDue = Math.max(0, Math.round((globalCreditAgg[0]?.totalDue || 0) * 100) / 100);
+    stats.totalAdvance = realAdvance;
+    stats.totalCr = realAdvance;
+    stats.totalDr = realCreditDue;
+    stats.drCount = globalCreditAgg[0]?.count || 0;
+    stats.netRunning = Math.abs(realCreditDue - realAdvance);
+    stats.runningType = realCreditDue >= realAdvance ? "Dr" : "Cr";
+  } catch (err) {
+    console.warn("Failed to compute real-time global customer stats:", err.message);
+  }
+
   return {
-    customers: result.customers.map((c) => {
-      // c might be a plain object now if enriched by repository
-      const obj = c.toSafeObject ? c.toSafeObject() : { ...c };
-      if (obj.outstandingAmount === undefined) {
-        obj.outstandingAmount = obj.openingBalance || 0;
-        obj.balanceType = obj.openingBalanceType || "dr";
-      }
-      obj.advanceBalance = Number(obj.advanceBalance || 0);
-      obj.creditOutstanding = Number(obj.creditOutstanding || 0);
-      return obj;
-    }),
+    customers: mappedCustomers,
     total: result.total,
     page: result.page,
     limit: result.limit,
-    stats: result.stats,
+    stats,
   };
 };
 

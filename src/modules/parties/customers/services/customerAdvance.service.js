@@ -472,7 +472,17 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
     } else if (isUpi) {
       // Find Bank Account
       let bankAccount = null;
-      const targetQrId = paymentQrId || paymentDetails.paymentQrId;
+      let targetQrId = paymentQrId || paymentDetails.paymentQrId;
+      if (!targetQrId && effectiveBranchId) {
+        const branchPrimaryQr = await PaymentQr.findOne({
+          companyId,
+          branchId: effectiveBranchId,
+          isDeleted: false,
+          status: "ACTIVE",
+          isPrimary: true,
+        }).session(session);
+        if (branchPrimaryQr) targetQrId = branchPrimaryQr._id;
+      }
       if (targetQrId) {
         const paymentQr = await PaymentQr.findById(targetQrId).session(session);
         if (paymentQr?.bankAccountId) {
@@ -962,7 +972,17 @@ export const settleCustomerCredit = async (workspaceId, companyId, userId, paylo
       advanceTx = cashAdvTxDoc;
     } else if (paymentMethod === "UPI") {
       let bankAccount = null;
-      const targetQrId = paymentQrId || paymentDetails.paymentQrId;
+      let targetQrId = paymentQrId || paymentDetails.paymentQrId;
+      if (!targetQrId && effectiveBranchId) {
+        const branchPrimaryQr = await PaymentQr.findOne({
+          companyId,
+          branchId: effectiveBranchId,
+          isDeleted: false,
+          status: "ACTIVE",
+          isPrimary: true,
+        }).session(session);
+        if (branchPrimaryQr) targetQrId = branchPrimaryQr._id;
+      }
       if (targetQrId) {
         const paymentQr = await PaymentQr.findById(targetQrId).session(session);
         if (paymentQr?.bankAccountId) {

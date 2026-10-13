@@ -49,7 +49,7 @@ const getInvoiceById = async (invoiceId, companyId, workspaceId, session = null)
 
   const queryBuilder = SalesInvoice.findOne(query)
     .populate("customerId", "name mobile alternateMobile phone contactNumber contact")
-    .populate("shiftId", "status shiftNumber openedAt closedAt branchId")
+    .populate("shiftId", "status shiftNo shiftName shiftNumber openPeriod openedAt closedAt branchId")
     .populate({
       path: "paymentQrId",
       select: "upiId label provider bankAccountId",
@@ -190,6 +190,65 @@ const getAllInvoices = async (companyId, workspaceId, filters = {}, pagination =
 
   const andConditions = [];
 
+  // Inclusive Invoice Number Range filter (supports numeric 35-55, 1-20, as well as full string serials)
+  if (filters.fromInvoice || filters.toInvoice) {
+    const fromStr = String(filters.fromInvoice || "").trim();
+    const toStr = String(filters.toInvoice || "").trim();
+
+    const parseInvoiceNoInput = (str) => {
+      if (!str) return { seq: null, prefix: null };
+      const parts = str.split("-");
+      if (parts.length > 1) {
+        const lastPart = parts[parts.length - 1].trim();
+        const num = parseInt(lastPart, 10);
+        const prefix = parts.slice(0, -1).join("-") + "-";
+        return { seq: !isNaN(num) ? num : null, prefix };
+      }
+      const num = parseInt(str, 10);
+      return { seq: !isNaN(num) ? num : null, prefix: null };
+    };
+
+    const fromInfo = parseInvoiceNoInput(fromStr);
+    const toInfo = parseInvoiceNoInput(toStr);
+    const resolvedPrefix = fromInfo.prefix || toInfo.prefix || null;
+
+    if (fromInfo.seq !== null || toInfo.seq !== null) {
+      const rangeConditions = [];
+      if (resolvedPrefix) {
+        rangeConditions.push({ invoiceNo: { $regex: `^${resolvedPrefix}`, $options: "i" } });
+      }
+
+      // Extract trailing segment after last hyphen and convert to integer safely
+      const seqExpr = {
+        $convert: {
+          input: { $arrayElemAt: [{ $split: ["$invoiceNo", "-"] }, -1] },
+          to: "int",
+          onError: 0,
+          onNull: 0,
+        },
+      };
+
+      if (fromInfo.seq !== null) {
+        rangeConditions.push({ $expr: { $gte: [seqExpr, fromInfo.seq] } });
+      }
+      if (toInfo.seq !== null) {
+        rangeConditions.push({ $expr: { $lte: [seqExpr, toInfo.seq] } });
+      }
+
+      if (rangeConditions.length === 1) {
+        andConditions.push(rangeConditions[0]);
+      } else if (rangeConditions.length > 1) {
+        andConditions.push({ $and: rangeConditions });
+      }
+    } else {
+      // Direct string comparison fallback
+      const strRange = {};
+      if (fromStr) strRange.$gte = fromStr;
+      if (toStr) strRange.$lte = toStr;
+      andConditions.push({ invoiceNo: strRange });
+    }
+  }
+
   // Payment filtering: include Split invoices that contain Cash or UPI allocations
   if (filters.paymentMethod && filters.paymentMethod !== "all") {
     const pm = String(filters.paymentMethod).trim();
@@ -248,11 +307,46 @@ const getAllInvoices = async (companyId, workspaceId, filters = {}, pagination =
           { "payments.1": { $exists: true } },
         ],
       });
+    } else if (pm.toLowerCase() === "credit") {
+      andConditions.push({
+        $or: [
+          { paymentMethod: { $regex: /^credit$/i } },
+          { "payments.paymentType": { $regex: /credit/i } },
+          { "payments.paymentMode": { $regex: /credit/i } },
+          { "payments.type": { $regex: /credit/i } },
+          { creditStatus: { $in: ["PENDING", "PARTIAL", "SETTLED"] } },
+          { creditTransactionId: { $ne: null } },
+        ],
+      });
+    } else if (pm.toLowerCase() === "advance") {
+      andConditions.push({
+        $or: [
+          { paymentMethod: { $regex: /^advance$/i } },
+          { "payments.paymentType": { $regex: /advance/i } },
+          { "payments.paymentMode": { $regex: /advance/i } },
+          { "payments.type": { $regex: /advance/i } },
+        ],
+      });
     } else {
       andConditions.push({
         paymentMethod: { $regex: new RegExp(`^${pm}$`, "i") },
       });
     }
+  }
+
+  // Filter by specific UPI QR code (matches root paymentQrId or inside payments[])
+  if (filters.paymentQrId && filters.paymentQrId !== "all") {
+    const qrIdStr = String(filters.paymentQrId).trim();
+    const qrConditions = [
+      { paymentQrId: qrIdStr },
+      { "payments.paymentQrId": qrIdStr },
+    ];
+    if (mongoose.Types.ObjectId.isValid(qrIdStr)) {
+      const qrObjId = new mongoose.Types.ObjectId(qrIdStr);
+      qrConditions.push({ paymentQrId: qrObjId });
+      qrConditions.push({ "payments.paymentQrId": qrObjId });
+    }
+    andConditions.push({ $or: qrConditions });
   }
 
   if (filters.searchQuery) {
@@ -303,7 +397,7 @@ const getAllInvoices = async (companyId, workspaceId, filters = {}, pagination =
   const [invoices, total, summaryRows] = await Promise.all([
     SalesInvoice.find(query)
       .populate("customerId", "name mobile alternateMobile phone contactNumber contact")
-      .populate("shiftId", "status shiftNumber openedAt closedAt branchId")
+      .populate("shiftId", "status shiftNo shiftName shiftNumber openPeriod openedAt closedAt branchId")
       .populate({
         path: "paymentQrId",
         select: "upiId label provider bankAccountId",

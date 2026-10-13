@@ -38,35 +38,72 @@ import { CUSTOMER_TRANSACTION_TYPE, CREDIT_STATUS } from "../../../parties/custo
  * and that received - returned exactly equals the cash amount.
  */
 
-const revertCashTransactionsForInvoice = async (invoiceNo, companyId, userId, session) => {
-  const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
-  for (const ct of cashTxns) {
-    if (ct.cashDenominationId) {
-      const denomRecord = await mongoose.model("CashDenomination").findOne({ _id: ct.cashDenominationId }).session(session);
-      if (denomRecord) {
-        const processedDenominations = denomRecord.denominations || [];
-        const partition = ct.cashPartition || "running";
-        const branchId = ct.branchId;
-        const ctDirection = ct.direction;
-        
-        if (ctDirection === "CREDIT") {
-          if (partition === "running") {
-            await branchCashRepository.subtractRunningDenominations(branchId, companyId, processedDenominations, userId, { session });
-          } else {
-            await branchCashRepository.subtractFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
-          }
-        } else {
-          if (partition === "running") {
-            await branchCashRepository.addRunningDenominations(branchId, companyId, processedDenominations, userId, { session });
-          } else {
-            await branchCashRepository.addFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
-          }
-        }
-        await mongoose.model("CashDenomination").deleteOne({ _id: denomRecord._id }, { session });
+const revertCashTransactionsForInvoice = async (
+  invoiceNo,
+  companyId,
+  userId,
+  session,
+  refundDenominations = null,
+  branchId = null
+) => {
+  const processedRefundDenoms = (Array.isArray(refundDenominations) ? refundDenominations : [])
+    .map((d) => ({
+      denomination: Number(d.denomination || d.val || d.note || 0),
+      quantity: Number(d.quantity || d.count || d.qty || 0),
+    }))
+    .filter((d) => d.denomination > 0 && d.quantity > 0);
+
+  if (processedRefundDenoms.length > 0 && (branchId || companyId)) {
+    // Staff provided custom refund denominations to pay customer back from branch running cash drawer
+    const resolvedBranchId = branchId;
+    if (resolvedBranchId) {
+      await branchCashRepository.subtractRunningDenominations(
+        resolvedBranchId,
+        companyId,
+        processedRefundDenoms,
+        userId,
+        { session }
+      );
+    }
+    // Delete linked CashDenomination records and CashTransactions
+    const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
+    for (const ct of cashTxns) {
+      if (ct.cashDenominationId) {
+        await mongoose.model("CashDenomination").deleteOne({ _id: ct.cashDenominationId }, { session });
       }
     }
+    await CashTransaction.deleteMany({ referenceNumber: invoiceNo }, { session });
+  } else {
+    // Default fallback: exactly reverse original note counts
+    const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
+    for (const ct of cashTxns) {
+      if (ct.cashDenominationId) {
+        const denomRecord = await mongoose.model("CashDenomination").findOne({ _id: ct.cashDenominationId }).session(session);
+        if (denomRecord) {
+          const processedDenominations = denomRecord.denominations || [];
+          const partition = ct.cashPartition || "running";
+          const resolvedBranchId = ct.branchId || branchId;
+          const ctDirection = ct.direction;
+          
+          if (ctDirection === "CREDIT") {
+            if (partition === "running") {
+              await branchCashRepository.subtractRunningDenominations(resolvedBranchId, companyId, processedDenominations, userId, { session });
+            } else {
+              await branchCashRepository.subtractFrozenDenominations(resolvedBranchId, companyId, processedDenominations, userId, { session });
+            }
+          } else {
+            if (partition === "running") {
+              await branchCashRepository.addRunningDenominations(resolvedBranchId, companyId, processedDenominations, userId, { session });
+            } else {
+              await branchCashRepository.addFrozenDenominations(resolvedBranchId, companyId, processedDenominations, userId, { session });
+            }
+          }
+          await mongoose.model("CashDenomination").deleteOne({ _id: denomRecord._id }, { session });
+        }
+      }
+    }
+    await CashTransaction.deleteMany({ referenceNumber: invoiceNo }, { session });
   }
-  await CashTransaction.deleteMany({ referenceNumber: invoiceNo }, { session });
 };
 
 const validateCashDenominations = (saleData) => {
@@ -263,12 +300,20 @@ const deductInvoiceInventory = async (items, branchId, session) => {
 /**
  * Helper to delete all financial & treasury entries associated with an invoice (GSTR-1, Cash, Bank, JVs)
  */
-const cleanInvoiceAccountingEntries = async (invoiceId, invoiceNo, companyId, userId, session) => {
+const cleanInvoiceAccountingEntries = async (
+  invoiceId,
+  invoiceNo,
+  companyId,
+  userId,
+  session,
+  refundDenominations = null,
+  branchId = null
+) => {
   // 1. Delete GSTR-1 entry
   await GstLedger.deleteMany({ voucherId: invoiceId }, { session });
 
-  // 2. Delete Cash Transactions & Revert Denominations
-  await revertCashTransactionsForInvoice(invoiceNo, companyId, userId, session);
+  // 2. Delete Cash Transactions & Revert Denominations (deducting custom refund denominations if specified)
+  await revertCashTransactionsForInvoice(invoiceNo, companyId, userId, session, refundDenominations, branchId);
 
   // 3. Delete Bank Transactions & Linked Journal Vouchers
   const bankTxQuery = {
@@ -1064,9 +1109,33 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
       );
     }
 
-    const creditDays = Number(customer.creditDays) || 30;
-    creditDueDate = new Date(saleData.date || Date.now());
-    creditDueDate.setDate(creditDueDate.getDate() + creditDays);
+    // Prioritize explicit creditDueDate provided by checkout modal
+    let resolvedDueDate = null;
+    if (saleData.creditDueDate) {
+      const parsed = new Date(saleData.creditDueDate);
+      if (!isNaN(parsed.getTime())) resolvedDueDate = parsed;
+    }
+    if (!resolvedDueDate && Array.isArray(saleData.payments)) {
+      const creditP = saleData.payments.find(
+        (p) => String(p.paymentType || p.mode || "").toLowerCase() === "credit" && (p.creditDueDate || p.dueDate)
+      );
+      if (creditP) {
+        const parsedP = new Date(creditP.creditDueDate || creditP.dueDate);
+        if (!isNaN(parsedP.getTime())) resolvedDueDate = parsedP;
+      }
+    }
+    if (!resolvedDueDate && saleData.dueDate) {
+      const parsedD = new Date(saleData.dueDate);
+      if (!isNaN(parsedD.getTime())) resolvedDueDate = parsedD;
+    }
+
+    if (resolvedDueDate) {
+      creditDueDate = resolvedDueDate;
+    } else {
+      const creditDays = Number(customer.creditDays) > 0 ? Number(customer.creditDays) : 15;
+      creditDueDate = new Date(saleData.date || Date.now());
+      creditDueDate.setDate(creditDueDate.getDate() + creditDays);
+    }
   }
 
   const isAllCredit = creditPortion >= grandTotal - 0.01 && grandTotal > 0;
@@ -1272,11 +1341,44 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
     existingInvoice.payments = Array.isArray(saleData.payments) ? saleData.payments : existingInvoice.payments;
     existingInvoice.denominations = Array.isArray(saleData.denominations) ? saleData.denominations : existingInvoice.denominations;
     existingInvoice.returnedDenominations = Array.isArray(saleData.returnedDenominations) ? saleData.returnedDenominations : existingInvoice.returnedDenominations;
-    const isUnsettledCredit = existingInvoice.creditStatus === "PENDING" || existingInvoice.creditStatus === "PARTIAL" || String(saleData.paymentMethod || existingInvoice.paymentMethod).toLowerCase() === "credit";
-    existingInvoice.status = isUnsettledCredit && existingInvoice.creditStatus !== "SETTLED" ? "Pending" : (saleData.status || existingInvoice.status || "Paid");
+    const isUnsettledCredit =
+      existingInvoice.creditStatus === "PENDING" ||
+      existingInvoice.creditStatus === "PARTIAL" ||
+      String(saleData.paymentMethod || existingInvoice.paymentMethod).toLowerCase() === "credit";
+
+    if (
+      saleData.status &&
+      String(saleData.status).toLowerCase() === "paid" &&
+      isUnsettledCredit &&
+      existingInvoice.creditStatus !== "SETTLED"
+    ) {
+      throw new ApiError(
+        400,
+        "Cannot directly mark a pending credit bill as Paid. Invoices with credit dues must be settled via Customer Credit Settlement."
+      );
+    }
+
+    if (isUnsettledCredit && existingInvoice.creditStatus !== "SETTLED") {
+      existingInvoice.status = "Pending";
+    } else if (existingInvoice.status !== "Cancelled") {
+      existingInvoice.status = saleData.status || existingInvoice.status || "Paid";
+    }
     existingInvoice.items = Array.isArray(saleData.items) ? saleData.items : existingInvoice.items;
     if (saleData.doctor !== undefined) existingInvoice.doctor = saleData.doctor;
     if (saleData.notes !== undefined) existingInvoice.notes = saleData.notes;
+    if (saleData.creditDueDate) {
+      const parsed = new Date(saleData.creditDueDate);
+      if (!isNaN(parsed.getTime())) {
+        existingInvoice.creditDueDate = parsed;
+        if (existingInvoice.creditTransactionId) {
+          await CustomerCreditTransaction.findByIdAndUpdate(
+            existingInvoice.creditTransactionId,
+            { dueDate: parsed },
+            { session }
+          );
+        }
+      }
+    }
     existingInvoice.updatedAt = new Date();
     if (user?._id) {
       existingInvoice.updatedBy = user._id;
@@ -1358,7 +1460,7 @@ const getAllCustomerSales = async (companyId, workspaceId, filters = {}, paginat
 };
 
 
-const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cancelReason = null) => {
+const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cancelReason = null, refundDenominations = null) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -1371,6 +1473,42 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
 
     if (invoice.status === "Cancelled") {
       throw new ApiError(400, "Invoice is already cancelled");
+    }
+
+    // Calculate net cash portion paid on this bill
+    let invoiceCashAmount = 0;
+    const paymentsList = Array.isArray(invoice.payments) ? invoice.payments : [];
+    if (paymentsList.length > 0) {
+      for (const p of paymentsList) {
+        const pType = String(p.paymentType || p.mode || "").toLowerCase();
+        if (pType === "cash") {
+          invoiceCashAmount += Number(p.amount || 0);
+        }
+      }
+    } else if (String(invoice.paymentMethod || "").toLowerCase() === "cash") {
+      invoiceCashAmount = Number(invoice.grandTotal || 0);
+    }
+
+    // Normalize refund denominations
+    const normalizedRefundDenoms = (Array.isArray(refundDenominations) ? refundDenominations : [])
+      .map((d) => ({
+        denomination: Number(d.denomination || d.val || d.note || 0),
+        quantity: Number(d.quantity || d.count || d.qty || 0),
+      }))
+      .filter((d) => d.denomination > 0 && d.quantity > 0);
+
+    // If refund denominations provided for cash bill, validate equality
+    if (invoiceCashAmount > 0 && normalizedRefundDenoms.length > 0) {
+      const refundTotal = normalizedRefundDenoms.reduce(
+        (sum, d) => sum + d.denomination * d.quantity,
+        0
+      );
+      if (Math.abs(refundTotal - invoiceCashAmount) > 0.01) {
+        throw new ApiError(
+          400,
+          `Refund denominations total (₹${refundTotal.toFixed(2)}) must equal invoice cash amount (₹${invoiceCashAmount.toFixed(2)})`
+        );
+      }
     }
 
     // Guardrail: Block cancellation of settled or partially settled credit invoices
@@ -1434,13 +1572,24 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
     await revertInvoiceInventory(invoice.items, invoice.branchId, session);
 
     // 2. Clean up accounting entries (GSTR-1, Cash Transactions, Bank Transactions, JVs)
-    await cleanInvoiceAccountingEntries(invoice._id, invoice.invoiceNo, companyId, user?._id || user?.id, session);
+    await cleanInvoiceAccountingEntries(
+      invoice._id,
+      invoice.invoiceNo,
+      companyId,
+      user?._id || user?.id,
+      session,
+      normalizedRefundDenoms.length > 0 ? normalizedRefundDenoms : null,
+      invoice.branchId
+    );
 
     // 6. Update invoice status & cancellation audit fields
     invoice.status = "Cancelled";
     invoice.cancelledAt = new Date();
     invoice.cancelledBy = user?._id || user?.id || null;
     if (cancelReason) invoice.cancelReason = cancelReason;
+    if (normalizedRefundDenoms.length > 0) {
+      invoice.refundDenominations = normalizedRefundDenoms;
+    }
     await invoice.save({ session });
 
     await session.commitTransaction();

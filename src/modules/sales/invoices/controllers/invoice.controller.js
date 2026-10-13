@@ -62,10 +62,13 @@ export const getAllCustomerSales = asyncHandler(async (req, res) => {
     searchQuery: req.query.search,
     status: req.query.status,
     paymentMethod: req.query.paymentMethod,
+    paymentQrId: req.query.paymentQrId,
     startDate: req.query.startDate,
     endDate: req.query.endDate,
     sortBy: req.query.sortBy,
     sortOrder: req.query.sortOrder,
+    fromInvoice: req.query.fromInvoice,
+    toInvoice: req.query.toInvoice,
   };
 
   const result = await invoiceService.getAllCustomerSales(
@@ -105,12 +108,14 @@ export const updateCustomerSale = asyncHandler(async (req, res) => {
 
 export const cancelCustomerSale = asyncHandler(async (req, res) => {
   const cancelReason = req.body?.reason || req.body?.cancelReason || null;
+  const refundDenominations = req.body?.refundDenominations || null;
   const result = await invoiceService.cancelCustomerSale(
     req.params.invoiceId,
     req.companyId,
     req.workspaceId,
     req.user,
-    cancelReason
+    cancelReason,
+    refundDenominations
   );
 
   return res
