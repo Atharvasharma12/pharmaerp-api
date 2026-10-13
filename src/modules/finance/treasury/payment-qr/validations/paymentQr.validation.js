@@ -21,6 +21,7 @@ const VALID_PROVIDERS = [
 const upiIdPattern = /^[a-zA-Z0-9._-]+@[a-zA-Z]{2,}$/;
 
 export const createPaymentQrSchema = Joi.object({
+  branchId: objectId.optional(),
   bankAccountId: objectId.required().messages({
     "any.required": "Bank Account ID is required",
   }),
@@ -62,6 +63,7 @@ export const paymentQrIdParamSchema = Joi.object({
 });
 
 export const getPaymentQrsQuerySchema = Joi.object({
+  branchId: objectId.optional(),
   bankAccountId: objectId.optional(),
   provider: Joi.string().valid(...VALID_PROVIDERS).optional(),
   status: Joi.string().valid("ACTIVE", "INACTIVE").optional(),

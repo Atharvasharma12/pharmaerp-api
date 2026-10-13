@@ -7,6 +7,10 @@ const POPULATE_FIELDS = [
     select: "accountName accountNumber ifscCode bankMasterId",
     populate: { path: "bankMasterId", select: "name shortName" },
   },
+  {
+    path: "branchId",
+    select: "name branchCode address",
+  },
   { path: "createdBy", select: "name email" },
 ];
 
@@ -42,11 +46,15 @@ const findPaymentQrByIdCompanyAndWorkspace = async (
 
 const findPaymentQrByUpiId = async (companyId, upiId, options = {}) => {
   if (!mongoose.Types.ObjectId.isValid(companyId)) return null;
-  return PaymentQr.findOne({
+  const query = {
     companyId,
     upiId: String(upiId).trim().toLowerCase(),
     isDeleted: false,
-  }).session(options.session || null);
+  };
+  if (options.branchId && mongoose.Types.ObjectId.isValid(options.branchId)) {
+    query.branchId = options.branchId;
+  }
+  return PaymentQr.findOne(query).session(options.session || null);
 };
 
 const createPaymentQr = async (payload, options = {}) => {
@@ -68,6 +76,9 @@ const getPaymentQrs = async (
     isDeleted: false,
   };
 
+  if (filters.branchId && mongoose.Types.ObjectId.isValid(filters.branchId)) {
+    query.branchId = filters.branchId;
+  }
   if (filters.bankAccountId) query.bankAccountId = filters.bankAccountId;
   if (filters.provider) query.provider = filters.provider;
   if (filters.status) query.status = filters.status;
@@ -108,10 +119,21 @@ const getPaymentQrs = async (
   return { paymentQrs, total, page, limit };
 };
 
-// Unset isPrimary for all QRs in the company, then set for the specified one
-const setPrimaryPaymentQr = async (id, companyId, workspaceId, options = {}) => {
+// Unset isPrimary for all QRs in the branch (or company if no branchId), then set for the specified one
+const setPrimaryPaymentQr = async (
+  id,
+  companyId,
+  workspaceId,
+  branchId = null,
+  options = {},
+) => {
+  const filter = { companyId, workspaceId, isDeleted: false };
+  if (branchId && mongoose.Types.ObjectId.isValid(branchId)) {
+    filter.branchId = branchId;
+  }
+
   await PaymentQr.updateMany(
-    { companyId, workspaceId, isDeleted: false },
+    filter,
     { $set: { isPrimary: false } },
     { session: options.session || null },
   );

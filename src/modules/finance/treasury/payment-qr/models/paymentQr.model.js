@@ -20,6 +20,14 @@ const paymentQrSchema = new mongoose.Schema(
       index: true,
     },
 
+    // Branch scope: physical UPI QR standee/soundbox is deployed inside a specific branch
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      required: [true, "Branch is required"],
+      index: true,
+    },
+
     // Linked bank account (UPI VPA is registered against a bank account)
     bankAccountId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -108,9 +116,9 @@ paymentQrSchema.methods.toSafeObject = function () {
   return obj;
 };
 
-// Unique index: upiId must be unique per company (excluding deleted)
+// Unique index: upiId must be unique per branch within company (excluding deleted)
 paymentQrSchema.index(
-  { companyId: 1, upiId: 1 },
+  { companyId: 1, branchId: 1, upiId: 1 },
   {
     unique: true,
     partialFilterExpression: { isDeleted: false },
@@ -120,6 +128,14 @@ paymentQrSchema.index(
 paymentQrSchema.index({
   workspaceId: 1,
   companyId: 1,
+  branchId: 1,
+  status: 1,
+  isDeleted: 1,
+});
+
+paymentQrSchema.index({
+  branchId: 1,
+  isPrimary: 1,
   status: 1,
   isDeleted: 1,
 });

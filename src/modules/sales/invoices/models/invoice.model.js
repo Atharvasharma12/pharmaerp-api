@@ -98,6 +98,10 @@ const invoiceSchema = new mongoose.Schema(
       type: Array,
       default: [],
     },
+    refundDenominations: {
+      type: Array,
+      default: [],
+    },
     status: {
       type: String,
       default: "Paid",
