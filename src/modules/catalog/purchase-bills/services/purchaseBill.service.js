@@ -504,6 +504,7 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId, user
       voucherNumber: bill.purchaseBillNo,
       voucherDate: bill.invoiceDate ? new Date(bill.invoiceDate) : new Date(),
       gstType: "GSTR-2",
+      groupDescription: "B2B Supplies",
       taxableAmount: bill.taxableSubtotal || bill.taxableAfterExtraDisc || 0,
       cgst: isIgst ? 0 : halfGst,
       sgst: isIgst ? 0 : halfGst,

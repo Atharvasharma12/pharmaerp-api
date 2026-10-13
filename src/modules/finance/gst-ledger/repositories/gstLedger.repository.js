@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import GstLedger from "../models/gstLedger.model.js";
+import calculateGstr1Summary, { deduceGstrGroup } from "../utils/gstr1SummaryCalculator.js";
 
 const createGstLedgerEntry = async (payload, options = {}) => {
   const [entry] = await GstLedger.create([payload], {
@@ -190,11 +191,127 @@ const getGstLedgerEntries = async (
     count: total,
   };
 
+  // Ensure entries have groupDescription populated and backfilled
+  entries.forEach((entry) => {
+    if (!entry.groupDescription) {
+      entry.groupDescription = deduceGstrGroup(entry);
+      GstLedger.updateOne(
+        { _id: entry._id, $or: [{ groupDescription: null }, { groupDescription: { $exists: false } }, { groupDescription: "" }] },
+        { $set: { groupDescription: entry.groupDescription } }
+      ).exec().catch(() => {});
+    }
+  });
+
+  // Opportunistic background backfill for any unassigned legacy records
+  if (query.workspaceId && query.companyId) {
+    GstLedger.find({
+      workspaceId: query.workspaceId,
+      companyId: query.companyId,
+      $or: [{ groupDescription: null }, { groupDescription: { $exists: false } }, { groupDescription: "" }],
+    })
+      .limit(100)
+      .then((docs) => {
+        if (docs && docs.length > 0) {
+          docs.forEach((doc) => {
+            const group = deduceGstrGroup(doc);
+            GstLedger.updateOne({ _id: doc._id }, { $set: { groupDescription: group } }).exec().catch(() => {});
+          });
+        }
+      })
+      .catch(() => {});
+  }
+
   return { entries, total, stats, page, limit };
+};
+
+const getGstr1Summary = async (workspaceId, companyId, filters = {}, options = {}) => {
+  if (
+    !mongoose.Types.ObjectId.isValid(workspaceId) ||
+    !mongoose.Types.ObjectId.isValid(companyId)
+  ) {
+    return { groups: [], totalRow: {}, localSummary: {}, centralSummary: {} };
+  }
+
+  const query = {
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
+    gstType: "GSTR-1",
+  };
+
+  if (filters.startDate || filters.endDate) {
+    query.voucherDate = {};
+    if (filters.startDate) {
+      query.voucherDate.$gte = new Date(filters.startDate);
+    }
+    if (filters.endDate) {
+      query.voucherDate.$lte = new Date(filters.endDate);
+    }
+  }
+
+  if (filters.branchId && filters.branchId !== "all" && mongoose.Types.ObjectId.isValid(filters.branchId)) {
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+    let voucherIdsForBranch = [];
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        const invoices = await db.collection("invoices").find({
+          workspaceId: new mongoose.Types.ObjectId(workspaceId),
+          companyId: new mongoose.Types.ObjectId(companyId),
+          branchId: targetBranchId,
+        }).project({ _id: 1 }).toArray();
+        voucherIdsForBranch = invoices.map((inv) => inv._id);
+      }
+    } catch (e) {
+      console.error("Error looking up vouchers for branch in getGstr1Summary:", e);
+    }
+
+    if (voucherIdsForBranch.length > 0) {
+      query.$or = [
+        { branchId: targetBranchId },
+        { voucherId: { $in: voucherIdsForBranch } },
+      ];
+    } else {
+      query.branchId = targetBranchId;
+    }
+  }
+
+  if (filters.search && typeof filters.search === "string" && filters.search.trim()) {
+    const searchRegex = new RegExp(filters.search.trim(), "i");
+    const searchCondition = [{ voucherNumber: searchRegex }, { narration: searchRegex }];
+    if (query.$or) {
+      query.$and = [
+        { $or: query.$or },
+        { $or: searchCondition },
+      ];
+      delete query.$or;
+    } else {
+      query.$or = searchCondition;
+    }
+  }
+
+  const entries = await GstLedger.find(query)
+    .populate({ path: "partyId", select: "name gstNumber" })
+    .lean();
+
+  entries.forEach((entry) => {
+    if (!entry.groupDescription) {
+      entry.groupDescription = deduceGstrGroup(entry);
+      GstLedger.updateOne(
+        { _id: entry._id, $or: [{ groupDescription: null }, { groupDescription: { $exists: false } }, { groupDescription: "" }] },
+        { $set: { groupDescription: entry.groupDescription } }
+      ).exec().catch(() => {});
+    }
+  });
+
+  return calculateGstr1Summary(entries, {
+    companyGstin: options.companyGstin || "",
+    b2cLargeThreshold: 250000,
+  });
 };
 
 export default {
   createGstLedgerEntry,
   deleteGstLedgerEntriesByVoucherId,
   getGstLedgerEntries,
+  getGstr1Summary,
 };

@@ -20,7 +20,7 @@ const itemSchema = Joi.object({
   cRatePct: Joi.number().min(0).max(100).default(0),
   mrp: Joi.number().min(0.01).required(),
   hsn: Joi.string().trim().max(20).allow("").optional(),
-  gst: Joi.number().min(0).max(100).default(12),
+  gst: Joi.number().min(0).max(100).default(0),
   rate: Joi.number().min(0.01).required(),
   amount: Joi.number().min(0).default(0),
   rateA: Joi.number().min(0).default(0),

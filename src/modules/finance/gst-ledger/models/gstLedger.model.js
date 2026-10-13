@@ -56,6 +56,13 @@ const gstLedgerSchema = new mongoose.Schema(
       index: true,
     },
 
+    groupDescription: {
+      type: String,
+      trim: true,
+      default: null,
+      index: true,
+    },
+
     taxableAmount: {
       type: Number,
       default: 0,
