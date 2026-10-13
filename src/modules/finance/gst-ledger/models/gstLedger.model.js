@@ -16,6 +16,14 @@ const gstLedgerSchema = new mongoose.Schema(
       index: true,
     },
 
+    branchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      required: false,
+      default: null,
+      index: true,
+    },
+
     partyId: {
       type: mongoose.Schema.Types.ObjectId,
       // Ref can be Customer or Supplier based on gstType
@@ -91,6 +99,15 @@ gstLedgerSchema.methods.toSafeObject = function () {
 };
 
 // Compound index for chronological querying of a company's GST ledger
+gstLedgerSchema.index({
+  workspaceId: 1,
+  companyId: 1,
+  branchId: 1,
+  gstType: 1,
+  voucherDate: 1,
+  createdAt: 1,
+});
+
 gstLedgerSchema.index({
   workspaceId: 1,
   companyId: 1,

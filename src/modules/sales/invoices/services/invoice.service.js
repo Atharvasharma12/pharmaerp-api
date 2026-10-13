@@ -401,6 +401,7 @@ const postSaleAccounting = async ({
     await gstLedgerRepository.createGstLedgerEntry({
       workspaceId: invoice.workspaceId,
       companyId: invoice.companyId,
+      branchId: invoice.branchId || null,
       partyId: customer._id,
       voucherId: invoice._id,
       voucherNumber: invoice.invoiceNo,

@@ -16,6 +16,7 @@ const getGstr1Ledger = async (workspaceId, companyId, query = {}) => {
   return {
     entries: result.entries.map((e) => e.toSafeObject()),
     total: result.total,
+    stats: result.stats,
     page: result.page,
     limit: result.limit,
   };
@@ -35,13 +36,14 @@ const getGstr2Ledger = async (workspaceId, companyId, query = {}) => {
   return {
     entries: result.entries.map((e) => e.toSafeObject()),
     total: result.total,
+    stats: result.stats,
     page: result.page,
     limit: result.limit,
   };
 };
 
 const createGstr1Entry = async (workspaceId, companyId, payload) => {
-  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId } = payload;
+  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId, branchId } = payload;
 
   if (!voucherNumber) {
     throw new ApiError(400, "Voucher number is required");
@@ -55,6 +57,7 @@ const createGstr1Entry = async (workspaceId, companyId, payload) => {
   const entry = await gstLedgerRepository.createGstLedgerEntry({
     workspaceId,
     companyId,
+    branchId: branchId && mongoose.Types.ObjectId.isValid(branchId) ? branchId : null,
     gstType: "GSTR-1",
     voucherId: voucherId || new mongoose.Types.ObjectId(),
     voucherNumber,
@@ -72,7 +75,7 @@ const createGstr1Entry = async (workspaceId, companyId, payload) => {
 };
 
 const createGstr2Entry = async (workspaceId, companyId, payload) => {
-  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId } = payload;
+  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId, branchId } = payload;
 
   if (!voucherNumber) {
     throw new ApiError(400, "Voucher number is required");
@@ -86,6 +89,7 @@ const createGstr2Entry = async (workspaceId, companyId, payload) => {
   const entry = await gstLedgerRepository.createGstLedgerEntry({
     workspaceId,
     companyId,
+    branchId: branchId && mongoose.Types.ObjectId.isValid(branchId) ? branchId : null,
     gstType: "GSTR-2",
     voucherId: voucherId || new mongoose.Types.ObjectId(),
     voucherNumber,

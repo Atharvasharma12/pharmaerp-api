@@ -36,8 +36,8 @@ const getGstLedgerEntries = async (
   }
 
   const query = {
-    workspaceId,
-    companyId,
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
     gstType,
   };
 
@@ -51,39 +51,146 @@ const getGstLedgerEntries = async (
     }
   }
 
+  // Filter by specific branch (if "all" or omitted, queries company-wide)
+  if (filters.branchId && filters.branchId !== "all" && mongoose.Types.ObjectId.isValid(filters.branchId)) {
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+
+    // Find any vouchers for this branch to match legacy entries that don't have branchId stored directly yet
+    let voucherIdsForBranch = [];
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        if (gstType === "GSTR-1") {
+          const invoices = await db.collection("invoices").find({
+            workspaceId: new mongoose.Types.ObjectId(workspaceId),
+            companyId: new mongoose.Types.ObjectId(companyId),
+            branchId: targetBranchId,
+          }).project({ _id: 1 }).toArray();
+          voucherIdsForBranch = invoices.map((inv) => inv._id);
+        } else if (gstType === "GSTR-2") {
+          const purchaseBills = await db.collection("purchasebills").find({
+            workspaceId: new mongoose.Types.ObjectId(workspaceId),
+            companyId: new mongoose.Types.ObjectId(companyId),
+            branchId: targetBranchId,
+          }).project({ _id: 1 }).toArray();
+          voucherIdsForBranch = purchaseBills.map((pb) => pb._id);
+        }
+      }
+    } catch (e) {
+      console.error("Error looking up vouchers for branch in gstLedger:", e);
+    }
+
+    if (voucherIdsForBranch.length > 0) {
+      query.$or = [
+        { branchId: targetBranchId },
+        { voucherId: { $in: voucherIdsForBranch } },
+      ];
+    } else {
+      query.branchId = targetBranchId;
+    }
+  }
+
   // Optional: Filter by specific party if needed
   if (filters.partyId && mongoose.Types.ObjectId.isValid(filters.partyId)) {
-    query.partyId = filters.partyId;
+    query.partyId = new mongoose.Types.ObjectId(filters.partyId);
   }
 
   if (filters.search && typeof filters.search === "string" && filters.search.trim()) {
     const searchRegex = new RegExp(filters.search.trim(), "i");
-    query.$or = [{ voucherNumber: searchRegex }, { narration: searchRegex }];
+    const searchCondition = [{ voucherNumber: searchRegex }, { narration: searchRegex }];
+    if (query.$or) {
+      query.$and = [
+        { $or: query.$or },
+        { $or: searchCondition },
+      ];
+      delete query.$or;
+    } else {
+      query.$or = searchCondition;
+    }
   }
 
   const sort = options.sort || { voucherDate: -1, createdAt: -1 };
 
+  const calculateEntriesStats = (entriesList, count) => {
+    return entriesList.reduce(
+      (acc, curr) => {
+        const cgst = Number(curr.cgst || 0);
+        const sgst = Number(curr.sgst || 0);
+        const igst = Number(curr.igst || 0);
+        acc.totalTaxable += Number(curr.taxableAmount || 0);
+        acc.totalCgst += cgst;
+        acc.totalSgst += sgst;
+        acc.totalIgst += igst;
+        acc.totalGst += cgst + sgst + igst;
+        acc.totalAmount += Number(curr.totalAmount || 0);
+        return acc;
+      },
+      {
+        totalTaxable: 0,
+        totalCgst: 0,
+        totalSgst: 0,
+        totalIgst: 0,
+        totalGst: 0,
+        totalAmount: 0,
+        count: count !== undefined ? count : entriesList.length,
+      }
+    );
+  };
+
   if (options.all === true) {
     const entries = await GstLedger.find(query)
+      .populate({ path: "branchId", select: "name code", strictPopulate: false })
       .sort(sort)
       .session(options.session || null);
-    return { entries, total: entries.length };
+    const stats = calculateEntriesStats(entries, entries.length);
+    return { entries, total: entries.length, stats };
   }
 
   const page = Math.max(1, parseInt(options.page) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 20));
+  const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 10));
   const skip = (page - 1) * limit;
 
-  const [entries, total] = await Promise.all([
+  const [entries, total, aggStats] = await Promise.all([
     GstLedger.find(query)
+      .populate({ path: "branchId", select: "name code", strictPopulate: false })
       .sort(sort)
       .skip(skip)
       .limit(limit)
       .session(options.session || null),
     GstLedger.countDocuments(query).session(options.session || null),
+    GstLedger.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: null,
+          totalTaxable: { $sum: "$taxableAmount" },
+          totalCgst: { $sum: "$cgst" },
+          totalSgst: { $sum: "$sgst" },
+          totalIgst: { $sum: "$igst" },
+          totalAmount: { $sum: "$totalAmount" },
+          count: { $sum: 1 },
+        },
+      },
+    ])
+      .session(options.session || null)
+      .catch(() => []),
   ]);
 
-  return { entries, total, page, limit };
+  const rawStat = (aggStats && aggStats[0]) || {};
+  const cgst = Number(rawStat.totalCgst || 0);
+  const sgst = Number(rawStat.totalSgst || 0);
+  const igst = Number(rawStat.totalIgst || 0);
+  const stats = {
+    totalTaxable: Number(rawStat.totalTaxable || 0),
+    totalCgst: cgst,
+    totalSgst: sgst,
+    totalIgst: igst,
+    totalGst: cgst + sgst + igst,
+    totalAmount: Number(rawStat.totalAmount || 0),
+    count: total,
+  };
+
+  return { entries, total, stats, page, limit };
 };
 
 export default {

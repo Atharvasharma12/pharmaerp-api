@@ -168,33 +168,6 @@ const createPurchaseBill = async (workspaceId, companyId, userId, payload) => {
     createdBy: userId,
   });
 
-  try {
-    const halfGst = (totalGst || 0) / 2;
-    const company = await Company.findOne({ _id: companyId, workspaceId });
-    const supplier = await Supplier.findOne({ _id: supplierId, workspaceId });
-    const companyGstin = company?.gstin || "";
-    const supplierGstin = supplier?.gstNumber || "";
-    const isIgst = companyGstin && supplierGstin && companyGstin.substring(0, 2) !== supplierGstin.substring(0, 2);
-
-    await gstLedgerRepository.createGstLedgerEntry({
-      workspaceId,
-      companyId,
-      partyId: supplierId,
-      voucherId: bill._id,
-      voucherNumber: generatedBillNo,
-      voucherDate: invoiceDate ? new Date(invoiceDate) : new Date(),
-      gstType: "GSTR-2",
-      taxableAmount: taxableSubtotal || taxableAfterExtraDisc || 0,
-      cgst: isIgst ? 0 : halfGst,
-      sgst: isIgst ? 0 : halfGst,
-      igst: isIgst ? (totalGst || 0) : 0,
-      totalAmount: grandTotal || 0,
-      narration: `Purchase Bill #${generatedBillNo}`,
-    });
-  } catch (err) {
-    console.error("Failed to auto-create GSTR-2 entry for purchase bill:", err);
-  }
-
   return bill;
 };
 
@@ -503,6 +476,44 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId, user
     }
   } catch (e) {
     console.error("Error creating purchase journal voucher:", e);
+  }
+
+  // 5. Create GSTR-2 Ledger Entry on Ingestion
+  try {
+    const halfGst = (bill.totalGst || 0) / 2;
+    const company = await Company.findOne({ _id: companyId, workspaceId });
+    const supplier = await Supplier.findOne({ _id: bill.supplierId, workspaceId });
+    const companyGstin = company?.gstin || "";
+    const supplierGstin = supplier?.gstNumber || "";
+    const isIgst = companyGstin && supplierGstin && companyGstin.substring(0, 2) !== supplierGstin.substring(0, 2);
+
+    let resolvedBranchId = bill.branchId || branchId;
+    if (!resolvedBranchId) {
+      resolvedBranchId = (await branchRepository.getDefaultBranch(workspaceId))?._id || null;
+    }
+
+    // Clean up any existing GSTR-2 entries for this bill to guarantee idempotency
+    await gstLedgerRepository.deleteGstLedgerEntriesByVoucherId(bill._id);
+
+    await gstLedgerRepository.createGstLedgerEntry({
+      workspaceId,
+      companyId,
+      branchId: resolvedBranchId || null,
+      partyId: bill.supplierId,
+      voucherId: bill._id,
+      voucherNumber: bill.purchaseBillNo,
+      voucherDate: bill.invoiceDate ? new Date(bill.invoiceDate) : new Date(),
+      gstType: "GSTR-2",
+      taxableAmount: bill.taxableSubtotal || bill.taxableAfterExtraDisc || 0,
+      cgst: isIgst ? 0 : halfGst,
+      sgst: isIgst ? 0 : halfGst,
+      igst: isIgst ? (bill.totalGst || 0) : 0,
+      totalAmount: bill.grandTotal || 0,
+      narration: `Purchase Bill Ingested #${bill.purchaseBillNo}`,
+    });
+    console.log(`[Service] Successfully created GSTR-2 entry for ingested bill: ${bill.purchaseBillNo}`);
+  } catch (err) {
+    console.error("Failed to auto-create GSTR-2 entry for ingested purchase bill:", err);
   }
 
   return updatedBill;
