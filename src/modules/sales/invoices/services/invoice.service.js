@@ -396,21 +396,42 @@ const postSaleAccounting = async ({
 
     const companyGstin = resolvedCompany?.gstin || "";
     const customerGstin = customer?.gstNumber || "";
-    const isIgst = companyGstin && customerGstin && companyGstin.substring(0, 2) !== customerGstin.substring(0, 2);
+    const hasCustomerGst = customerGstin && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(customerGstin.trim().toUpperCase());
+    const grandTotal = Number(invoice.grandTotal || 0);
+    const isIgst = Boolean(
+      invoice.isIgst ||
+      saleData?.isIgst ||
+      (companyGstin && customerGstin && companyGstin.length >= 2 && customerGstin.length >= 2 && companyGstin.slice(0, 2) !== customerGstin.slice(0, 2))
+    );
+
+    let groupDescription = "B2C (Small) Invoice";
+    if (invoice.isExport || String(invoice.billingMode).toUpperCase() === "EXPORT") {
+      groupDescription = "Export Invoices";
+    } else if (hasCustomerGst || String(invoice.billingMode).toUpperCase() === "B2B") {
+      groupDescription = "B2B";
+    } else if (isIgst && grandTotal > 250000) {
+      groupDescription = "B2C (Large) Invoice";
+    } else if (invoice.isNilRated || (totalGst === 0 && taxableAmt > 0)) {
+      groupDescription = "Nil Rated";
+    } else {
+      groupDescription = "B2C (Small) Invoice";
+    }
 
     await gstLedgerRepository.createGstLedgerEntry({
       workspaceId: invoice.workspaceId,
       companyId: invoice.companyId,
+      branchId: invoice.branchId || null,
       partyId: customer._id,
       voucherId: invoice._id,
       voucherNumber: invoice.invoiceNo,
       voucherDate: invoice.date ? new Date(invoice.date) : new Date(),
       gstType: "GSTR-1",
+      groupDescription,
       taxableAmount: taxableAmt,
       cgst: isIgst ? 0 : halfGst,
       sgst: isIgst ? 0 : halfGst,
       igst: isIgst ? totalGst : 0,
-      totalAmount: Number(invoice.grandTotal || 0),
+      totalAmount: grandTotal,
       narration: `Sale Bill ${invoice.invoiceNo} (${invoice.billingMode}) - Customer: ${customer.name || "Customer"}`,
     }, { session });
   } catch (gstErr) {

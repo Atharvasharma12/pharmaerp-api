@@ -16,6 +16,7 @@ const getGstr1Ledger = async (workspaceId, companyId, query = {}) => {
   return {
     entries: result.entries.map((e) => e.toSafeObject()),
     total: result.total,
+    stats: result.stats,
     page: result.page,
     limit: result.limit,
   };
@@ -35,13 +36,14 @@ const getGstr2Ledger = async (workspaceId, companyId, query = {}) => {
   return {
     entries: result.entries.map((e) => e.toSafeObject()),
     total: result.total,
+    stats: result.stats,
     page: result.page,
     limit: result.limit,
   };
 };
 
 const createGstr1Entry = async (workspaceId, companyId, payload) => {
-  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId } = payload;
+  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId, branchId, groupDescription } = payload;
 
   if (!voucherNumber) {
     throw new ApiError(400, "Voucher number is required");
@@ -55,7 +57,9 @@ const createGstr1Entry = async (workspaceId, companyId, payload) => {
   const entry = await gstLedgerRepository.createGstLedgerEntry({
     workspaceId,
     companyId,
+    branchId: branchId && mongoose.Types.ObjectId.isValid(branchId) ? branchId : null,
     gstType: "GSTR-1",
+    groupDescription: groupDescription || "B2C (Small) Invoice",
     voucherId: voucherId || new mongoose.Types.ObjectId(),
     voucherNumber,
     voucherDate: voucherDate ? new Date(voucherDate) : new Date(),
@@ -72,7 +76,7 @@ const createGstr1Entry = async (workspaceId, companyId, payload) => {
 };
 
 const createGstr2Entry = async (workspaceId, companyId, payload) => {
-  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId } = payload;
+  const { voucherNumber, voucherDate, taxableAmount, igst, cgst, sgst, totalAmount, narration, partyId, voucherId, branchId, groupDescription } = payload;
 
   if (!voucherNumber) {
     throw new ApiError(400, "Voucher number is required");
@@ -86,7 +90,9 @@ const createGstr2Entry = async (workspaceId, companyId, payload) => {
   const entry = await gstLedgerRepository.createGstLedgerEntry({
     workspaceId,
     companyId,
+    branchId: branchId && mongoose.Types.ObjectId.isValid(branchId) ? branchId : null,
     gstType: "GSTR-2",
+    groupDescription: groupDescription || null,
     voucherId: voucherId || new mongoose.Types.ObjectId(),
     voucherNumber,
     voucherDate: voucherDate ? new Date(voucherDate) : new Date(),
@@ -102,9 +108,19 @@ const createGstr2Entry = async (workspaceId, companyId, payload) => {
   return entry.toSafeObject();
 };
 
+const getGstr1Summary = async (workspaceId, companyId, query = {}) => {
+  const result = await gstLedgerRepository.getGstr1Summary(
+    workspaceId,
+    companyId,
+    query
+  );
+  return result;
+};
+
 export default {
   getGstr1Ledger,
   getGstr2Ledger,
+  getGstr1Summary,
   createGstr1Entry,
   createGstr2Entry,
 };

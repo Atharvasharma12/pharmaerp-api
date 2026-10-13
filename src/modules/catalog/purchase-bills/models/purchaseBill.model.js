@@ -19,7 +19,7 @@ const purchaseBillItemSchema = new mongoose.Schema(
     cRatePct: { type: Number, default: 0 },
     mrp: { type: Number, default: 0 },
     hsn: { type: String, trim: true, default: "" },
-    gst: { type: Number, default: 12 },
+    gst: { type: Number, default: 0 },
     rate: { type: Number, default: 0 },
     amount: { type: Number, default: 0 },
     rateA: { type: Number, default: 0 },

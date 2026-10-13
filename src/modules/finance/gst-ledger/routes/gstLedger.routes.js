@@ -6,6 +6,7 @@ import companyContextMiddleware from "../../../../middlewares/companyContext.mid
 
 import {
   getGstr1Ledger,
+  getGstr1Summary,
   getGstr2Ledger,
   createGstr1Ledger,
   createGstr2Ledger,
@@ -19,6 +20,7 @@ router.use(workspaceContextMiddleware);
 router.use(companyContextMiddleware);
 
 // Routes
+router.get("/gstr-1/summary", getGstr1Summary);
 router.get("/gstr-1", getGstr1Ledger);
 router.post("/gstr-1", createGstr1Ledger);
 router.get("/gstr-2", getGstr2Ledger);

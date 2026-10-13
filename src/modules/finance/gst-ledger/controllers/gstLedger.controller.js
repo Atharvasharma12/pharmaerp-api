@@ -3,10 +3,15 @@ import ApiResponse from "../../../../utils/ApiResponse.js";
 import gstLedgerService from "../services/gstLedger.service.js";
 
 export const getGstr1Ledger = asyncHandler(async (req, res) => {
+  const branchId =
+    req.query.branchId !== undefined
+      ? req.query.branchId
+      : req.branchId || req.headers["x-branch-id"] || null;
+
   const result = await gstLedgerService.getGstr1Ledger(
     req.workspaceId,
     req.companyId,
-    req.query
+    { ...req.query, branchId }
   );
 
   return res
@@ -14,11 +19,33 @@ export const getGstr1Ledger = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "GSTR-1 ledger entries fetched successfully", result));
 });
 
+export const getGstr1Summary = asyncHandler(async (req, res) => {
+  const branchId =
+    req.query.branchId !== undefined
+      ? req.query.branchId
+      : req.branchId || req.headers["x-branch-id"] || null;
+
+  const result = await gstLedgerService.getGstr1Summary(
+    req.workspaceId,
+    req.companyId,
+    { ...req.query, branchId }
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "GSTR-1 summary calculated successfully", result));
+});
+
 export const getGstr2Ledger = asyncHandler(async (req, res) => {
+  const branchId =
+    req.query.branchId !== undefined
+      ? req.query.branchId
+      : req.branchId || req.headers["x-branch-id"] || null;
+
   const result = await gstLedgerService.getGstr2Ledger(
     req.workspaceId,
     req.companyId,
-    req.query
+    { ...req.query, branchId }
   );
 
   return res
@@ -27,10 +54,13 @@ export const getGstr2Ledger = asyncHandler(async (req, res) => {
 });
 
 export const createGstr1Ledger = asyncHandler(async (req, res) => {
+  const branchId =
+    req.body.branchId || req.branchId || req.headers["x-branch-id"] || null;
+
   const result = await gstLedgerService.createGstr1Entry(
     req.workspaceId,
     req.companyId,
-    req.body
+    { ...req.body, branchId }
   );
 
   return res
@@ -39,10 +69,13 @@ export const createGstr1Ledger = asyncHandler(async (req, res) => {
 });
 
 export const createGstr2Ledger = asyncHandler(async (req, res) => {
+  const branchId =
+    req.body.branchId || req.branchId || req.headers["x-branch-id"] || null;
+
   const result = await gstLedgerService.createGstr2Entry(
     req.workspaceId,
     req.companyId,
-    req.body
+    { ...req.body, branchId }
   );
 
   return res
