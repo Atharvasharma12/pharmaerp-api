@@ -2,6 +2,8 @@ import { Router } from "express";
 import {
   createTransferOrder,
   receiveTransferOrder,
+  cancelTransferOrder,
+  updateTransferOrder,
   getTransferOrders,
   getTransferOrderById,
 } from "../controllers/transferOrder.controller.js";
@@ -16,6 +18,8 @@ router.use(workspaceContextMiddleware);
 router.post("/", createTransferOrder);
 router.get("/", getTransferOrders);
 router.get("/:id", getTransferOrderById);
+router.put("/:id", updateTransferOrder);
 router.post("/:id/receive", receiveTransferOrder);
+router.post("/:id/cancel", cancelTransferOrder);
 
 export default router;

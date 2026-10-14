@@ -413,6 +413,140 @@ export const cancelTransferOrder = async (
   }
 };
 
+export const updateTransferOrder = async (
+  workspaceId,
+  transferOrderId,
+  data,
+  user
+) => {
+  const { destinationBranchId, items, remarks } = data;
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const transferOrder = await TransferOrder.findOne({
+      _id: transferOrderId,
+      workspaceId,
+    }).session(session);
+
+    if (!transferOrder) {
+      throw new ApiError(404, "Transfer Order not found");
+    }
+
+    if (transferOrder.status === "COMPLETED") {
+      throw new ApiError(400, "Cannot edit a completed transfer order");
+    }
+
+    if (transferOrder.status === "CANCELLED") {
+      throw new ApiError(400, "Cannot edit a cancelled transfer order");
+    }
+
+    if (destinationBranchId) {
+      if (String(destinationBranchId) === String(transferOrder.sourceBranchId)) {
+        throw new ApiError(
+          400,
+          "Destination branch cannot be the same as source branch"
+        );
+      }
+      transferOrder.destinationBranchId = destinationBranchId;
+    }
+
+    if (remarks !== undefined) {
+      transferOrder.remarks = remarks;
+    }
+
+    // If items are being modified, restore old stock first and then deduct new stock
+    if (items && Array.isArray(items) && items.length > 0) {
+      // 1. Restore previous quantities to source branch
+      for (const oldItem of transferOrder.items) {
+        const sourceBatch = await Batch.findOne({
+          _id: oldItem.batch,
+          workspaceId,
+          branch_id: transferOrder.sourceBranchId,
+        }).session(session);
+
+        if (sourceBatch) {
+          sourceBatch.batchQty += oldItem.transferQty;
+          await sourceBatch.save({ session });
+        }
+
+        const sourceFacility = await ProductFacility.findOne({
+          workspaceId,
+          facility_id: transferOrder.sourceBranchId,
+          product_id: oldItem.product,
+        }).session(session);
+
+        if (sourceFacility) {
+          sourceFacility.total_qty_available += oldItem.transferQty;
+          sourceFacility.qoh += oldItem.transferQty;
+          await sourceFacility.save({ session });
+        }
+      }
+
+      // 2. Validate and deduct new items
+      for (const newItem of items) {
+        const batch = await Batch.findOne({
+          _id: newItem.batch,
+          workspaceId,
+          branch_id: transferOrder.sourceBranchId,
+        }).session(session);
+
+        if (!batch) {
+          throw new ApiError(
+            404,
+            `Batch ${newItem.batchNo || ""} not found in source branch`
+          );
+        }
+
+        if (batch.batchQty < newItem.transferQty) {
+          throw new ApiError(
+            400,
+            `Insufficient quantity in batch ${newItem.batchNo || ""}. Available: ${batch.batchQty}`
+          );
+        }
+
+        batch.batchQty -= newItem.transferQty;
+        await batch.save({ session });
+
+        const sourceFacility = await ProductFacility.findOne({
+          workspaceId,
+          facility_id: transferOrder.sourceBranchId,
+          product_id: newItem.product,
+        }).session(session);
+
+        if (sourceFacility) {
+          sourceFacility.total_qty_available = Math.max(
+            0,
+            sourceFacility.total_qty_available - newItem.transferQty
+          );
+          sourceFacility.qoh = Math.max(0, sourceFacility.qoh - newItem.transferQty);
+          await sourceFacility.save({ session });
+        }
+      }
+
+      transferOrder.items = items;
+    }
+
+    await transferOrder.save({ session });
+    await session.commitTransaction();
+    session.endSession();
+
+    return await TransferOrder.findById(transferOrder._id)
+      .populate("sourceBranchId", "name branchCode type")
+      .populate("destinationBranchId", "name branchCode type")
+      .populate("createdBy", "name")
+      .populate("receivedBy", "name")
+      .populate({ path: "cancelledBy", select: "name", strictPopulate: false })
+      .populate("items.product", "name")
+      .lean();
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
 export const getTransferOrders = async (
   workspaceId,
   filters = {},
@@ -502,6 +636,7 @@ export default {
   createTransferOrder,
   receiveTransferOrder,
   cancelTransferOrder,
+  updateTransferOrder,
   getTransferOrders,
   getTransferOrderById,
 };
