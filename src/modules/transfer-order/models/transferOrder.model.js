@@ -77,8 +77,22 @@ const transferOrderSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    cancelledBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    cancelledAt: {
+      type: Date,
+      default: null,
+    },
+    cancelReason: {
+      type: String,
+      trim: true,
+      default: "",
+    },
   },
-  { timestamps: true }
+  { timestamps: true, strictPopulate: false }
 );
 
 // Virtual alias for _id
