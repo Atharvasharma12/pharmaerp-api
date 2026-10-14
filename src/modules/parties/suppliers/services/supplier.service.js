@@ -83,12 +83,7 @@ const createSupplier = async (workspaceId, companyId, userId, payload) => {
   }
 
   const accCode = supplierCode ? `SUP-${supplierCode}` : `SUP-${Date.now()}`;
-  let accountName = `${businessName} - Supplier`;
-  
-  const existingAcc = await Account.findOne({ companyId, accountName }).lean();
-  if (existingAcc) {
-    accountName = `${businessName} - Supplier (${accCode})`;
-  }
+  const accountName = `${businessName} - Supplier`;
 
   const ledgerAccount = await Account.create({
     workspaceId,
@@ -617,8 +612,7 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
     const existingAccounts = await Account.find({
       companyId,
       isDeleted: false
-    }).select("accountName accountCode").lean();
-    const existingAccountNamesSet = new Set(existingAccounts.map(a => a.accountName));
+    }).select("accountCode").lean();
 
     // Add existing account codes to usedCodes to prevent orphaned account code collisions
     existingAccounts.forEach(a => {
@@ -642,11 +636,7 @@ const confirmImport = async (workspaceId, companyId, userId, suppliersData) => {
       usedCodes.add(supplierCode);
       const accCode = `SUP-${supplierCode}`;
       
-      let accountName = `${supplierData.businessName} - Supplier`;
-      if (existingAccountNamesSet.has(accountName)) {
-        accountName = `${supplierData.businessName} - Supplier (${accCode})`;
-      }
-      existingAccountNamesSet.add(accountName);
+      const accountName = `${supplierData.businessName} - Supplier`;
       
       const accountId = new mongoose.Types.ObjectId();
       

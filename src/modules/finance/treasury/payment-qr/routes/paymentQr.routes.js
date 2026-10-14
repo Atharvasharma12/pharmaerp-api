@@ -12,6 +12,7 @@ import {
   deletePaymentQr,
   setPrimary,
   getStats,
+  getUpiTransactions,
 } from "../controllers/paymentQr.controller.js";
 
 import {
@@ -19,6 +20,7 @@ import {
   updatePaymentQrSchema,
   paymentQrIdParamSchema,
   getPaymentQrsQuerySchema,
+  getUpiTransactionsQuerySchema,
 } from "../validations/paymentQr.validation.js";
 
 const router = Router();
@@ -32,11 +34,19 @@ router.use(companyContextMiddleware);
 router.post("/", validate(createPaymentQrSchema), createPaymentQr);
 router.get("/", validate(getPaymentQrsQuerySchema, "query"), getPaymentQrs);
 
+// Multi-source UPI reconciliation transactions endpoint
+router.get(
+  "/transactions",
+  validate(getUpiTransactionsQuerySchema, "query"),
+  getUpiTransactions,
+);
+
 router.get(
   "/:paymentQrId",
   validate(paymentQrIdParamSchema, "params"),
   getPaymentQrById,
 );
+
 
 router.patch(
   "/:paymentQrId",

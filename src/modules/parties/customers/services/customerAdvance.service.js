@@ -398,9 +398,15 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
           if (changeDue > 0) {
             const outCashTx = await cashTransactionRepository.getNextTransactionNumber(companyId, workspaceId, { session });
             const outCount = await cashDenominationRepository.getNextCountNumber(companyId, workspaceId, { session });
+            const changeVoucherNumber = await voucherNumberService.generateVoucherNumber(
+              companyId,
+              workspaceId,
+              "JOURNAL",
+              { session }
+            );
             const cashOutPayload = {
               transactionNumber: outCashTx,
-              voucherNumber: voucherNumber,
+              voucherNumber: changeVoucherNumber,
               countNumber: outCount,
               transactionDate: date ? new Date(date) : new Date(),
               branchId: effectiveBranchId,
@@ -410,7 +416,7 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
               amount: changeDue,
               referenceNumber: voucherNumber,
               narration: `Change Returned for Customer Advance from ${customer.name}`,
-              counterpartyAccountId: advanceAccount._id,
+              counterpartyAccountId: customerLedgerAccount._id,
               denominations: returnedDenoms,
               shiftId: resolvedShiftId || null,
             };
@@ -437,7 +443,7 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
       }
 
       // If treasury didn't post JV, create and post JV directly
-      if (!cashTxSuccess || !journalVoucher) {
+      if (!journalVoucher) {
         const jvPayload = {
           voucherNumber,
           voucherDate: date ? new Date(date) : new Date(),
@@ -870,9 +876,15 @@ export const settleCustomerCredit = async (workspaceId, companyId, userId, paylo
           if (changeDue > 0) {
             const outCashTx = await cashTransactionRepository.getNextTransactionNumber(companyId, workspaceId, { session });
             const outCount = await cashDenominationRepository.getNextCountNumber(companyId, workspaceId, { session });
+            const changeVoucherNumber = await voucherNumberService.generateVoucherNumber(
+              companyId,
+              workspaceId,
+              "JOURNAL",
+              { session }
+            );
             const cashOutPayload = {
               transactionNumber: outCashTx,
-              voucherNumber,
+              voucherNumber: changeVoucherNumber,
               countNumber: outCount,
               transactionDate: date ? new Date(date) : new Date(),
               branchId: effectiveBranchId,
@@ -907,7 +919,7 @@ export const settleCustomerCredit = async (workspaceId, companyId, userId, paylo
         }
       }
 
-      if (!cashTxSuccess || !journalVoucher) {
+      if (!journalVoucher) {
         const jvPayload = {
           voucherNumber,
           voucherDate: date ? new Date(date) : new Date(),

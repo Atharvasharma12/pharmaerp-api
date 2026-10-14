@@ -10,7 +10,8 @@
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
     "lint": "eslint .",
     "seed:platform-user": "node scripts/seedPlatformUser.js",
-    "seed:free-plan": "node scripts/seedFreePlan.js"
+    "seed:free-plan": "node scripts/seedFreePlan.js",
+    "db:drop-account-name-index": "node src/scripts/drop-account-name-index.js"
   },
   "keywords": [
     "node",

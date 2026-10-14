@@ -102,3 +102,23 @@ export const getStats = asyncHandler(async (req, res) => {
     .status(200)
     .json(new ApiResponse(200, "Payment QR stats fetched successfully", stats));
 });
+
+export const getUpiTransactions = asyncHandler(async (req, res) => {
+  const branchId =
+    req.query.branchId ||
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    null;
+
+  const result = await paymentQrStatsService.getUpiTransactions(
+    req.workspaceId,
+    req.companyId,
+    branchId,
+    req.query,
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "UPI transactions fetched successfully", result));
+});
+

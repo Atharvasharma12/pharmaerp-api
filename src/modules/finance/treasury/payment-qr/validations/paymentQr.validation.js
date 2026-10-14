@@ -73,3 +73,20 @@ export const getPaymentQrsQuerySchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(20).optional(),
   all: Joi.boolean().default(false).optional(),
 });
+
+export const getUpiTransactionsQuerySchema = Joi.object({
+  paymentQrId: objectId.allow("", null).optional(),
+  branchId: Joi.alternatives().try(objectId, Joi.string().valid("all")).allow("", null).optional(),
+  sourceType: Joi.string()
+    .valid("all", "invoice", "credit_settlement", "advance")
+    .default("all")
+    .optional(),
+  startDate: Joi.string().isoDate().allow("", null).optional(),
+  endDate: Joi.string().isoDate().allow("", null).optional(),
+  search: Joi.string().trim().allow("").optional(),
+  page: Joi.number().integer().min(1).default(1).optional(),
+  limit: Joi.number().integer().min(1).max(100).default(20).optional(),
+  sortBy: Joi.string().valid("date", "amount", "referenceno").default("date").optional(),
+  sortOrder: Joi.string().valid("asc", "desc").default("desc").optional(),
+});
+

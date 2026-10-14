@@ -377,17 +377,18 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
 // GET CASH TRANSACTIONS (LIST)
 // ---------------------------------------------------------------------------
 const getCashTransactions = async (workspaceId, companyId, query = {}) => {
-  const { page, limit, sort, all, ...filters } = query;
+  const { page, limit, sort, sortBy, sortOrder, all, ...filters } = query;
   const result = await cashTransactionRepository.getCashTransactions(
     workspaceId,
     companyId,
     filters,
-    { page, limit, sort, all: all === "true" || all === true },
+    { page, limit, sort, sortBy, sortOrder, all: all === "true" || all === true },
   );
 
   return {
     cashTransactions: result.cashTransactions.map((ct) => ct.toSafeObject()),
     total: result.total,
+    summary: result.summary,
     page: result.page,
     limit: result.limit,
   };

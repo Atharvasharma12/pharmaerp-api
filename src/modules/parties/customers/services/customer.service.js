@@ -813,15 +813,6 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
     // making collisions practically impossible.
     const usedCodes = new Set();
     
-    // Fetch only account names relevant to this batch
-    const accountNamesToCheck = customersData.map(c => `${c.name} - Customer`);
-    const existingAccounts = await Account.find({
-      companyId,
-      accountName: { $in: accountNamesToCheck }
-    }).select("accountName").lean();
-    
-    const existingAccountNamesSet = new Set(existingAccounts.map(a => a.accountName));
-
     const accountsToInsert = [];
     const payloadsToInsert = [];
     
@@ -844,12 +835,7 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
       usedCodes.add(customerCode);
       
       const accCode = `CUST-${customerCode}`;
-      
-      let accountName = `${customerData.name} - Customer`;
-      if (existingAccountNamesSet.has(accountName)) {
-        accountName = `${customerData.name} - Customer (${accCode})`;
-      }
-      existingAccountNamesSet.add(accountName);
+      const accountName = `${customerData.name} - Customer`;
       
       const accountId = new mongoose.Types.ObjectId();
       

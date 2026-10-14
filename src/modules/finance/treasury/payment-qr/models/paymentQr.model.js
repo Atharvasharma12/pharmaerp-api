@@ -20,7 +20,7 @@ const paymentQrSchema = new mongoose.Schema(
       index: true,
     },
 
-    // Branch scope: physical UPI QR standee/soundbox is deployed inside a specific branch
+    // Branch scope: physical UPI QR standee/device is deployed inside a specific branch
     branchId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Branch",
