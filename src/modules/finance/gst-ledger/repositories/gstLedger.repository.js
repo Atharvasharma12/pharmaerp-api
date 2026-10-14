@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import GstLedger from "../models/gstLedger.model.js";
 import calculateGstr1Summary, { deduceGstrGroup } from "../utils/gstr1SummaryCalculator.js";
+import { calculateGstr3bSummary } from "../utils/gstr3bSummaryCalculator.js";
 
 const createGstLedgerEntry = async (payload, options = {}) => {
   const [entry] = await GstLedger.create([payload], {
@@ -309,9 +310,72 @@ const getGstr1Summary = async (workspaceId, companyId, filters = {}, options = {
   });
 };
 
+const getGstr3bSummary = async (workspaceId, companyId, filters = {}, options = {}) => {
+  if (
+    !mongoose.Types.ObjectId.isValid(workspaceId) ||
+    !mongoose.Types.ObjectId.isValid(companyId)
+  ) {
+    return calculateGstr3bSummary([], []);
+  }
+
+  const baseQuery = {
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
+  };
+
+  if (filters.startDate || filters.endDate) {
+    baseQuery.voucherDate = {};
+    if (filters.startDate) {
+      baseQuery.voucherDate.$gte = new Date(filters.startDate);
+    }
+    if (filters.endDate) {
+      baseQuery.voucherDate.$lte = new Date(filters.endDate);
+    }
+  }
+
+  if (filters.branchId && filters.branchId !== "all" && mongoose.Types.ObjectId.isValid(filters.branchId)) {
+    const targetBranchId = new mongoose.Types.ObjectId(filters.branchId);
+    let voucherIdsForBranch = [];
+    try {
+      const db = mongoose.connection.db;
+      if (db) {
+        const invoices = await db.collection("invoices").find({
+          workspaceId: new mongoose.Types.ObjectId(workspaceId),
+          companyId: new mongoose.Types.ObjectId(companyId),
+          branchId: targetBranchId,
+        }).project({ _id: 1 }).toArray();
+        voucherIdsForBranch = invoices.map((inv) => inv._id);
+      }
+    } catch (e) {
+      console.error("Error looking up vouchers for branch in getGstr3bSummary:", e);
+    }
+
+    if (voucherIdsForBranch.length > 0) {
+      baseQuery.$or = [
+        { branchId: targetBranchId },
+        { voucherId: { $in: voucherIdsForBranch } },
+      ];
+    } else {
+      baseQuery.branchId = targetBranchId;
+    }
+  }
+
+  const [gstr1Entries, gstr2Entries] = await Promise.all([
+    GstLedger.find({ ...baseQuery, gstType: "GSTR-1" })
+      .populate({ path: "partyId", select: "name gstNumber" })
+      .lean(),
+    GstLedger.find({ ...baseQuery, gstType: "GSTR-2" })
+      .populate({ path: "partyId", select: "name gstNumber" })
+      .lean(),
+  ]);
+
+  return calculateGstr3bSummary(gstr1Entries, gstr2Entries, options);
+};
+
 export default {
   createGstLedgerEntry,
   deleteGstLedgerEntriesByVoucherId,
   getGstLedgerEntries,
   getGstr1Summary,
+  getGstr3bSummary,
 };

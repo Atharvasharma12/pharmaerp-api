@@ -2,31 +2,148 @@ import mongoose from "mongoose";
 import TransferOrder from "../models/transferOrder.model.js";
 import Batch from "../../catalog/products/models/batch.model.js";
 import ProductFacility from "../../catalog/products/models/productFacility.model.js";
+import branchRepository from "../../organization/branches/repositories/branch.repository.js";
+import financialPeriodRepository from "../../finance/financial-periods/repositories/financialPeriod.repository.js";
+import { getBranchInitials } from "../../../utils/branchInitials.js";
 import ApiError from "../../../utils/ApiError.js";
 
-const generateTransferNo = async () => {
-  const count = await TransferOrder.countDocuments();
-  return `TR-${String(count + 1).padStart(4, "0")}`;
+/**
+ * Generates a branch-wise sequential transfer order number.
+ * Format: {BRANCH_INITIALS}-TR-{FY}-{0001}
+ * e.g., NN-TR-2627-0001
+ * Follows the same pattern and reliability as sales invoice numbering.
+ */
+const generateBranchTransferNo = async (
+  workspaceId,
+  sourceBranch,
+  companyId,
+  session
+) => {
+  const branchInitials = getBranchInitials(sourceBranch);
+
+  let fyString = "";
+  if (companyId) {
+    try {
+      const periods = await financialPeriodRepository.getFinancialPeriods(
+        companyId,
+        workspaceId,
+        { status: "ACTIVE" }
+      );
+      const period = periods?.periods?.[0];
+      if (period && period.startDate && period.endDate) {
+        const startYear = new Date(period.startDate).getFullYear();
+        const endYear = new Date(period.endDate).getFullYear();
+        fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
+      }
+    } catch {
+      // Fallback to calendar-based fiscal year (Apr-Mar)
+    }
+  }
+
+  if (!fyString) {
+    const now = new Date();
+    const currentMonth = now.getMonth(); // 0 = Jan, 3 = Apr
+    const currentYear = now.getFullYear();
+    const startYear = currentMonth >= 3 ? currentYear : currentYear - 1;
+    const endYear = startYear + 1;
+    fyString = `${startYear.toString().slice(-2)}${endYear.toString().slice(-2)}`;
+  }
+
+  const finalPrefix = `${branchInitials}-TR-${fyString}-`;
+
+  // Find latest transfer order created by this branch matching this prefix
+  const lastOrder = await TransferOrder.findOne({
+    workspaceId,
+    sourceBranchId: sourceBranch._id,
+    transferNo: { $regex: `^${finalPrefix}` },
+  })
+    .sort({ createdAt: -1, _id: -1 })
+    .session(session);
+
+  let sequenceNo = 1;
+  if (
+    lastOrder &&
+    lastOrder.transferNo &&
+    lastOrder.transferNo.startsWith(finalPrefix)
+  ) {
+    const parts = lastOrder.transferNo.split("-");
+    if (parts.length >= 4) {
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastSeq)) {
+        sequenceNo = lastSeq + 1;
+      }
+    }
+  }
+
+  // Ensure collision avoidance across workspace
+  let candidateSeq = sequenceNo;
+  let finalTransferNo = `${finalPrefix}${candidateSeq.toString().padStart(4, "0")}`;
+  let collision = await TransferOrder.findOne({
+    workspaceId,
+    transferNo: finalTransferNo,
+  }).session(session);
+
+  while (collision) {
+    candidateSeq += 1;
+    finalTransferNo = `${finalPrefix}${candidateSeq.toString().padStart(4, "0")}`;
+    collision = await TransferOrder.findOne({
+      workspaceId,
+      transferNo: finalTransferNo,
+    }).session(session);
+  }
+
+  return finalTransferNo;
 };
 
-export const createTransferOrder = async (workspaceId, data, user) => {
+export const createTransferOrder = async (
+  workspaceId,
+  data,
+  user,
+  companyId = null,
+  branchId = null
+) => {
+  const { sourceBranchId, destinationBranchId, items, remarks } = data;
+
+  if (!items || items.length === 0) {
+    throw new ApiError(400, "Items cannot be empty");
+  }
+
+  if (!sourceBranchId) {
+    throw new ApiError(400, "Source branch is required");
+  }
+
+  if (!destinationBranchId) {
+    throw new ApiError(400, "Destination branch is required");
+  }
+
+  if (String(sourceBranchId) === String(destinationBranchId)) {
+    throw new ApiError(400, "Source and destination branches cannot be the same");
+  }
+
+  // Resolve source branch details to obtain branch initials and companyId
+  const sourceBranch = await branchRepository.findBranchById(sourceBranchId);
+  if (!sourceBranch) {
+    throw new ApiError(404, "Source branch not found");
+  }
+
+  const resolvedCompanyId =
+    companyId || data.companyId || sourceBranch.companyId || null;
+  const resolvedBranchId = branchId || data.branchId || sourceBranchId;
+
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const { sourceBranchId, destinationBranchId, items, remarks } = data;
-
-    if (!items || items.length === 0) {
-      throw new ApiError(400, "Items cannot be empty");
-    }
-
-    if (sourceBranchId === destinationBranchId) {
-      throw new ApiError(400, "Source and destination branches cannot be the same");
-    }
-
-    const transferNo = await generateTransferNo();
+    const transferNo = await generateBranchTransferNo(
+      workspaceId,
+      sourceBranch,
+      resolvedCompanyId,
+      session
+    );
 
     const transferOrder = new TransferOrder({
       workspaceId,
+      companyId: resolvedCompanyId,
+      branchId: resolvedBranchId,
       transferNo,
       sourceBranchId,
       destinationBranchId,
@@ -187,22 +304,173 @@ export const receiveTransferOrder = async (workspaceId, transferOrderId, user) =
   }
 };
 
-export const getTransferOrders = async (workspaceId, filters, pagination) => {
+export const cancelTransferOrder = async (
+  workspaceId,
+  transferOrderId,
+  user,
+  cancelReason = ""
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const transferOrder = await TransferOrder.findOne({
+      _id: transferOrderId,
+      workspaceId,
+    }).session(session);
+
+    if (!transferOrder) {
+      throw new ApiError(404, "Transfer Order not found");
+    }
+
+    if (transferOrder.status === "COMPLETED") {
+      throw new ApiError(400, "Cannot cancel a completed transfer order");
+    }
+
+    if (transferOrder.status === "CANCELLED") {
+      throw new ApiError(400, "Transfer order is already cancelled");
+    }
+
+    if (transferOrder.status !== "IN_TRANSIT" && transferOrder.status !== "PENDING") {
+      throw new ApiError(
+        400,
+        `Cannot cancel transfer order with status ${transferOrder.status}`
+      );
+    }
+
+    // Restore stock to source branch batches and product facility
+    for (const item of transferOrder.items) {
+      const sourceBatch = await Batch.findOne({
+        _id: item.batch,
+        workspaceId,
+        branch_id: transferOrder.sourceBranchId,
+      }).session(session);
+
+      if (sourceBatch) {
+        sourceBatch.batchQty += item.transferQty;
+        await sourceBatch.save({ session });
+      } else {
+        // Fallback by product & batchNo in source branch
+        const fallbackBatch = await Batch.findOne({
+          product_id: item.product,
+          batchNo: item.batchNo,
+          branch_id: transferOrder.sourceBranchId,
+          workspaceId,
+        }).session(session);
+
+        if (fallbackBatch) {
+          fallbackBatch.batchQty += item.transferQty;
+          await fallbackBatch.save({ session });
+        }
+      }
+
+      // Restore to source product facility
+      let sourceFacility = await ProductFacility.findOne({
+        workspaceId,
+        facility_id: transferOrder.sourceBranchId,
+        product_id: item.product,
+      }).session(session);
+
+      if (sourceFacility) {
+        sourceFacility.total_qty_available += item.transferQty;
+        sourceFacility.qoh += item.transferQty;
+        await sourceFacility.save({ session });
+      } else {
+        sourceFacility = new ProductFacility({
+          workspaceId,
+          facility_id: transferOrder.sourceBranchId,
+          product_id: item.product,
+          total_qty_available: item.transferQty,
+          qoh: item.transferQty,
+        });
+        await sourceFacility.save({ session });
+      }
+    }
+
+    transferOrder.status = "CANCELLED";
+    transferOrder.cancelledBy = user._id;
+    transferOrder.cancelledAt = new Date();
+    if (cancelReason) {
+      transferOrder.cancelReason = cancelReason;
+    }
+    await transferOrder.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return await TransferOrder.findById(transferOrder._id)
+      .populate("sourceBranchId", "name branchCode type")
+      .populate("destinationBranchId", "name branchCode type")
+      .populate("createdBy", "name")
+      .populate("receivedBy", "name")
+      .populate("cancelledBy", "name")
+      .populate("items.product", "name")
+      .lean();
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
+export const getTransferOrders = async (
+  workspaceId,
+  filters = {},
+  pagination = {},
+  companyId = null,
+  branchId = null
+) => {
   const { page = 1, limit = 10 } = pagination;
   const skip = (page - 1) * limit;
 
   const query = { workspaceId };
-  if (filters.status) query.status = filters.status;
-  if (filters.sourceBranchId) query.sourceBranchId = filters.sourceBranchId;
-  if (filters.destinationBranchId) query.destinationBranchId = filters.destinationBranchId;
+
+  const targetCompanyId = companyId || filters.companyId;
+  if (targetCompanyId) {
+    query.$or = [{ companyId: targetCompanyId }, { companyId: null }];
+  }
+
+  if (filters.status && filters.status !== "all") {
+    query.status = filters.status;
+  }
+
+  if (filters.sourceBranchId && filters.sourceBranchId !== "all") {
+    query.sourceBranchId = filters.sourceBranchId;
+  }
+
+  if (filters.destinationBranchId && filters.destinationBranchId !== "all") {
+    query.destinationBranchId = filters.destinationBranchId;
+  }
+
+  // Branch-specific query: if branchId is provided and neither source nor destination filter was specified
+  const targetBranchId = branchId || filters.branchId;
+  if (
+    targetBranchId &&
+    targetBranchId !== "all" &&
+    (!filters.sourceBranchId || filters.sourceBranchId === "all") &&
+    (!filters.destinationBranchId || filters.destinationBranchId === "all")
+  ) {
+    const branchOrConditions = [
+      { sourceBranchId: targetBranchId },
+      { destinationBranchId: targetBranchId },
+      { branchId: targetBranchId },
+    ];
+    if (query.$or) {
+      query.$and = [{ $or: query.$or }, { $or: branchOrConditions }];
+      delete query.$or;
+    } else {
+      query.$or = branchOrConditions;
+    }
+  }
 
   const total = await TransferOrder.countDocuments(query);
   const transferOrders = await TransferOrder.find(query)
-    .populate("sourceBranchId", "name branchCode")
-    .populate("destinationBranchId", "name branchCode")
+    .populate("sourceBranchId", "name branchCode type")
+    .populate("destinationBranchId", "name branchCode type")
     .populate("createdBy", "name")
     .populate("receivedBy", "name")
-    .sort({ createdAt: -1 })
+    .populate("cancelledBy", "name")
+    .sort({ createdAt: -1, _id: -1 })
     .skip(skip)
     .limit(limit)
     .lean();
@@ -215,10 +483,11 @@ export const getTransferOrderById = async (workspaceId, transferOrderId) => {
     _id: transferOrderId,
     workspaceId,
   })
-    .populate("sourceBranchId", "name branchCode")
-    .populate("destinationBranchId", "name branchCode")
+    .populate("sourceBranchId", "name branchCode type")
+    .populate("destinationBranchId", "name branchCode type")
     .populate("createdBy", "name")
     .populate("receivedBy", "name")
+    .populate("cancelledBy", "name")
     .populate("items.product", "name")
     .lean();
 
@@ -232,6 +501,7 @@ export const getTransferOrderById = async (workspaceId, transferOrderId) => {
 export default {
   createTransferOrder,
   receiveTransferOrder,
+  cancelTransferOrder,
   getTransferOrders,
   getTransferOrderById,
 };

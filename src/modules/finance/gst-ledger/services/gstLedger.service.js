@@ -117,10 +117,20 @@ const getGstr1Summary = async (workspaceId, companyId, query = {}) => {
   return result;
 };
 
+const getGstr3bSummary = async (workspaceId, companyId, query = {}) => {
+  const result = await gstLedgerRepository.getGstr3bSummary(
+    workspaceId,
+    companyId,
+    query
+  );
+  return result;
+};
+
 export default {
   getGstr1Ledger,
   getGstr2Ledger,
   getGstr1Summary,
+  getGstr3bSummary,
   createGstr1Entry,
   createGstr2Entry,
 };
