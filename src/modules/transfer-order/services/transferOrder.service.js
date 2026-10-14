@@ -403,7 +403,7 @@ export const cancelTransferOrder = async (
       .populate("destinationBranchId", "name branchCode type")
       .populate("createdBy", "name")
       .populate("receivedBy", "name")
-      .populate("cancelledBy", "name")
+      .populate({ path: "cancelledBy", select: "name", strictPopulate: false })
       .populate("items.product", "name")
       .lean();
   } catch (error) {
@@ -469,7 +469,7 @@ export const getTransferOrders = async (
     .populate("destinationBranchId", "name branchCode type")
     .populate("createdBy", "name")
     .populate("receivedBy", "name")
-    .populate("cancelledBy", "name")
+    .populate({ path: "cancelledBy", select: "name", strictPopulate: false })
     .sort({ createdAt: -1, _id: -1 })
     .skip(skip)
     .limit(limit)
@@ -487,7 +487,7 @@ export const getTransferOrderById = async (workspaceId, transferOrderId) => {
     .populate("destinationBranchId", "name branchCode type")
     .populate("createdBy", "name")
     .populate("receivedBy", "name")
-    .populate("cancelledBy", "name")
+    .populate({ path: "cancelledBy", select: "name", strictPopulate: false })
     .populate("items.product", "name")
     .lean();
 
