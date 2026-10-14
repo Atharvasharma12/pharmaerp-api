@@ -3,10 +3,27 @@ import ApiResponse from "../../../utils/ApiResponse.js";
 import transferOrderService from "../services/transferOrder.service.js";
 
 export const createTransferOrder = asyncHandler(async (req, res) => {
+  const companyId =
+    req.headers["x-company-id"] ||
+    req.companyId ||
+    req.body.companyId ||
+    req.query.companyId ||
+    null;
+
+  const branchId =
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    req.body.branchId ||
+    req.body.sourceBranchId ||
+    req.query.branchId ||
+    null;
+
   const transferOrder = await transferOrderService.createTransferOrder(
     req.workspaceId,
     req.body,
-    req.user
+    req.user,
+    companyId,
+    branchId
   );
 
   return res
@@ -33,10 +50,24 @@ export const receiveTransferOrder = asyncHandler(async (req, res) => {
 export const getTransferOrders = asyncHandler(async (req, res) => {
   const { page, limit, status, sourceBranchId, destinationBranchId } = req.query;
 
+  const companyId =
+    req.headers["x-company-id"] ||
+    req.companyId ||
+    req.query.companyId ||
+    null;
+
+  const branchId =
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    req.query.branchId ||
+    null;
+
   const result = await transferOrderService.getTransferOrders(
     req.workspaceId,
-    { status, sourceBranchId, destinationBranchId },
-    { page: Number(page), limit: Number(limit) }
+    { status, sourceBranchId, destinationBranchId, companyId, branchId },
+    { page: Number(page) || 1, limit: Number(limit) || 10 },
+    companyId,
+    branchId
   );
 
   return res
