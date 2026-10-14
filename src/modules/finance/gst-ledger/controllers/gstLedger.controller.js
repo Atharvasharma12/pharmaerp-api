@@ -36,6 +36,23 @@ export const getGstr1Summary = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "GSTR-1 summary calculated successfully", result));
 });
 
+export const getGstr3bSummary = asyncHandler(async (req, res) => {
+  const branchId =
+    req.query.branchId !== undefined
+      ? req.query.branchId
+      : req.branchId || req.headers["x-branch-id"] || null;
+
+  const result = await gstLedgerService.getGstr3bSummary(
+    req.workspaceId,
+    req.companyId,
+    { ...req.query, branchId }
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "GSTR-3B summary calculated successfully", result));
+});
+
 export const getGstr2Ledger = asyncHandler(async (req, res) => {
   const branchId =
     req.query.branchId !== undefined

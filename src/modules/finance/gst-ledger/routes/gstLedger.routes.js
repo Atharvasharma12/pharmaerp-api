@@ -8,6 +8,7 @@ import {
   getGstr1Ledger,
   getGstr1Summary,
   getGstr2Ledger,
+  getGstr3bSummary,
   createGstr1Ledger,
   createGstr2Ledger,
 } from "../controllers/gstLedger.controller.js";
@@ -25,5 +26,6 @@ router.get("/gstr-1", getGstr1Ledger);
 router.post("/gstr-1", createGstr1Ledger);
 router.get("/gstr-2", getGstr2Ledger);
 router.post("/gstr-2", createGstr2Ledger);
+router.get("/gstr-3b/summary", getGstr3bSummary);
 
 export default router;
