@@ -304,6 +304,115 @@ export const receiveTransferOrder = async (workspaceId, transferOrderId, user) =
   }
 };
 
+export const cancelTransferOrder = async (
+  workspaceId,
+  transferOrderId,
+  user,
+  cancelReason = ""
+) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const transferOrder = await TransferOrder.findOne({
+      _id: transferOrderId,
+      workspaceId,
+    }).session(session);
+
+    if (!transferOrder) {
+      throw new ApiError(404, "Transfer Order not found");
+    }
+
+    if (transferOrder.status === "COMPLETED") {
+      throw new ApiError(400, "Cannot cancel a completed transfer order");
+    }
+
+    if (transferOrder.status === "CANCELLED") {
+      throw new ApiError(400, "Transfer order is already cancelled");
+    }
+
+    if (transferOrder.status !== "IN_TRANSIT" && transferOrder.status !== "PENDING") {
+      throw new ApiError(
+        400,
+        `Cannot cancel transfer order with status ${transferOrder.status}`
+      );
+    }
+
+    // Restore stock to source branch batches and product facility
+    for (const item of transferOrder.items) {
+      const sourceBatch = await Batch.findOne({
+        _id: item.batch,
+        workspaceId,
+        branch_id: transferOrder.sourceBranchId,
+      }).session(session);
+
+      if (sourceBatch) {
+        sourceBatch.batchQty += item.transferQty;
+        await sourceBatch.save({ session });
+      } else {
+        // Fallback by product & batchNo in source branch
+        const fallbackBatch = await Batch.findOne({
+          product_id: item.product,
+          batchNo: item.batchNo,
+          branch_id: transferOrder.sourceBranchId,
+          workspaceId,
+        }).session(session);
+
+        if (fallbackBatch) {
+          fallbackBatch.batchQty += item.transferQty;
+          await fallbackBatch.save({ session });
+        }
+      }
+
+      // Restore to source product facility
+      let sourceFacility = await ProductFacility.findOne({
+        workspaceId,
+        facility_id: transferOrder.sourceBranchId,
+        product_id: item.product,
+      }).session(session);
+
+      if (sourceFacility) {
+        sourceFacility.total_qty_available += item.transferQty;
+        sourceFacility.qoh += item.transferQty;
+        await sourceFacility.save({ session });
+      } else {
+        sourceFacility = new ProductFacility({
+          workspaceId,
+          facility_id: transferOrder.sourceBranchId,
+          product_id: item.product,
+          total_qty_available: item.transferQty,
+          qoh: item.transferQty,
+        });
+        await sourceFacility.save({ session });
+      }
+    }
+
+    transferOrder.status = "CANCELLED";
+    transferOrder.cancelledBy = user._id;
+    transferOrder.cancelledAt = new Date();
+    if (cancelReason) {
+      transferOrder.cancelReason = cancelReason;
+    }
+    await transferOrder.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return await TransferOrder.findById(transferOrder._id)
+      .populate("sourceBranchId", "name branchCode type")
+      .populate("destinationBranchId", "name branchCode type")
+      .populate("createdBy", "name")
+      .populate("receivedBy", "name")
+      .populate("cancelledBy", "name")
+      .populate("items.product", "name")
+      .lean();
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    throw error;
+  }
+};
+
 export const getTransferOrders = async (
   workspaceId,
   filters = {},
@@ -360,6 +469,7 @@ export const getTransferOrders = async (
     .populate("destinationBranchId", "name branchCode type")
     .populate("createdBy", "name")
     .populate("receivedBy", "name")
+    .populate("cancelledBy", "name")
     .sort({ createdAt: -1, _id: -1 })
     .skip(skip)
     .limit(limit)
@@ -377,6 +487,7 @@ export const getTransferOrderById = async (workspaceId, transferOrderId) => {
     .populate("destinationBranchId", "name branchCode type")
     .populate("createdBy", "name")
     .populate("receivedBy", "name")
+    .populate("cancelledBy", "name")
     .populate("items.product", "name")
     .lean();
 
@@ -390,6 +501,7 @@ export const getTransferOrderById = async (workspaceId, transferOrderId) => {
 export default {
   createTransferOrder,
   receiveTransferOrder,
+  cancelTransferOrder,
   getTransferOrders,
   getTransferOrderById,
 };

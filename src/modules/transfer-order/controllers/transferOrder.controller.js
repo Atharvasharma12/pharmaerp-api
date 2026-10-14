@@ -47,6 +47,22 @@ export const receiveTransferOrder = asyncHandler(async (req, res) => {
     );
 });
 
+export const cancelTransferOrder = asyncHandler(async (req, res) => {
+  const { cancelReason } = req.body || {};
+  const transferOrder = await transferOrderService.cancelTransferOrder(
+    req.workspaceId,
+    req.params.id,
+    req.user,
+    cancelReason
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "Transfer order cancelled successfully", transferOrder)
+    );
+});
+
 export const getTransferOrders = asyncHandler(async (req, res) => {
   const { page, limit, status, sourceBranchId, destinationBranchId } = req.query;
 
