@@ -127,14 +127,11 @@ accountSchema.index(
   }
 );
 
-// Unique index: accountName must be unique per company
-accountSchema.index(
-  { companyId: 1, accountName: 1 },
-  {
-    unique: true,
-    partialFilterExpression: { isDeleted: false },
-  }
-);
+// Non-unique index: optimize search and sorting by accountName per company
+accountSchema.index({
+  companyId: 1,
+  accountName: 1,
+});
 
 accountSchema.index({
   workspaceId: 1,

@@ -29,17 +29,6 @@ const createAccount = async (workspaceId, companyId, userId, payload) => {
     );
   }
 
-  // Check unique name
-  const existingName = await accountRepository.findAccountByName(
-    companyId,
-    accountName,
-  );
-  if (existingName) {
-    throw new ApiError(
-      400,
-      "Account with this name already exists in the company",
-    );
-  }
 
   // Validate parent account group
   const group = await accountGroupRepository.findGroupByIdCompanyAndWorkspace(
@@ -124,22 +113,6 @@ const updateAccount = async (
     throw new ApiError(400, "System accounts cannot be modified");
   }
 
-  // Unique name check
-  if (payload.accountName && payload.accountName !== account.accountName) {
-    const existingName = await accountRepository.findAccountByName(
-      companyId,
-      payload.accountName,
-    );
-    if (
-      existingName &&
-      existingName._id.toString() !== account._id.toString()
-    ) {
-      throw new ApiError(
-        400,
-        "Account with this name already exists in the company",
-      );
-    }
-  }
 
   // Group change check
   if (payload.accountGroupId) {

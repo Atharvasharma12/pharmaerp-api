@@ -643,7 +643,7 @@ const postSaleAccounting = async ({
               let receivedAmount = receivedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);
 
               if (receivedAmount === 0 && receivedDenoms.length === 0) {
-                throw new ApiError(400, "Cash denominations are required for cash payments.");
+                receivedAmount = Number(payment.amount || amount || 0);
               }
 
               let changeAmount = returnedDenoms.reduce((sum, d) => sum + (Number(d.denomination) * Number(d.quantity)), 0);

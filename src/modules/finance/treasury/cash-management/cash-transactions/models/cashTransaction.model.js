@@ -174,6 +174,9 @@ const cashTransactionSchema = new mongoose.Schema(
 cashTransactionSchema.methods.toSafeObject = function () {
   const obj = this.toObject();
   delete obj.__v;
+  if (this.invoice || (this._doc && this._doc.invoice)) {
+    obj.invoice = this.invoice || this._doc.invoice;
+  }
   return obj;
 };
 
