@@ -63,6 +63,21 @@ export const cancelTransferOrder = asyncHandler(async (req, res) => {
     );
 });
 
+export const updateTransferOrder = asyncHandler(async (req, res) => {
+  const transferOrder = await transferOrderService.updateTransferOrder(
+    req.workspaceId,
+    req.params.id,
+    req.body,
+    req.user
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(200, "Transfer order updated successfully", transferOrder)
+    );
+});
+
 export const getTransferOrders = asyncHandler(async (req, res) => {
   const { page, limit, status, sourceBranchId, destinationBranchId } = req.query;
 
