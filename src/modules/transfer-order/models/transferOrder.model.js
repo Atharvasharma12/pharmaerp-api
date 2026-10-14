@@ -33,18 +33,6 @@ const transferOrderSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    companyId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Company",
-      default: null,
-      index: true,
-    },
-    branchId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Branch",
-      default: null,
-      index: true,
-    },
     transferNo: {
       type: String,
       required: true,
@@ -92,10 +80,6 @@ const transferOrderSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-transferOrderSchema.index({ companyId: 1, sourceBranchId: 1, createdAt: -1 });
-transferOrderSchema.index({ workspaceId: 1, sourceBranchId: 1 });
-transferOrderSchema.index({ workspaceId: 1, destinationBranchId: 1 });
 
 // Virtual alias for _id
 transferOrderSchema.virtual("transferOrderId").get(function () {
