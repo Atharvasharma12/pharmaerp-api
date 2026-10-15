@@ -102,6 +102,10 @@ const invoiceSchema = new mongoose.Schema(
       type: Array,
       default: [],
     },
+    customerChangeDenominations: {
+      type: Array,
+      default: [],
+    },
     status: {
       type: String,
       default: "Paid",
@@ -145,6 +149,12 @@ const invoiceSchema = new mongoose.Schema(
     doctor: {
       type: String,
       default: null,
+    },
+    doctorId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Doctor",
+      default: null,
+      index: true,
     },
     notes: {
       type: String,

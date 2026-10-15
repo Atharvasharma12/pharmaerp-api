@@ -40,15 +40,19 @@ const formatPaymentQr = (doc) => {
 };
 
 const getInvoiceById = async (invoiceId, companyId, workspaceId, session = null) => {
+  const isObjectId = mongoose.Types.ObjectId.isValid(invoiceId);
   const query = {
-    _id: invoiceId,
     companyId: new mongoose.Types.ObjectId(companyId),
     workspaceId: new mongoose.Types.ObjectId(workspaceId),
     isDeleted: false,
+    ...(isObjectId
+      ? { $or: [{ _id: new mongoose.Types.ObjectId(invoiceId) }, { invoiceNo: invoiceId }] }
+      : { invoiceNo: invoiceId }),
   };
 
   const queryBuilder = SalesInvoice.findOne(query)
-    .populate("customerId", "name mobile alternateMobile phone contactNumber contact")
+    .populate("customerId", "name mobile alternateMobile phone contactNumber contact customerCode customerType gstNumber panNumber billingAddress creditLimit creditDays advanceBalance creditOutstanding")
+    .populate("doctorId", "name doctorCode qualification specialty mobile phone clinicHospitalName")
     .populate("shiftId", "status shiftNo shiftName shiftNumber openPeriod openedAt closedAt branchId")
     .populate({
       path: "paymentQrId",
