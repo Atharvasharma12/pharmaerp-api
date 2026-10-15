@@ -83,6 +83,18 @@ export const getAllCustomerSales = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "All customer sales fetched successfully", result));
 });
 
+export const getInvoiceById = asyncHandler(async (req, res) => {
+  const result = await invoiceService.getInvoiceById(
+    req.params.invoiceId,
+    req.companyId,
+    req.workspaceId
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Invoice fetched successfully", result));
+});
+
 export const updateCustomerSale = asyncHandler(async (req, res) => {
   const branchId =
     req.headers["x-branch-id"] ||
@@ -109,13 +121,15 @@ export const updateCustomerSale = asyncHandler(async (req, res) => {
 export const cancelCustomerSale = asyncHandler(async (req, res) => {
   const cancelReason = req.body?.reason || req.body?.cancelReason || null;
   const refundDenominations = req.body?.refundDenominations || null;
+  const customerChangeDenominations = req.body?.customerChangeDenominations || null;
   const result = await invoiceService.cancelCustomerSale(
     req.params.invoiceId,
     req.companyId,
     req.workspaceId,
     req.user,
     cancelReason,
-    refundDenominations
+    refundDenominations,
+    customerChangeDenominations
   );
 
   return res

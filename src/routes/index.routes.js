@@ -14,6 +14,7 @@ import salesModule from "../modules/sales/sales.module.js";
 import transferOrderModule from "../modules/transfer-order/transferOrder.module.js";
 import operationsModule from "../modules/operations/operations.module.js";
 import dashboardModule from "../modules/dashboard/dashboard.module.js";
+import doctorModule from "../modules/doctor/doctor.module.js";
 
 const router = Router();
 
@@ -28,6 +29,8 @@ router.use(API_PREFIX + subscriptionModule.path, subscriptionModule.router);
 router.use(API_PREFIX + catalogModule.path, catalogModule.router);
 
 router.use(API_PREFIX + partiesModule.path, partiesModule.router);
+
+router.use(API_PREFIX + doctorModule.path, doctorModule.router);
 
 router.use(API_PREFIX + financeModule.path, financeModule.router);
 

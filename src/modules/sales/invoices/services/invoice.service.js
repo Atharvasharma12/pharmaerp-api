@@ -44,9 +44,17 @@ const revertCashTransactionsForInvoice = async (
   userId,
   session,
   refundDenominations = null,
-  branchId = null
+  branchId = null,
+  customerChangeDenominations = null
 ) => {
   const processedRefundDenoms = (Array.isArray(refundDenominations) ? refundDenominations : [])
+    .map((d) => ({
+      denomination: Number(d.denomination || d.val || d.note || 0),
+      quantity: Number(d.quantity || d.count || d.qty || 0),
+    }))
+    .filter((d) => d.denomination > 0 && d.quantity > 0);
+
+  const processedCustomerChangeDenoms = (Array.isArray(customerChangeDenominations) ? customerChangeDenominations : [])
     .map((d) => ({
       denomination: Number(d.denomination || d.val || d.note || 0),
       quantity: Number(d.quantity || d.count || d.qty || 0),
@@ -57,6 +65,7 @@ const revertCashTransactionsForInvoice = async (
     // Staff provided custom refund denominations to pay customer back from branch running cash drawer
     const resolvedBranchId = branchId;
     if (resolvedBranchId) {
+      // 1. Subtract cash dispensed to customer from branch running cash drawer
       await branchCashRepository.subtractRunningDenominations(
         resolvedBranchId,
         companyId,
@@ -64,6 +73,17 @@ const revertCashTransactionsForInvoice = async (
         userId,
         { session }
       );
+
+      // 2. Add change received from customer back into branch running cash drawer (if any)
+      if (processedCustomerChangeDenoms.length > 0) {
+        await branchCashRepository.addRunningDenominations(
+          resolvedBranchId,
+          companyId,
+          processedCustomerChangeDenoms,
+          userId,
+          { session }
+        );
+      }
     }
     // Delete linked CashDenomination records and CashTransactions
     const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
@@ -307,13 +327,22 @@ const cleanInvoiceAccountingEntries = async (
   userId,
   session,
   refundDenominations = null,
-  branchId = null
+  branchId = null,
+  customerChangeDenominations = null
 ) => {
   // 1. Delete GSTR-1 entry
   await GstLedger.deleteMany({ voucherId: invoiceId }, { session });
 
-  // 2. Delete Cash Transactions & Revert Denominations (deducting custom refund denominations if specified)
-  await revertCashTransactionsForInvoice(invoiceNo, companyId, userId, session, refundDenominations, branchId);
+  // 2. Delete Cash Transactions & Revert Denominations (deducting custom refund denominations & adding customer change if specified)
+  await revertCashTransactionsForInvoice(
+    invoiceNo,
+    companyId,
+    userId,
+    session,
+    refundDenominations,
+    branchId,
+    customerChangeDenominations
+  );
 
   // 3. Delete Bank Transactions & Linked Journal Vouchers
   const bankTxQuery = {
@@ -1167,7 +1196,8 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     creditPaidAmount: 0,
     creditTransactionId: null,
     items: Array.isArray(saleData.items) ? saleData.items : [],
-    doctor: saleData.doctor || null,
+    doctor: saleData.doctor || saleData.doctorName || null,
+    doctorId: saleData.doctorId || null,
     notes: saleData.notes || null,
     createdBy: user?._id || null,
     createdByName: user?.name || null,
@@ -1365,6 +1395,8 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
     }
     existingInvoice.items = Array.isArray(saleData.items) ? saleData.items : existingInvoice.items;
     if (saleData.doctor !== undefined) existingInvoice.doctor = saleData.doctor;
+    if (saleData.doctorName !== undefined && saleData.doctor === undefined) existingInvoice.doctor = saleData.doctorName;
+    if (saleData.doctorId !== undefined) existingInvoice.doctorId = saleData.doctorId || null;
     if (saleData.notes !== undefined) existingInvoice.notes = saleData.notes;
     if (saleData.creditDueDate) {
       const parsed = new Date(saleData.creditDueDate);
@@ -1460,7 +1492,15 @@ const getAllCustomerSales = async (companyId, workspaceId, filters = {}, paginat
 };
 
 
-const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cancelReason = null, refundDenominations = null) => {
+const cancelCustomerSale = async (
+  invoiceId,
+  companyId,
+  workspaceId,
+  user,
+  cancelReason = null,
+  refundDenominations = null,
+  customerChangeDenominations = null
+) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -1489,7 +1529,7 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
       invoiceCashAmount = Number(invoice.grandTotal || 0);
     }
 
-    // Normalize refund denominations
+    // Normalize refund denominations (cash dispensed from drawer to customer)
     const normalizedRefundDenoms = (Array.isArray(refundDenominations) ? refundDenominations : [])
       .map((d) => ({
         denomination: Number(d.denomination || d.val || d.note || 0),
@@ -1497,16 +1537,30 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
       }))
       .filter((d) => d.denomination > 0 && d.quantity > 0);
 
-    // If refund denominations provided for cash bill, validate equality
+    // Normalize customer change denominations (change received from customer back into drawer)
+    const normalizedCustomerChangeDenoms = (Array.isArray(customerChangeDenominations) ? customerChangeDenominations : [])
+      .map((d) => ({
+        denomination: Number(d.denomination || d.val || d.note || 0),
+        quantity: Number(d.quantity || d.count || d.qty || 0),
+      }))
+      .filter((d) => d.denomination > 0 && d.quantity > 0);
+
+    // If refund denominations provided for cash bill, validate net refund equality
     if (invoiceCashAmount > 0 && normalizedRefundDenoms.length > 0) {
       const refundTotal = normalizedRefundDenoms.reduce(
         (sum, d) => sum + d.denomination * d.quantity,
         0
       );
-      if (Math.abs(refundTotal - invoiceCashAmount) > 0.01) {
+      const changeTotal = normalizedCustomerChangeDenoms.reduce(
+        (sum, d) => sum + d.denomination * d.quantity,
+        0
+      );
+      const netRefund = refundTotal - changeTotal;
+
+      if (Math.abs(netRefund - invoiceCashAmount) > 0.01) {
         throw new ApiError(
           400,
-          `Refund denominations total (₹${refundTotal.toFixed(2)}) must equal invoice cash amount (₹${invoiceCashAmount.toFixed(2)})`
+          `Net refund (₹${netRefund.toFixed(2)}) must equal invoice cash amount (₹${invoiceCashAmount.toFixed(2)}). Dispensed from drawer: ₹${refundTotal.toFixed(2)}, Customer change: ₹${changeTotal.toFixed(2)}`
         );
       }
     }
@@ -1579,7 +1633,8 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
       user?._id || user?.id,
       session,
       normalizedRefundDenoms.length > 0 ? normalizedRefundDenoms : null,
-      invoice.branchId
+      invoice.branchId,
+      normalizedCustomerChangeDenoms.length > 0 ? normalizedCustomerChangeDenoms : null
     );
 
     // 6. Update invoice status & cancellation audit fields
@@ -1589,6 +1644,9 @@ const cancelCustomerSale = async (invoiceId, companyId, workspaceId, user, cance
     if (cancelReason) invoice.cancelReason = cancelReason;
     if (normalizedRefundDenoms.length > 0) {
       invoice.refundDenominations = normalizedRefundDenoms;
+    }
+    if (normalizedCustomerChangeDenoms.length > 0) {
+      invoice.customerChangeDenominations = normalizedCustomerChangeDenoms;
     }
     await invoice.save({ session });
 
@@ -1683,6 +1741,14 @@ const getNextInvoiceNumber = async (companyId, workspaceId, branchId, date = new
   };
 };
 
+const getInvoiceById = async (invoiceId, companyId, workspaceId) => {
+  const invoice = await invoiceRepository.getInvoiceById(invoiceId, companyId, workspaceId);
+  if (!invoice) {
+    throw new ApiError(404, "Invoice not found");
+  }
+  return invoice;
+};
+
 export default {
   recordCustomerSale,
   updateCustomerSale,
@@ -1690,4 +1756,5 @@ export default {
   getCustomerSales,
   getAllCustomerSales,
   getNextInvoiceNumber,
+  getInvoiceById,
 };
