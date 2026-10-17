@@ -1,0 +1,92 @@
+name: Deploy PharmaERP API to Production Server
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy Production Backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to AIC Server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USERNAME }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT }}
+
+          script: |
+            set -e
+
+            echo "======================================"
+            echo "🚀 Starting Production Deployment"
+            echo "======================================"
+
+            cd /var/www/pharmaerp-api
+
+            # Current deployed commit
+            OLD_COMMIT=$(git rev-parse HEAD)
+
+            echo "Current commit:"
+            echo "$OLD_COMMIT"
+
+            # Fetch latest main
+            echo "📥 Fetching latest main..."
+            git fetch origin main
+
+            # Latest remote commit
+            NEW_COMMIT=$(git rev-parse origin/main)
+
+            echo "Latest commit:"
+            echo "$NEW_COMMIT"
+
+            # Check if server is already up to date
+            if [ "$OLD_COMMIT" = "$NEW_COMMIT" ]; then
+              echo "✅ Server is already up to date."
+              exit 0
+            fi
+
+            # Update server to latest main
+            echo "🔄 Updating production server..."
+            git reset --hard origin/main
+
+            # Check for dependency changes
+            echo "🔍 Checking dependency changes..."
+
+            if git diff --name-only "$OLD_COMMIT" "$NEW_COMMIT" | grep -qE '(^|/)(package.json|package-lock.json)$'; then
+
+              echo "📦 Dependency changes detected."
+              echo "📦 Running npm ci..."
+
+              npm ci
+
+              echo "✅ Dependencies updated."
+
+            else
+
+              echo "✅ No dependency changes detected."
+              echo "⏭️ Skipping npm ci."
+
+            fi
+
+            # Restart application
+            echo "🔄 Restarting PM2..."
+
+            pm2 restart pharmaerp-api-prod
+
+            # Save PM2 process list
+            echo "💾 Saving PM2 configuration..."
+
+            pm2 save
+
+            echo "======================================"
+            echo "✅ Production deployment completed"
+            echo "======================================"
+
+            echo "📊 PM2 Status:"
+            pm2 status
