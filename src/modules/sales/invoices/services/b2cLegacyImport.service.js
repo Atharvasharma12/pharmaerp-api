@@ -676,3 +676,17 @@ export const getImportReport = async (migrationId, workspaceId) => {
     errorMessage: job.errorMessage,
   };
 };
+
+const b2cLegacyImportService = {
+  createImportJob,
+  processChunk,
+  materializeHistoricalInvoices,
+  runImportJob,
+  startImportJob,
+  pauseImportJob,
+  resumeImportJob,
+  getImportStatus,
+  getImportReport,
+};
+
+export default b2cLegacyImportService;
