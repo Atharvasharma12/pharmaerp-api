@@ -21,6 +21,9 @@ import ledgerService from "../../../finance/ledger/services/ledger.service.js";
 import customerAdvanceService from "./customerAdvance.service.js";
 import CustomerAdvanceTransaction from "../models/customerAdvanceTransaction.model.js";
 import CustomerCreditTransaction from "../models/customerCreditTransaction.model.js";
+import SharedContactGroup from "../models/sharedContactGroup.model.js";
+import CustomerRelationship, { CONFIRMATION_STATUS } from "../models/customerRelationship.model.js";
+import { getReciprocalRelation } from "../helpers/phoneNormalizer.js";
 
 const createCustomer = async (workspaceId, companyId, userId, payload) => {
   const {
@@ -97,8 +100,9 @@ const createCustomer = async (workspaceId, companyId, userId, payload) => {
       }, { session });
     }
 
-    // 3. Create the Ledger Account for the customer under SUNDRY_DEBTORS
-    const accCode = customerCode ? `CUST-${customerCode}` : `CUST-${Date.now()}`;
+    const accCode = customerCode
+      ? `CUST-${customerCode}`
+      : `CUST-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
     const ledgerAccount = await accountRepository.createAccount({
       workspaceId,
       companyId,
@@ -401,7 +405,471 @@ const getCustomerById = async (customerId, companyId, workspaceId) => {
     safeCustomer.overdueCount = 0;
   }
 
+  // Enrich with SharedContactGroup and pairwise relationship records from the viewing customer's perspective
+  if (safeCustomer.sharedContactGroupId) {
+    try {
+      const group = await SharedContactGroup.findOne({
+        _id: safeCustomer.sharedContactGroupId,
+        workspaceId,
+        companyId,
+      }).lean();
+
+      if (group && Array.isArray(group.members) && group.members.length > 0) {
+        const sortedMembers = [...group.members].sort(
+          (a, b) => (a.sequence || 1) - (b.sequence || 1)
+        );
+        const memberCustomerIds = sortedMembers.map((m) => m.customerId);
+
+        const [memberCustomers, relationshipRecords] = await Promise.all([
+          Customer.find({
+            _id: { $in: memberCustomerIds },
+            workspaceId,
+            companyId,
+            isDeleted: false,
+          })
+            .select("_id customerCode name mobile gender")
+            .lean(),
+          CustomerRelationship.find({
+            workspaceId,
+            companyId,
+            sourceCustomerId: customer._id,
+            targetCustomerId: { $in: memberCustomerIds },
+          }).lean(),
+        ]);
+
+        const customerMap = new Map(
+          memberCustomers.map((c) => [c._id.toString(), c])
+        );
+        const relMap = new Map(
+          relationshipRecords.map((r) => [r.targetCustomerId.toString(), r])
+        );
+
+        const enrichedMembers = sortedMembers
+          .map((m) => {
+            const targetCust = customerMap.get(m.customerId.toString());
+            if (!targetCust) return null;
+
+            const isSelf = m.customerId.toString() === customer._id.toString();
+            const relRecord = relMap.get(m.customerId.toString());
+
+            let relation = isSelf ? "Self" : "Other";
+            let confirmationStatus = isSelf ? "confirmed" : "suggested";
+
+            if (relRecord) {
+              relation = relRecord.relationship;
+              confirmationStatus = relRecord.confirmationStatus;
+            }
+
+            return {
+              customerId: targetCust._id,
+              customerCode: targetCust.customerCode,
+              name: targetCust.name,
+              mobile: targetCust.mobile,
+              gender: targetCust.gender || null,
+              sequence: m.sequence,
+              joinedAt: m.joinedAt,
+              relation,
+              confirmationStatus,
+              confirmedBy: relRecord?.confirmedBy || null,
+              confirmedAt: relRecord?.confirmedAt || null,
+              notes: relRecord?.notes || null,
+              relationshipId: relRecord?._id || null,
+            };
+          })
+          .filter(Boolean);
+
+        safeCustomer.sharedContactGroup = {
+          _id: group._id,
+          normalizedPhone: group.normalizedPhone,
+          members: enrichedMembers,
+        };
+        safeCustomer.members = enrichedMembers;
+      }
+    } catch (err) {
+      console.warn("Failed to attach sharedContactGroup to customer:", err.message);
+    }
+  }
+
   return safeCustomer;
+};
+
+const updateCustomerRelationship = async (
+  workspaceId,
+  companyId,
+  userId,
+  sourceCustomerId,
+  targetCustomerId,
+  data
+) => {
+  const { relationship, confirmationStatus = CONFIRMATION_STATUS.CONFIRMED, notes } = data;
+
+  const [sourceCustomer, targetCustomer] = await Promise.all([
+    Customer.findOne({ _id: sourceCustomerId, workspaceId, companyId, isDeleted: false }),
+    Customer.findOne({ _id: targetCustomerId, workspaceId, companyId, isDeleted: false }),
+  ]);
+
+  if (!sourceCustomer) {
+    throw new ApiError(404, "Source customer not found");
+  }
+  if (!targetCustomer) {
+    throw new ApiError(404, "Target customer not found");
+  }
+
+  if (sourceCustomerId.toString() === targetCustomerId.toString()) {
+    throw new ApiError(400, "Cannot change relationship with oneself");
+  }
+
+  let groupId = sourceCustomer.sharedContactGroupId || targetCustomer.sharedContactGroupId;
+  if (!groupId) {
+    const phone = sourceCustomer.mobile;
+    if (phone && phone === targetCustomer.mobile) {
+      let group = await SharedContactGroup.findOne({
+        workspaceId,
+        companyId,
+        normalizedPhone: phone,
+      });
+      if (!group) {
+        group = new SharedContactGroup({
+          workspaceId,
+          companyId,
+          normalizedPhone: phone,
+          members: [
+            { customerId: sourceCustomer._id, sequence: 1 },
+            { customerId: targetCustomer._id, sequence: 2 },
+          ],
+        });
+        await group.save();
+      }
+      groupId = group._id;
+      sourceCustomer.sharedContactGroupId = groupId;
+      targetCustomer.sharedContactGroupId = groupId;
+      await Promise.all([sourceCustomer.save(), targetCustomer.save()]);
+    } else {
+      throw new ApiError(400, "Customers do not belong to the same shared contact group");
+    }
+  }
+
+  // 1. Update source -> target relationship
+  const updatedRelationship = await CustomerRelationship.findOneAndUpdate(
+    {
+      workspaceId,
+      companyId,
+      sourceCustomerId,
+      targetCustomerId,
+    },
+    {
+      $set: {
+        sharedContactGroupId: groupId,
+        relationship,
+        confirmationStatus,
+        confirmedBy: confirmationStatus === CONFIRMATION_STATUS.CONFIRMED ? userId : null,
+        confirmedAt: confirmationStatus === CONFIRMATION_STATUS.CONFIRMED ? new Date() : null,
+        notes: notes !== undefined ? notes : null,
+      },
+    },
+    { upsert: true, new: true, runValidators: true }
+  );
+
+  // 2. Check and derive reciprocal relationship for target -> source when confirmed
+  if (confirmationStatus === CONFIRMATION_STATUS.CONFIRMED) {
+    const reciprocalRel = getReciprocalRelation(relationship, {
+      isSameCustomer: false,
+      targetGender: sourceCustomer.gender || null,
+    });
+
+    if (reciprocalRel && reciprocalRel !== "Other") {
+      await CustomerRelationship.findOneAndUpdate(
+        {
+          workspaceId,
+          companyId,
+          sourceCustomerId: targetCustomerId,
+          targetCustomerId: sourceCustomerId,
+        },
+        {
+          $set: {
+            sharedContactGroupId: groupId,
+            relationship: reciprocalRel,
+            confirmationStatus: CONFIRMATION_STATUS.CONFIRMED,
+            confirmedBy: userId,
+            confirmedAt: new Date(),
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+  }
+
+  return updatedRelationship;
+};
+
+const addCustomerRelationship = async (
+  workspaceId,
+  companyId,
+  userId,
+  sourceCustomerId,
+  data
+) => {
+  const {
+    targetCustomerId: providedTargetId,
+    name,
+    mobile,
+    gender = null,
+    relationship = "Other",
+    confirmationStatus = CONFIRMATION_STATUS.CONFIRMED,
+    notes = null,
+  } = data;
+
+  const sourceCustomer = await Customer.findOne({
+    _id: sourceCustomerId,
+    workspaceId,
+    companyId,
+    isDeleted: false,
+  });
+
+  if (!sourceCustomer) {
+    throw new ApiError(404, "Source customer not found");
+  }
+
+  let targetCustomer = null;
+
+  if (providedTargetId) {
+    targetCustomer = await Customer.findOne({
+      _id: providedTargetId,
+      workspaceId,
+      companyId,
+      isDeleted: false,
+    });
+    if (!targetCustomer) {
+      throw new ApiError(404, "Target customer not found");
+    }
+  } else if (name) {
+    const cleanPhone = mobile ? String(mobile).trim() : null;
+    if (cleanPhone) {
+      targetCustomer = await Customer.findOne({
+        workspaceId,
+        companyId,
+        name: new RegExp(`^${name.trim()}$`, "i"),
+        mobile: cleanPhone,
+        isDeleted: false,
+      });
+    }
+
+    if (!targetCustomer) {
+      targetCustomer = new Customer({
+        workspaceId,
+        companyId,
+        name: name.trim(),
+        mobile: cleanPhone || sourceCustomer.mobile,
+        gender: gender || null,
+        customerType: "other",
+        customerCode: null,
+        createdBy: userId,
+        status: "active",
+      });
+      await targetCustomer.save();
+    }
+  } else {
+    throw new ApiError(400, "Either targetCustomerId or customer name is required");
+  }
+
+  if (sourceCustomer._id.equals(targetCustomer._id)) {
+    throw new ApiError(400, "Cannot add relationship to oneself");
+  }
+
+  // Determine or create SharedContactGroup
+  let group = null;
+  if (sourceCustomer.sharedContactGroupId) {
+    group = await SharedContactGroup.findOne({
+      _id: sourceCustomer.sharedContactGroupId,
+      workspaceId,
+      companyId,
+    });
+  } else if (targetCustomer.sharedContactGroupId) {
+    group = await SharedContactGroup.findOne({
+      _id: targetCustomer.sharedContactGroupId,
+      workspaceId,
+      companyId,
+    });
+  }
+
+  const phoneForGroup = sourceCustomer.mobile || targetCustomer.mobile || `grp-${Date.now()}`;
+
+  if (!group) {
+    group = new SharedContactGroup({
+      workspaceId,
+      companyId,
+      normalizedPhone: phoneForGroup,
+      members: [
+        { customerId: sourceCustomer._id, sequence: 1 },
+        { customerId: targetCustomer._id, sequence: 2 },
+      ],
+    });
+    await group.save();
+  } else {
+    const isTargetInGroup = group.members.some((m) =>
+      m.customerId.equals(targetCustomer._id)
+    );
+    if (!isTargetInGroup) {
+      const nextSequence =
+        group.members.length > 0
+          ? Math.max(...group.members.map((m) => m.sequence || 0)) + 1
+          : 1;
+      group.members.push({ customerId: targetCustomer._id, sequence: nextSequence });
+      await group.save();
+    }
+
+    const isSourceInGroup = group.members.some((m) =>
+      m.customerId.equals(sourceCustomer._id)
+    );
+    if (!isSourceInGroup) {
+      const nextSequence =
+        group.members.length > 0
+          ? Math.max(...group.members.map((m) => m.sequence || 0)) + 1
+          : 1;
+      group.members.push({ customerId: sourceCustomer._id, sequence: nextSequence });
+      await group.save();
+    }
+  }
+
+  if (!sourceCustomer.sharedContactGroupId || !sourceCustomer.sharedContactGroupId.equals(group._id)) {
+    sourceCustomer.sharedContactGroupId = group._id;
+    await sourceCustomer.save();
+  }
+  if (!targetCustomer.sharedContactGroupId || !targetCustomer.sharedContactGroupId.equals(group._id)) {
+    targetCustomer.sharedContactGroupId = group._id;
+    await targetCustomer.save();
+  }
+
+  const relDoc = await CustomerRelationship.findOneAndUpdate(
+    {
+      workspaceId,
+      companyId,
+      sourceCustomerId: sourceCustomer._id,
+      targetCustomerId: targetCustomer._id,
+    },
+    {
+      $set: {
+        sharedContactGroupId: group._id,
+        relationship,
+        confirmationStatus,
+        confirmedBy: confirmationStatus === CONFIRMATION_STATUS.CONFIRMED ? userId : null,
+        confirmedAt: confirmationStatus === CONFIRMATION_STATUS.CONFIRMED ? new Date() : null,
+        notes,
+      },
+    },
+    { upsert: true, new: true, runValidators: true }
+  );
+
+  if (confirmationStatus === CONFIRMATION_STATUS.CONFIRMED) {
+    const reciprocalRel = getReciprocalRelation(relationship, {
+      isSameCustomer: false,
+      targetGender: sourceCustomer.gender || null,
+    });
+
+    if (reciprocalRel && reciprocalRel !== "Other") {
+      await CustomerRelationship.findOneAndUpdate(
+        {
+          workspaceId,
+          companyId,
+          sourceCustomerId: targetCustomer._id,
+          targetCustomerId: sourceCustomer._id,
+        },
+        {
+          $set: {
+            sharedContactGroupId: group._id,
+            relationship: reciprocalRel,
+            confirmationStatus: CONFIRMATION_STATUS.CONFIRMED,
+            confirmedBy: userId,
+            confirmedAt: new Date(),
+          },
+        },
+        { upsert: true, new: true }
+      );
+    }
+  }
+
+  return {
+    relationship: relDoc,
+    targetCustomer: {
+      _id: targetCustomer._id,
+      name: targetCustomer.name,
+      mobile: targetCustomer.mobile,
+      gender: targetCustomer.gender,
+      customerCode: targetCustomer.customerCode,
+    },
+  };
+};
+
+const deleteCustomerRelationship = async (
+  workspaceId,
+  companyId,
+  userId,
+  sourceCustomerId,
+  targetCustomerId
+) => {
+  const [sourceCustomer, targetCustomer] = await Promise.all([
+    Customer.findOne({ _id: sourceCustomerId, workspaceId, companyId, isDeleted: false }),
+    Customer.findOne({ _id: targetCustomerId, workspaceId, companyId, isDeleted: false }),
+  ]);
+
+  if (!sourceCustomer) {
+    throw new ApiError(404, "Source customer not found");
+  }
+  if (!targetCustomer) {
+    throw new ApiError(404, "Target customer not found");
+  }
+
+  // 1. Delete pairwise relationship records between source and target in both directions
+  await CustomerRelationship.deleteMany({
+    workspaceId,
+    companyId,
+    $or: [
+      { sourceCustomerId, targetCustomerId },
+      { sourceCustomerId: targetCustomerId, targetCustomerId: sourceCustomerId },
+    ],
+  });
+
+  // 2. Update SharedContactGroup
+  const groupId = sourceCustomer.sharedContactGroupId || targetCustomer.sharedContactGroupId;
+  if (groupId) {
+    const group = await SharedContactGroup.findOne({ _id: groupId, workspaceId, companyId });
+    if (group) {
+      group.members = group.members.filter(
+        (m) => !m.customerId.equals(targetCustomerId)
+      );
+
+      group.members.forEach((m, idx) => {
+        m.sequence = idx + 1;
+      });
+
+      if (group.members.length <= 1) {
+        if (group.members.length === 1) {
+          const remainingId = group.members[0].customerId;
+          await Customer.updateOne(
+            { _id: remainingId },
+            { $set: { sharedContactGroupId: null } }
+          );
+        }
+        await SharedContactGroup.deleteOne({ _id: group._id });
+        await Customer.updateOne(
+          { _id: targetCustomerId },
+          { $set: { sharedContactGroupId: null } }
+        );
+        await Customer.updateOne(
+          { _id: sourceCustomerId },
+          { $set: { sharedContactGroupId: null } }
+        );
+      } else {
+        await group.save();
+        await Customer.updateOne(
+          { _id: targetCustomerId },
+          { $set: { sharedContactGroupId: null } }
+        );
+      }
+    }
+  }
+
+  return { success: true, message: "Relationship removed successfully" };
 };
 
 const updateCustomer = async (
@@ -828,16 +1296,21 @@ const confirmImport = async (workspaceId, companyId, userId, customersData, impo
       existingKeys.add(customerKey);
       
       // Auto-generate unique code that won't collide even across concurrent chunks
-      let customerCode;
-      do {
-         customerCode = `CUS-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-      } while(usedCodes.has(customerCode));
-      usedCodes.add(customerCode);
-      
-      const accCode = `CUST-${customerCode}`;
-      const accountName = `${customerData.name} - Customer`;
+      let customerCode = customerData.customerCode ? String(customerData.customerCode).trim().toUpperCase() : null;
+      if (importType === "b2c") {
+        customerCode = null; // B2C customer code can be skipped cleanly
+      } else if (!customerCode) {
+        do {
+          customerCode = `CUS-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+        } while(usedCodes.has(customerCode));
+        usedCodes.add(customerCode);
+      }
       
       const accountId = new mongoose.Types.ObjectId();
+      const accCode = customerCode 
+        ? `CUST-${customerCode}` 
+        : `CUST-${accountId.toString().slice(-8).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`;
+      const accountName = `${customerData.name} - Customer`;
       
       accountsToInsert.push({
         _id: accountId,
@@ -1171,4 +1644,7 @@ export default {
   getCustomerLedger,
   getCustomerOutstanding,
   getCustomerPayments,
+  updateCustomerRelationship,
+  addCustomerRelationship,
+  deleteCustomerRelationship,
 };

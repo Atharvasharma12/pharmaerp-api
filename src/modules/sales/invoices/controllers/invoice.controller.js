@@ -32,13 +32,15 @@ export const getCustomerSales = asyncHandler(async (req, res) => {
 
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
+  const memberId = req.query.memberId || null;
+  const includeFamily = req.query.includeFamily !== "false";
 
   const result = await invoiceService.getCustomerSales(
     req.params.customerId,
     req.companyId,
     req.workspaceId,
     branchId,
-    { page, limit }
+    { page, limit, memberId, includeFamily }
   );
 
   return res

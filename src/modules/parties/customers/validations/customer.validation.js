@@ -25,7 +25,7 @@ const addressSchema = Joi.object({
 
 export const createCustomerSchema = Joi.object({
   branchId: objectId.allow(null).optional(),
-  customerCode: Joi.string().trim().uppercase().max(50).optional(),
+  customerCode: Joi.string().trim().uppercase().max(50).allow(null, "").optional(),
   customerType: Joi.string()
     .valid(...Object.values(CUSTOMER_TYPE))
     .optional(),
@@ -85,7 +85,7 @@ export const createCustomerSchema = Joi.object({
 
 export const updateCustomerSchema = Joi.object({
   branchId: objectId.allow(null).optional(),
-  customerCode: Joi.string().trim().uppercase().max(50).optional(),
+  customerCode: Joi.string().trim().uppercase().max(50).allow(null, "").optional(),
   customerType: Joi.string()
     .valid(...Object.values(CUSTOMER_TYPE))
     .optional(),
@@ -216,3 +216,58 @@ export const getStatementQuerySchema = Joi.object({
   fromDate: Joi.date().optional(),
   toDate: Joi.date().optional(),
 });
+
+export const updateCustomerRelationshipSchema = Joi.object({
+  relationship: Joi.string()
+    .valid(
+      "Self",
+      "Father",
+      "Mother",
+      "Brother",
+      "Sister",
+      "Son",
+      "Daughter",
+      "Spouse",
+      "Other"
+    )
+    .required(),
+  confirmationStatus: Joi.string()
+    .valid("suggested", "confirmed")
+    .optional(),
+  notes: Joi.string().trim().max(500).allow(null, "").optional(),
+});
+
+export const addCustomerRelationshipSchema = Joi.object({
+  targetCustomerId: objectId.optional(),
+  name: Joi.string().trim().min(2).max(160).optional(),
+  mobile: Joi.string()
+    .trim()
+    .pattern(/^[6-9][0-9]{9}$/)
+    .allow(null, "")
+    .optional(),
+  gender: Joi.string().valid("male", "female", "other").allow(null, "").optional(),
+  relationship: Joi.string()
+    .valid(
+      "Self",
+      "Father",
+      "Mother",
+      "Brother",
+      "Sister",
+      "Son",
+      "Daughter",
+      "Spouse",
+      "Other"
+    )
+    .required(),
+  confirmationStatus: Joi.string()
+    .valid("suggested", "confirmed")
+    .default("confirmed")
+    .optional(),
+  notes: Joi.string().trim().max(500).allow(null, "").optional(),
+}).or("targetCustomerId", "name");
+
+export const customerRelationshipParamsSchema = Joi.object({
+  customerId: objectId.required(),
+  targetCustomerId: objectId.required(),
+});
+

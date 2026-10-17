@@ -32,6 +32,9 @@ import CustomerAdvanceTransaction from "../../../parties/customers/models/custom
 import CustomerCreditTransaction from "../../../parties/customers/models/customerCreditTransaction.model.js";
 import customerAdvanceService from "../../../parties/customers/services/customerAdvance.service.js";
 import { CUSTOMER_TRANSACTION_TYPE, CREDIT_STATUS } from "../../../parties/customers/constants/customer.constant.js";
+import Customer from "../../../parties/customers/models/customer.model.js";
+import SharedContactGroup from "../../../parties/customers/models/sharedContactGroup.model.js";
+import CustomerRelationship from "../../../parties/customers/models/customerRelationship.model.js";
 
 /**
  * Validates that all cash payments have explicit denomination breakdowns
@@ -1467,23 +1470,168 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
   }
 };
 
-const getCustomerSales = async (customerId, companyId, workspaceId, branchId = null, pagination = {}) => {
+const getCustomerSales = async (
+  customerId,
+  companyId,
+  workspaceId,
+  branchId = null,
+  options = {}
+) => {
   const customer = await customerRepository.findCustomerById(customerId);
 
   if (!customer) {
     throw new ApiError(404, "Customer not found");
   }
 
+  const { page = 1, limit = 10, memberId = null, includeFamily = true } = options;
+
+  let targetCustomerIds = [customerId];
+  const familyMembers = [];
+  const familyMemberMap = new Map();
+
+  // Always include the currently viewed customer as "Self"
+  const selfMember = {
+    customerId: customer._id,
+    _id: customer._id,
+    name: customer.name,
+    customerCode: customer.customerCode,
+    mobile: customer.mobile,
+    gender: customer.gender || null,
+    relation: "Self",
+    isSelf: true,
+  };
+  familyMembers.push(selfMember);
+  familyMemberMap.set(customer._id.toString(), selfMember);
+
+  // If customer is part of a SharedContactGroup, resolve all members and pairwise relations
+  if (customer.sharedContactGroupId) {
+    try {
+      const group = await SharedContactGroup.findOne({
+        _id: customer.sharedContactGroupId,
+        workspaceId,
+        companyId,
+      }).lean();
+
+      if (group && Array.isArray(group.members) && group.members.length > 0) {
+        const sortedMembers = [...group.members].sort(
+          (a, b) => (a.sequence || 1) - (b.sequence || 1)
+        );
+        const otherMemberIds = sortedMembers
+          .map((m) => m.customerId)
+          .filter((id) => id && id.toString() !== customer._id.toString());
+
+        if (otherMemberIds.length > 0) {
+          const [relatedCustomers, relationshipRecords] = await Promise.all([
+            Customer.find({
+              _id: { $in: otherMemberIds },
+              workspaceId,
+              companyId,
+              isDeleted: false,
+            })
+              .select("_id customerCode name mobile gender")
+              .lean(),
+            CustomerRelationship.find({
+              workspaceId,
+              companyId,
+              sourceCustomerId: customer._id,
+              targetCustomerId: { $in: otherMemberIds },
+            }).lean(),
+          ]);
+
+          const relMap = new Map(
+            relationshipRecords.map((r) => [r.targetCustomerId.toString(), r])
+          );
+          const custMap = new Map(
+            relatedCustomers.map((c) => [c._id.toString(), c])
+          );
+
+          for (const m of sortedMembers) {
+            const mIdStr = m.customerId?.toString();
+            if (!mIdStr || mIdStr === customer._id.toString()) continue;
+            const targetCust = custMap.get(mIdStr);
+            if (!targetCust) continue;
+
+            const relRecord = relMap.get(mIdStr);
+            const relation = relRecord?.relationship || "Other";
+            const memberObj = {
+              customerId: targetCust._id,
+              _id: targetCust._id,
+              name: targetCust.name,
+              customerCode: targetCust.customerCode,
+              mobile: targetCust.mobile,
+              gender: targetCust.gender || null,
+              relation,
+              isSelf: false,
+            };
+            familyMembers.push(memberObj);
+            familyMemberMap.set(mIdStr, memberObj);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load family members for customer sales:", err.message);
+    }
+  }
+
+  // Determine query targets based on memberId filter & includeFamily flag
+  if (memberId && mongoose.Types.ObjectId.isValid(memberId)) {
+    targetCustomerIds = [memberId];
+  } else if (includeFamily && familyMembers.length > 1) {
+    targetCustomerIds = familyMembers.map((m) => m.customerId);
+  } else {
+    targetCustomerIds = [customerId];
+  }
+
   const result = await invoiceRepository.getInvoicesByCustomerId(
-    customerId,
+    targetCustomerIds,
     companyId,
     workspaceId,
     { branchId },
-    pagination
+    { page, limit }
   );
 
+  const enrichedSales = (result.sales || []).map((inv) => {
+    const custIdStr = (inv.customerId?._id || inv.customerId)?.toString();
+    const memberInfo = familyMemberMap.get(custIdStr);
+
+    // Slim down items array - strip heavy embedded workspaceProduct object
+    const items = (inv.items || []).map((item) => ({
+      id: item.id || item._id || item.productId,
+      productId: item.productId || item._id,
+      name: item.name || item.productName || item.workspaceProduct?.name || "Product",
+      batch: item.batch || item.batchNo || "",
+      qty: item.qty || 1,
+      rate: Number(item.rate ?? item.price ?? item.rateC ?? item.mrp ?? 0),
+      price: Number(item.price ?? item.rate ?? 0),
+      mrp: Number(item.mrp ?? 0),
+      disc: Number(item.disc ?? 0),
+    }));
+
+    return {
+      _id: inv._id,
+      invoiceNo: inv.invoiceNo,
+      date: inv.date,
+      billingMode: inv.billingMode,
+      subtotal: inv.subtotal,
+      discount: inv.discount,
+      tax: inv.tax,
+      grandTotal: inv.grandTotal,
+      paymentMethod: inv.paymentMethod,
+      status: inv.status,
+      customerId: inv.customerId,
+      memberName: memberInfo?.name || inv.customerId?.name || "",
+      memberRelation:
+        memberInfo?.relation || (custIdStr === customer._id.toString() ? "Self" : "Customer"),
+      memberGender: memberInfo?.gender || inv.customerId?.gender || null,
+      isSelf: memberInfo?.isSelf ?? (custIdStr === customer._id.toString()),
+      items,
+    };
+  });
+
   return {
-    data: result.sales,
+    data: enrichedSales,
+    familyMembers,
+    selectedMemberId: memberId || null,
     meta: {
       total: result.total,
       page: result.page,

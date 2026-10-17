@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import crypto from "crypto";
 
 import {
   CUSTOMER_STATUS,
@@ -81,6 +82,7 @@ const customerSchema = new mongoose.Schema(
       type: String,
       trim: true,
       uppercase: true,
+      default: null,
     },
 
     customerType: {
@@ -96,6 +98,14 @@ const customerSchema = new mongoose.Schema(
       trim: true,
       minlength: [2, "Customer name must be at least 2 characters"],
       maxlength: [160, "Customer name cannot exceed 160 characters"],
+    },
+
+    gender: {
+      type: String,
+      enum: ["male", "female", "other"],
+      default: null,
+      lowercase: true,
+      trim: true,
     },
 
     mobile: {
@@ -202,6 +212,13 @@ const customerSchema = new mongoose.Schema(
       index: true,
     },
 
+    sharedContactGroupId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SharedContactGroup",
+      default: null,
+      index: true,
+    },
+
     notes: {
       type: String,
       trim: true,
@@ -244,13 +261,13 @@ const customerSchema = new mongoose.Schema(
   },
 );
 
-const generateCustomerCode = async () => {
+export const generateCustomerCode = async () => {
   const Customer = mongoose.models.Customer;
 
   while (true) {
-    const code = `${CUSTOMER_CODE_PREFIX}${Math.floor(
-      100000 + Math.random() * 900000,
-    )}`;
+    const code = `${CUSTOMER_CODE_PREFIX}-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+    if (!Customer || !Customer.db || Customer.db.readyState !== 1) return code;
 
     const exists = await Customer.exists({
       customerCode: code,
@@ -262,7 +279,12 @@ const generateCustomerCode = async () => {
 };
 
 customerSchema.pre("validate", async function () {
-  if (!this.customerCode) {
+  if (this.customerCode === "") {
+    this.customerCode = null;
+  }
+  // Only auto-generate if customerCode is undefined (not passed at all).
+  // If caller explicitly sets null, keep it null so customerCode can be skipped cleanly!
+  if (this.customerCode === undefined) {
     this.customerCode = await generateCustomerCode();
   }
 });
@@ -279,7 +301,10 @@ customerSchema.index(
   { customerCode: 1 },
   {
     unique: true,
-    partialFilterExpression: { isDeleted: false },
+    partialFilterExpression: {
+      isDeleted: false,
+      customerCode: { $type: "string" },
+    },
   },
 );
 
