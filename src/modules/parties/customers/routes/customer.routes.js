@@ -18,6 +18,8 @@ import {
   previewImport,
   confirmImport,
   importChunk,
+  previewB2CImport,
+  confirmB2CImport,
   receiveAdvance,
   getAdvanceBalance,
   settleCredit,
@@ -25,6 +27,9 @@ import {
   getCustomerTransactions,
   getCustomerStatement,
   getAllPendingCredits,
+  addCustomerRelationship,
+  updateCustomerRelationship,
+  deleteCustomerRelationship,
 } from "../controllers/customer.controller.js";
 
 import {
@@ -36,6 +41,9 @@ import {
   settleCreditSchema,
   getTransactionsQuerySchema,
   getStatementQuerySchema,
+  addCustomerRelationshipSchema,
+  updateCustomerRelationshipSchema,
+  customerRelationshipParamsSchema,
 } from "../validations/customer.validation.js";
 
 const router = Router();
@@ -52,6 +60,18 @@ import uploadFile from "../../../../middlewares/upload.middleware.js";
 router.post("/import/preview", uploadFile.single("file"), previewImport);
 router.post("/import/confirm", confirmImport);
 router.post("/import/chunk", importChunk);
+router.post("/import/b2c-preview", uploadFile.single("file"), previewB2CImport);
+router.post(
+  "/import/b2c-confirm",
+  (req, res, next) => {
+    const contentType = req.headers["content-type"] || "";
+    if (contentType.includes("multipart/form-data")) {
+      return uploadFile.single("file")(req, res, next);
+    }
+    next();
+  },
+  confirmB2CImport
+);
 
 // CRUD
 
@@ -146,5 +166,25 @@ router.get(
   getCustomerStatement,
 );
 
+// Customer Relationships
+router.post(
+  "/:customerId/relationships",
+  validate(customerIdParamSchema, "params"),
+  validate(addCustomerRelationshipSchema),
+  addCustomerRelationship,
+);
+
+router.patch(
+  "/:customerId/relationships/:targetCustomerId",
+  validate(customerRelationshipParamsSchema, "params"),
+  validate(updateCustomerRelationshipSchema),
+  updateCustomerRelationship,
+);
+
+router.delete(
+  "/:customerId/relationships/:targetCustomerId",
+  validate(customerRelationshipParamsSchema, "params"),
+  deleteCustomerRelationship,
+);
 
 export default router;
