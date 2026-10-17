@@ -54,6 +54,12 @@ const b2cLegacyImportJobSchema = new mongoose.Schema(
       trim: true,
     },
 
+    fileFormat: {
+      type: String,
+      enum: ["FLAT_TABULAR", "MARG_ERP_STATEMENT"],
+      default: "FLAT_TABULAR",
+    },
+
     columnMapping: {
       customerNameField: { type: String, default: null, trim: true },
       mobileNumberField: { type: String, default: null, trim: true },

@@ -1,4 +1,4 @@
-import XLSX from "xlsx";
+  import XLSX from "xlsx";
 import mongoose from "mongoose";
 import fs from "fs";
 import path from "path";
@@ -12,6 +12,10 @@ import {
   detectColumnMapping,
   normalizeMedicineName,
 } from "../helpers/b2cLegacyExtractor.js";
+import {
+  isMargStatement,
+  transformMargStatementRows,
+} from "../helpers/margStatementParser.js";
 
 // Active runners in memory to support pause/resume signals
 const activeJobs = new Map();
@@ -39,7 +43,7 @@ export const createImportJob = async ({
   const fileSize = file.size || (fs.existsSync(filePath) ? fs.statSync(filePath).size : 0);
 
   // Fast header inspection
-  const workbook = XLSX.readFile(filePath, { sheetRows: 10, dense: true });
+  const workbook = XLSX.readFile(filePath, { sheetRows: 40, dense: true });
   const sheetNames = workbook.SheetNames || [];
   if (sheetNames.length === 0) {
     throw new Error("Uploaded Excel file has no worksheets");
@@ -48,19 +52,27 @@ export const createImportJob = async ({
   const targetSheetName = options.sheetName || sheetNames[0];
   const worksheet = workbook.Sheets[targetSheetName];
 
-  // Inspect headers from first row
-  const sampleRows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
-  const headers = Array.isArray(sampleRows[0])
-    ? sampleRows[0].map((h) => String(h || "").trim()).filter(Boolean)
+  // Inspect headers and sample rows from first 40 rows
+  const sampleAoa = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+  const isMarg = isMargStatement(sampleAoa);
+  const fileFormat = isMarg ? "MARG_ERP_STATEMENT" : "FLAT_TABULAR";
+
+  const headers = Array.isArray(sampleAoa[0])
+    ? sampleAoa[0].map((h) => String(h || "").trim()).filter(Boolean)
     : [];
 
-  const detectedMapping = detectColumnMapping(headers);
+  const detectedMapping = isMarg
+    ? {
+        customerNameField: "Customer Name (Marg ERP Auto-Parsed)",
+        mobileNumberField: "Mobile Number (Marg ERP Auto-Parsed)",
+        medicineField: "Medicine Description (Marg ERP Auto-Parsed)",
+      }
+    : detectColumnMapping(headers);
 
   // Estimate total rows from ref
   let totalRows = 0;
   if (worksheet["!ref"]) {
     const range = XLSX.utils.decode_range(worksheet["!ref"]);
-    // Rows count minus 1 header row
     totalRows = Math.max(0, range.e.r);
   }
 
@@ -78,6 +90,7 @@ export const createImportJob = async ({
     originalFileName,
     fileSize,
     sheetName: targetSheetName,
+    fileFormat,
     columnMapping: {
       customerNameField: options.customerNameField || detectedMapping.customerNameField,
       mobileNumberField: options.mobileNumberField || detectedMapping.mobileNumberField,
@@ -96,6 +109,7 @@ export const createImportJob = async ({
     selectedSheet: targetSheetName,
     headers,
     detectedMapping,
+    fileFormat,
     totalRows,
   };
 };
@@ -262,6 +276,170 @@ export const processChunk = async ({
 
   return {
     processedCount: chunkRows.length,
+    validCount,
+    skippedCount,
+    matchedCount,
+    unmatchedCount,
+  };
+};
+
+/**
+ * Processes a chunk of records parsed from Marg ERP statement format.
+ */
+export const processMargChunk = async ({
+  chunkRecords,
+  migrationId,
+  workspaceId,
+  companyId,
+  branchId,
+  job,
+}) => {
+  let validCount = 0;
+  let skippedCount = 0;
+  let matchedCount = 0;
+  let unmatchedCount = 0;
+
+  const validExtracted = [];
+
+  chunkRecords.forEach((r) => {
+    if (!r.isValid) {
+      skippedCount++;
+      if (job.skippedRecords.length < MAX_ERROR_SAMPLES_IN_DB) {
+        job.skippedRecords.push({
+          rowNumber: r.rowNumber,
+          reason: r.skipReason || "INVALID_MOBILE",
+          value: r.value || "",
+        });
+      }
+    } else {
+      validExtracted.push(r);
+    }
+  });
+
+  validCount = validExtracted.length;
+
+  if (validExtracted.length === 0) {
+    job.processedRows += chunkRecords.length;
+    job.validRows += validCount;
+    job.skippedRows += skippedCount;
+    return {
+      processedCount: chunkRecords.length,
+      validCount,
+      skippedCount,
+      matchedCount: 0,
+      unmatchedCount: 0,
+    };
+  }
+
+  // Product matching: check normalized clean name, normalized raw name, and clean name
+  const uniqueNormalized = [
+    ...new Set(validExtracted.map((r) => r.normalizedMedicineName).filter(Boolean)),
+  ];
+  const uniqueRawNormalized = [
+    ...new Set(validExtracted.map((r) => r.rawNormalizedMedicineName).filter(Boolean)),
+  ];
+  const uniqueCleanNames = [
+    ...new Set(validExtracted.map((r) => r.cleanMedicineName).filter(Boolean)),
+  ];
+
+  const productMap = new Map();
+  const allNormalizedKeys = [...new Set([...uniqueNormalized, ...uniqueRawNormalized])];
+
+  const BATCH_QUERY_SIZE = 500;
+  for (let i = 0; i < allNormalizedKeys.length; i += BATCH_QUERY_SIZE) {
+    const batchNorm = allNormalizedKeys.slice(i, i + BATCH_QUERY_SIZE);
+    const batchNames = uniqueCleanNames.slice(i, i + BATCH_QUERY_SIZE);
+
+    const products = await WorkspaceProduct.find({
+      workspaceId,
+      $or: [
+        { normalizedName: { $in: batchNorm } },
+        { name: { $in: batchNames } },
+      ],
+      isDeleted: false,
+    })
+      .select("_id name normalizedName")
+      .lean();
+
+    products.forEach((p) => {
+      if (p.normalizedName) {
+        productMap.set(p.normalizedName, { _id: p._id, name: p.name });
+      }
+      const normFromName = normalizeMedicineName(p.name);
+      if (normFromName) {
+        productMap.set(normFromName, { _id: p._id, name: p.name });
+      }
+    });
+  }
+
+  // Group matched products by customer mobile
+  const customerMobileMap = new Map();
+
+  validExtracted.forEach((r) => {
+    const matchedProduct =
+      productMap.get(r.normalizedMedicineName) ||
+      productMap.get(r.rawNormalizedMedicineName);
+
+    if (!matchedProduct) {
+      unmatchedCount++;
+      if (job.unmatchedMedicines.length < MAX_ERROR_SAMPLES_IN_DB) {
+        job.unmatchedMedicines.push({
+          medicineName: r.medicineName || r.cleanMedicineName,
+          rowNumber: r.rowNumber,
+        });
+      }
+    } else {
+      matchedCount++;
+      if (!customerMobileMap.has(r.mobileNumber)) {
+        customerMobileMap.set(r.mobileNumber, {
+          customerName: r.customerName,
+          productIds: new Set(),
+        });
+      }
+      customerMobileMap.get(r.mobileNumber).productIds.add(matchedProduct._id);
+    }
+  });
+
+  // Bulk upsert into B2CLegacyImportStaging with $addToSet
+  if (customerMobileMap.size > 0) {
+    const stagingOps = [];
+    for (const [mobile, data] of customerMobileMap.entries()) {
+      stagingOps.push({
+        updateOne: {
+          filter: {
+            migrationId,
+            workspaceId,
+            mobileNumber: mobile,
+          },
+          update: {
+            $setOnInsert: {
+              companyId,
+              branchId,
+              customerName: data.customerName || "Customer",
+              status: "pending",
+            },
+            $addToSet: {
+              productIds: { $each: Array.from(data.productIds) },
+            },
+          },
+          upsert: true,
+        },
+      });
+    }
+
+    if (stagingOps.length > 0) {
+      await B2CLegacyImportStaging.bulkWrite(stagingOps, { ordered: false });
+    }
+  }
+
+  job.processedRows += chunkRecords.length;
+  job.validRows += validCount;
+  job.skippedRows += skippedCount;
+  job.matchedProducts += matchedCount;
+  job.unmatchedProducts += unmatchedCount;
+
+  return {
+    processedCount: chunkRecords.length,
     validCount,
     skippedCount,
     matchedCount,
@@ -472,42 +650,78 @@ export const runImportJob = async (migrationId) => {
     const workbook = XLSX.readFile(filePath, { dense: true });
     const worksheet = workbook.Sheets[job.sheetName || workbook.SheetNames[0]];
 
-    // Read rows as objects with headers
-    const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-    const totalFileRows = rawRows.length;
-    job.totalRows = totalFileRows;
+    if (job.fileFormat === "MARG_ERP_STATEMENT") {
+      // Parse Marg ERP statement hierarchical rows
+      const rawAoa = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: "" });
+      const allRecords = transformMargStatementRows(rawAoa);
+      const totalRecords = allRecords.length;
+      job.totalRows = totalRecords;
 
-    const chunkSize = job.chunkSize || 1000;
-    let currentRowIndex = job.lastProcessedRow || 0;
+      const chunkSize = job.chunkSize || 1000;
+      let currentIndex = job.lastProcessedRow || 0;
 
-    // Process in chunks
-    while (currentRowIndex < totalFileRows) {
-      // Check for pause signal
-      const activeState = activeJobs.get(migrationId);
-      if (activeState?.shouldPause) {
-        job.status = "paused";
+      while (currentIndex < totalRecords) {
+        const activeState = activeJobs.get(migrationId);
+        if (activeState?.shouldPause) {
+          job.status = "paused";
+          await job.save();
+          activeJobs.delete(migrationId);
+          return job;
+        }
+
+        const chunk = allRecords.slice(currentIndex, currentIndex + chunkSize);
+
+        await processMargChunk({
+          chunkRecords: chunk,
+          migrationId: job.migrationId,
+          workspaceId: job.workspaceId,
+          companyId: job.companyId,
+          branchId: job.branchId,
+          job,
+        });
+
+        currentIndex += chunk.length;
+        job.lastProcessedRow = currentIndex;
         await job.save();
-        activeJobs.delete(migrationId);
-        return job;
       }
+    } else {
+      // Standard Flat Tabular format
+      const rawRows = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+      const totalFileRows = rawRows.length;
+      job.totalRows = totalFileRows;
 
-      const chunk = rawRows.slice(currentRowIndex, currentRowIndex + chunkSize);
-      const startRowNumber = currentRowIndex + 2; // +1 for 1-based, +1 for header row
+      const chunkSize = job.chunkSize || 1000;
+      let currentRowIndex = job.lastProcessedRow || 0;
 
-      await processChunk({
-        chunkRows: chunk,
-        startRowNumber,
-        migrationId: job.migrationId,
-        workspaceId: job.workspaceId,
-        companyId: job.companyId,
-        branchId: job.branchId,
-        columnMapping: job.columnMapping,
-        job,
-      });
+      // Process in chunks
+      while (currentRowIndex < totalFileRows) {
+        // Check for pause signal
+        const activeState = activeJobs.get(migrationId);
+        if (activeState?.shouldPause) {
+          job.status = "paused";
+          await job.save();
+          activeJobs.delete(migrationId);
+          return job;
+        }
 
-      currentRowIndex += chunk.length;
-      job.lastProcessedRow = currentRowIndex;
-      await job.save();
+        const chunk = rawRows.slice(currentRowIndex, currentRowIndex + chunkSize);
+        const startRowNumber = currentRowIndex + 2; // +1 for 1-based, +1 for header row
+
+        await processChunk({
+          chunkRows: chunk,
+          startRowNumber,
+          migrationId: job.migrationId,
+          workspaceId: job.workspaceId,
+          companyId: job.companyId,
+          branchId: job.branchId,
+          columnMapping: job.columnMapping,
+          job,
+        });
+
+        currentRowIndex += chunk.length;
+        job.lastProcessedRow = currentRowIndex;
+        await job.save();
+      }
     }
 
     // Materialize Phase
@@ -680,6 +894,7 @@ export const getImportReport = async (migrationId, workspaceId) => {
 const b2cLegacyImportService = {
   createImportJob,
   processChunk,
+  processMargChunk,
   materializeHistoricalInvoices,
   runImportJob,
   startImportJob,
