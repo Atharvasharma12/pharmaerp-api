@@ -71,6 +71,14 @@ const workspaceProductSchema = new mongoose.Schema(
       maxlength: 300,
     },
 
+    normalizedName: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      default: null,
+      index: true,
+    },
+
     manufacturer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "ManufacturerMaster",
@@ -288,6 +296,15 @@ workspaceProductSchema.pre("validate", async function () {
   if (!this.workspaceProductCode) {
     this.workspaceProductCode = await generateWorkspaceProductCode();
   }
+  if (this.name) {
+    this.normalizedName = this.name
+      .trim()
+      .toLowerCase()
+      .replace(/[-_]/g, " ")
+      .replace(/[^a-z0-9\s]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
 });
 
 workspaceProductSchema.methods.toSafeObject = function () {
@@ -326,6 +343,11 @@ workspaceProductSchema.index(
     },
   },
 );
+
+workspaceProductSchema.index({
+  workspaceId: 1,
+  normalizedName: 1,
+});
 
 workspaceProductSchema.index({
   workspaceId: 1,

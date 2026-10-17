@@ -188,6 +188,21 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    isHistoricalImport: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    importSource: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    migrationId: {
+      type: String,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -195,6 +210,7 @@ const invoiceSchema = new mongoose.Schema(
 );
 
 invoiceSchema.index({ companyId: 1, workspaceId: 1, date: -1 });
+invoiceSchema.index({ workspaceId: 1, migrationId: 1, customerId: 1 });
 // Per-UPI analytics: single-method UPI invoices
 invoiceSchema.index({ companyId: 1, paymentQrId: 1, date: -1 });
 // Per-UPI analytics: split-payment UPI sub-items

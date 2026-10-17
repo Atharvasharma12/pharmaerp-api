@@ -310,6 +310,12 @@ customerSchema.index(
 
 customerSchema.index({
   workspaceId: 1,
+  mobile: 1,
+  isDeleted: 1,
+});
+
+customerSchema.index({
+  workspaceId: 1,
   companyId: 1,
   isDeleted: 1,
 });
