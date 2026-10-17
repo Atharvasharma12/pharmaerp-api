@@ -51,7 +51,7 @@ jobs:
 
             # Update server
             echo "🔄 Updating production server..."
-            git reset --hard origin/main
+            git pull origin main
 
             # Check dependency changes
             echo "🔍 Checking dependency changes..."
