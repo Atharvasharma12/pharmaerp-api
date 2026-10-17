@@ -75,7 +75,7 @@ jobs:
             # Restart PM2
             echo "🔄 Restarting PM2..."
 
-            pm2 restart pharmaerp-api-prod
+            pm2 restart pharmaerp-api-uat
 
             # Save PM2 configuration
             pm2 save
