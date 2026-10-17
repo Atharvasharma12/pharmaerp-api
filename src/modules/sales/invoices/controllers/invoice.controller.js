@@ -24,11 +24,12 @@ export const recordCustomerSale = asyncHandler(async (req, res) => {
 });
 
 export const getCustomerSales = asyncHandler(async (req, res) => {
+  // Bring customer sales history from all branches across the workspace.
+  // Only restrict to a specific branch if explicitly passed in query and not "all".
   const branchId =
-    req.headers["x-branch-id"] ||
-    req.branchId ||
-    req.query.branchId ||
-    null;
+    req.query.branchId && req.query.branchId !== "all"
+      ? req.query.branchId
+      : null;
 
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;

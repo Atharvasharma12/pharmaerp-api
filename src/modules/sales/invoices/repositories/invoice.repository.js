@@ -153,8 +153,9 @@ const getInvoicesByCustomerId = async (customerId, companyId, workspaceId, filte
 
   const [invoices, total, aggregate] = await Promise.all([
     SalesInvoice.find(query)
-      .select("invoiceNo date billingMode subtotal discount tax grandTotal paymentMethod status items customerId createdAt")
+      .select("invoiceNo date billingMode subtotal discount tax grandTotal paymentMethod status items customerId branchId createdAt")
       .populate("customerId", "name mobile customerCode gender")
+      .populate("branchId", "name branchCode")
       .sort({ date: -1 })
       .skip(skip)
       .limit(limit)

@@ -14,7 +14,12 @@ export const uploadFileController = async (req, res) => {
 
     const workspaceId = req.workspace?._id;
     const companyId = req.company?._id;
-    const branchId = req.branch?._id || null;
+    const branchId =
+      req.headers?.["x-branch-id"] ||
+      req.branchId ||
+      req.branch?._id ||
+      req.body?.branchId ||
+      null;
     const userId = req.user?._id || null;
 
     const result = await b2cLegacyImportService.createImportJob({

@@ -148,13 +148,22 @@ const MEDICINE_COLUMNS = [
 export const normalizeMedicineName = (name) => {
   if (!name || typeof name !== "string") return "";
 
-  return name
+  // Replace any whitespace (including tabs, non‑breaking spaces) with a single space,
+  // then trim, lowercase, replace hyphens/underscores/slashes with space, remove punctuation,
+  // and collapse multiple spaces.
+  let normalized = name
     .trim()
+    .replace(/[\s\u00A0\t]+/g, " ")
     .toLowerCase()
-    .replace(/[-_]/g, " ")
+    .replace(/[\-_/]/g, " ")
+    .replace(/[\.]/g, "")
     .replace(/[^a-z0-9\s]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  // Collapse any leftover multiple spaces and trim again
+  normalized = normalized.replace(/\s+/g, " ").trim();
+  return normalized;
 };
 
 /**

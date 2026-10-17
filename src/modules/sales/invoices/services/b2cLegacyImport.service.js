@@ -7,6 +7,7 @@ import B2CLegacyImportStaging from "../models/b2cLegacyImportStaging.model.js";
 import SalesInvoice from "../models/invoice.model.js";
 import WorkspaceProduct from "../../../catalog/products/models/workspaceProduct.model.js";
 import Customer from "../../../parties/customers/models/customer.model.js";
+import Branch from "../../../organization/branches/models/branch.model.js";
 import {
   extractB2CLegacyRow,
   detectColumnMapping,
@@ -81,11 +82,24 @@ export const createImportJob = async ({
     .substring(2, 7)
     .toUpperCase()}`;
 
+  let targetBranchId = branchId;
+  if (!targetBranchId && workspaceId && mongoose.connection?.readyState === 1) {
+    try {
+      const defaultBranch = await Branch.findOne({ workspaceId, isDeleted: false })
+        .sort({ createdAt: 1 })
+        .select("_id")
+        .lean();
+      targetBranchId = defaultBranch?._id || null;
+    } catch (e) {
+      // fallback
+    }
+  }
+
   const job = await B2CLegacyImportJob.create({
     migrationId,
     workspaceId,
     companyId,
-    branchId,
+    branchId: targetBranchId,
     filePath,
     originalFileName,
     fileSize,
@@ -173,47 +187,78 @@ export const processChunk = async ({
   }
 
   // Step 2: Product matching in batch
-  const uniqueNormalizedMedicines = [
-    ...new Set(validExtracted.map((r) => r.normalizedMedicineName)),
-  ];
-  const uniqueRawMedicines = [
-    ...new Set(validExtracted.map((r) => r.medicineName)),
-  ];
+  const uniqueNames = new Set();
+  const uniqueNormalized = new Set();
+
+  validExtracted.forEach((r) => {
+    if (r.medicineName) uniqueNames.add(r.medicineName);
+    if (r.singleSpacedMedicineName) uniqueNames.add(r.singleSpacedMedicineName);
+    if (r.cleanMedicineName) uniqueNames.add(r.cleanMedicineName);
+    if (r.normalizedMedicineName) uniqueNormalized.add(r.normalizedMedicineName);
+    const normSingle = normalizeMedicineName(r.singleSpacedMedicineName || r.medicineName);
+    if (normSingle) uniqueNormalized.add(normSingle);
+  });
+
+  const queryNamesList = [...uniqueNames];
+  const queryNormsList = [...uniqueNormalized];
 
   const productMap = new Map();
-
   const BATCH_QUERY_SIZE = 500;
-  for (let i = 0; i < uniqueNormalizedMedicines.length; i += BATCH_QUERY_SIZE) {
-    const batchNormalized = uniqueNormalizedMedicines.slice(i, i + BATCH_QUERY_SIZE);
-    const batchRaw = uniqueRawMedicines.slice(i, i + BATCH_QUERY_SIZE);
 
+  const populateProductMap = (products = []) => {
+    products.forEach((p) => {
+      if (p.name) {
+        productMap.set(p.name, { _id: p._id, name: p.name });
+        const single = p.name.trim().replace(/[\s\u00A0\t]+/g, " ");
+        productMap.set(single, { _id: p._id, name: p.name });
+        const norm = normalizeMedicineName(p.name);
+        if (norm) productMap.set(norm, { _id: p._id, name: p.name });
+      }
+      if (p.normalizedName) {
+        productMap.set(p.normalizedName, { _id: p._id, name: p.name });
+      }
+    });
+  };
+
+  // Query by name candidates
+  for (let i = 0; i < queryNamesList.length; i += BATCH_QUERY_SIZE) {
+    const batchNames = queryNamesList.slice(i, i + BATCH_QUERY_SIZE);
     const products = await WorkspaceProduct.find({
       workspaceId,
-      $or: [
-        { normalizedName: { $in: batchNormalized } },
-        { name: { $in: batchRaw } },
-      ],
+      name: { $in: batchNames },
       isDeleted: false,
     })
       .select("_id name normalizedName")
       .lean();
 
-    products.forEach((p) => {
-      if (p.normalizedName) {
-        productMap.set(p.normalizedName, { _id: p._id, name: p.name });
-      }
-      const normFromName = normalizeMedicineName(p.name);
-      if (normFromName) {
-        productMap.set(normFromName, { _id: p._id, name: p.name });
-      }
-    });
+    populateProductMap(products);
+  }
+
+  // Query by normalizedName candidates
+  for (let i = 0; i < queryNormsList.length; i += BATCH_QUERY_SIZE) {
+    const batchNorms = queryNormsList.slice(i, i + BATCH_QUERY_SIZE);
+    const products = await WorkspaceProduct.find({
+      workspaceId,
+      normalizedName: { $in: batchNorms },
+      isDeleted: false,
+    })
+      .select("_id name normalizedName")
+      .lean();
+
+    populateProductMap(products);
   }
 
   // Step 3: Group matched products by customer mobile for this chunk
   const customerMobileMap = new Map();
 
   validExtracted.forEach((r) => {
-    const matchedProduct = productMap.get(r.normalizedMedicineName);
+    const normFromSingle = normalizeMedicineName(r.singleSpacedMedicineName || r.medicineName);
+    const matchedProduct =
+      (r.singleSpacedMedicineName && productMap.get(r.singleSpacedMedicineName)) ||
+      (r.cleanMedicineName && productMap.get(r.cleanMedicineName)) ||
+      (r.medicineName && productMap.get(r.medicineName)) ||
+      (r.normalizedMedicineName && productMap.get(r.normalizedMedicineName)) ||
+      (normFromSingle && productMap.get(normFromSingle));
 
     if (!matchedProduct) {
       unmatchedCount++;
@@ -331,54 +376,81 @@ export const processMargChunk = async ({
     };
   }
 
-  // Product matching: check normalized clean name, normalized raw name, and clean name
-  const uniqueNormalized = [
-    ...new Set(validExtracted.map((r) => r.normalizedMedicineName).filter(Boolean)),
-  ];
-  const uniqueRawNormalized = [
-    ...new Set(validExtracted.map((r) => r.rawNormalizedMedicineName).filter(Boolean)),
-  ];
-  const uniqueCleanNames = [
-    ...new Set(validExtracted.map((r) => r.cleanMedicineName).filter(Boolean)),
-  ];
+  // Product matching: check all candidate names and normalized forms
+  const uniqueNames = new Set();
+  const uniqueNormalized = new Set();
+
+  validExtracted.forEach((r) => {
+    if (r.medicineName) uniqueNames.add(r.medicineName);
+    if (r.singleSpacedMedicineName) uniqueNames.add(r.singleSpacedMedicineName);
+    if (r.cleanMedicineName) uniqueNames.add(r.cleanMedicineName);
+    if (r.normalizedMedicineName) uniqueNormalized.add(r.normalizedMedicineName);
+    if (r.rawNormalizedMedicineName) uniqueNormalized.add(r.rawNormalizedMedicineName);
+    const normSingle = normalizeMedicineName(r.singleSpacedMedicineName || r.medicineName);
+    if (normSingle) uniqueNormalized.add(normSingle);
+  });
+
+  const queryNamesList = [...uniqueNames];
+  const queryNormsList = [...uniqueNormalized];
 
   const productMap = new Map();
-  const allNormalizedKeys = [...new Set([...uniqueNormalized, ...uniqueRawNormalized])];
-
   const BATCH_QUERY_SIZE = 500;
-  for (let i = 0; i < allNormalizedKeys.length; i += BATCH_QUERY_SIZE) {
-    const batchNorm = allNormalizedKeys.slice(i, i + BATCH_QUERY_SIZE);
-    const batchNames = uniqueCleanNames.slice(i, i + BATCH_QUERY_SIZE);
 
+  const populateProductMap = (products = []) => {
+    products.forEach((p) => {
+      if (p.name) {
+        productMap.set(p.name, { _id: p._id, name: p.name });
+        const single = p.name.trim().replace(/[\s\u00A0\t]+/g, " ");
+        productMap.set(single, { _id: p._id, name: p.name });
+        const norm = normalizeMedicineName(p.name);
+        if (norm) productMap.set(norm, { _id: p._id, name: p.name });
+      }
+      if (p.normalizedName) {
+        productMap.set(p.normalizedName, { _id: p._id, name: p.name });
+      }
+    });
+  };
+
+  // Query by name candidates
+  for (let i = 0; i < queryNamesList.length; i += BATCH_QUERY_SIZE) {
+    const batchNames = queryNamesList.slice(i, i + BATCH_QUERY_SIZE);
     const products = await WorkspaceProduct.find({
       workspaceId,
-      $or: [
-        { normalizedName: { $in: batchNorm } },
-        { name: { $in: batchNames } },
-      ],
+      name: { $in: batchNames },
       isDeleted: false,
     })
       .select("_id name normalizedName")
       .lean();
 
-    products.forEach((p) => {
-      if (p.normalizedName) {
-        productMap.set(p.normalizedName, { _id: p._id, name: p.name });
-      }
-      const normFromName = normalizeMedicineName(p.name);
-      if (normFromName) {
-        productMap.set(normFromName, { _id: p._id, name: p.name });
-      }
-    });
+    populateProductMap(products);
+  }
+
+  // Query by normalizedName candidates
+  for (let i = 0; i < queryNormsList.length; i += BATCH_QUERY_SIZE) {
+    const batchNorms = queryNormsList.slice(i, i + BATCH_QUERY_SIZE);
+    const products = await WorkspaceProduct.find({
+      workspaceId,
+      normalizedName: { $in: batchNorms },
+      isDeleted: false,
+    })
+      .select("_id name normalizedName")
+      .lean();
+
+    populateProductMap(products);
   }
 
   // Group matched products by customer mobile
   const customerMobileMap = new Map();
 
   validExtracted.forEach((r) => {
+    const normFromSingle = normalizeMedicineName(r.singleSpacedMedicineName || r.medicineName);
     const matchedProduct =
-      productMap.get(r.normalizedMedicineName) ||
-      productMap.get(r.rawNormalizedMedicineName);
+      (r.singleSpacedMedicineName && productMap.get(r.singleSpacedMedicineName)) ||
+      (r.cleanMedicineName && productMap.get(r.cleanMedicineName)) ||
+      (r.medicineName && productMap.get(r.medicineName)) ||
+      (r.normalizedMedicineName && productMap.get(r.normalizedMedicineName)) ||
+      (r.rawNormalizedMedicineName && productMap.get(r.rawNormalizedMedicineName)) ||
+      (normFromSingle && productMap.get(normFromSingle));
 
     if (!matchedProduct) {
       unmatchedCount++;
@@ -458,6 +530,19 @@ export const materializeHistoricalInvoices = async ({
   branchId,
   job,
 }) => {
+  let targetBranchId = branchId;
+  if (!targetBranchId && workspaceId && mongoose.connection?.readyState === 1) {
+    try {
+      const defaultBranch = await Branch.findOne({ workspaceId, isDeleted: false })
+        .sort({ createdAt: 1 })
+        .select("_id")
+        .lean();
+      targetBranchId = defaultBranch?._id || null;
+    } catch (e) {
+      // fallback
+    }
+  }
+
   const pendingStaged = await B2CLegacyImportStaging.find({
     migrationId,
     workspaceId,
@@ -510,8 +595,8 @@ export const materializeHistoricalInvoices = async ({
               branchId,
               name,
               mobile: m,
-              customerType: "RETAIL",
-              status: "ACTIVE",
+              customerType: "other",
+              status: "active",
               isDeleted: false,
             },
           },
@@ -519,8 +604,8 @@ export const materializeHistoricalInvoices = async ({
       }
 
       if (customerOps.length > 0) {
-        await Customer.bulkWrite(customerOps, { ordered: false });
-        totalCustomersCreated += customerOps.length;
+        const bulkRes = await Customer.bulkWrite(customerOps, { ordered: false });
+        totalCustomersCreated += bulkRes.insertedCount || customerOps.length;
 
         // Fetch newly created customers to populate map
         const newlyCreated = await Customer.find({
@@ -579,7 +664,7 @@ export const materializeHistoricalInvoices = async ({
           document: {
             workspaceId,
             companyId,
-            branchId,
+            branchId: targetBranchId,
             customerId: customer._id,
             invoiceNo: `HIST-${staged.mobileNumber}-${migrationId.slice(-6)}`,
             billingMode: "B2C",
@@ -610,6 +695,13 @@ export const materializeHistoricalInvoices = async ({
         { $set: { status: "migrated" } }
       );
     }
+  }
+
+  if (targetBranchId && migrationId && mongoose.connection?.readyState === 1) {
+    await SalesInvoice.updateMany(
+      { migrationId, branchId: null },
+      { $set: { branchId: targetBranchId } }
+    );
   }
 
   job.customersCreated += totalCustomersCreated;
@@ -867,6 +959,23 @@ export const getImportReport = async (migrationId, workspaceId) => {
 
   const job = await B2CLegacyImportJob.findOne(query).lean();
   if (!job) return null;
+
+  if (job.workspaceId && mongoose.connection?.readyState === 1) {
+    try {
+      const defaultBranch = await Branch.findOne({ workspaceId: job.workspaceId, isDeleted: false })
+        .sort({ createdAt: 1 })
+        .select("_id")
+        .lean();
+      if (defaultBranch?._id) {
+        await SalesInvoice.updateMany(
+          { migrationId: job.migrationId, branchId: null },
+          { $set: { branchId: defaultBranch._id } }
+        );
+      }
+    } catch (e) {
+      // non-blocking
+    }
+  }
 
   return {
     migrationId: job.migrationId,

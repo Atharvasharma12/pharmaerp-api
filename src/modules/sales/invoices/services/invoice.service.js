@@ -1619,6 +1619,9 @@ const getCustomerSales = async (
       paymentMethod: inv.paymentMethod,
       status: inv.status,
       customerId: inv.customerId,
+      branchId: inv.branchId?._id || inv.branchId || null,
+      branchName: inv.branchId?.name || null,
+      branchCode: inv.branchId?.branchCode || null,
       memberName: memberInfo?.name || inv.customerId?.name || "",
       memberRelation:
         memberInfo?.relation || (custIdStr === customer._id.toString() ? "Self" : "Customer"),
