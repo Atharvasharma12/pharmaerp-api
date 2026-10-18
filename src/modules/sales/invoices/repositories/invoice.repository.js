@@ -136,18 +136,30 @@ const getInvoicesByCustomerId = async (customerId, companyId, workspaceId, filte
   const skip = (page - 1) * limit;
 
   const query = {
-    customerId: new mongoose.Types.ObjectId(customerId),
     companyId: new mongoose.Types.ObjectId(companyId),
     workspaceId: new mongoose.Types.ObjectId(workspaceId),
     isDeleted: false,
   };
 
-  if (filters.branchId) {
+  if (Array.isArray(customerId)) {
+    query.customerId = { $in: customerId.map((id) => new mongoose.Types.ObjectId(id)) };
+  } else {
+    query.customerId = new mongoose.Types.ObjectId(customerId);
+  }
+
+  if (filters.branchId && mongoose.Types.ObjectId.isValid(filters.branchId)) {
     query.branchId = new mongoose.Types.ObjectId(filters.branchId);
   }
 
   const [invoices, total, aggregate] = await Promise.all([
-    SalesInvoice.find(query).sort({ date: -1 }).skip(skip).limit(limit).lean(),
+    SalesInvoice.find(query)
+      .select("invoiceNo date billingMode subtotal discount tax grandTotal paymentMethod status items customerId branchId createdAt")
+      .populate("customerId", "name mobile customerCode gender")
+      .populate("branchId", "name branchCode")
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(),
     SalesInvoice.countDocuments(query),
     SalesInvoice.aggregate([{ $match: query }, { $group: { _id: null, totalAmount: { $sum: "$grandTotal" } } }]),
   ]);
