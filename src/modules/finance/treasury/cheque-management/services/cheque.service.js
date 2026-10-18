@@ -5,70 +5,13 @@ import { CHEQUE_TYPE, CHEQUE_STATUS } from "../constants/cheque.constant.js";
 
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
 import Account from "../../../chart-of-accounts/models/account.model.js";
-import accountGroupRepository from "../../../chart-of-accounts/repositories/accountGroup.repository.js";
-import accountRepository from "../../../chart-of-accounts/repositories/account.repository.js";
 import journalVoucherRepository from "../../../journal-vouchers/repositories/journalVoucher.repository.js";
 import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
 import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
 import journalCancellationService from "../../../journal-vouchers/services/journalCancellation.service.js";
 import { VOUCHER_TYPE } from "../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../journal-vouchers/services/voucherNumber.service.js";
-
-// ---------------------------------------------------------------------------
-// HELPER — find or auto-create a system account (e.g. Cheques In Transit,
-//           Bounce Charges Expense)
-// ---------------------------------------------------------------------------
-const findOrCreateSystemAccount = async (
-  workspaceId,
-  companyId,
-  userId,
-  accountCode,
-  accountName,
-  accountNature,
-  accountCategory,
-  groupCode,
-  groupName,
-  session,
-) => {
-  let account = await accountRepository.findAccountByCode(companyId, accountCode, { session });
-  if (account) return account;
-
-  let group = await accountGroupRepository.findGroupByCode(companyId, groupCode, { session });
-  if (!group) {
-    group = await accountGroupRepository.createGroup(
-      {
-        workspaceId,
-        companyId,
-        groupCode,
-        groupName,
-        parentGroupId: null,
-        nature: accountNature,
-        isSystemGroup: true,
-        createdBy: userId,
-      },
-      { session },
-    );
-  }
-
-  account = await accountRepository.createAccount(
-    {
-      workspaceId,
-      companyId,
-      accountCode,
-      accountName,
-      accountGroupId: group._id,
-      accountNature,
-      accountCategory,
-      openingBalance: 0,
-      openingBalanceType: "dr",
-      status: "active",
-      isSystemAccount: true,
-      createdBy: userId,
-    },
-    { session },
-  );
-  return account;
-};
+import findOrCreateSystemAccount from "../../shared/findOrCreateSystemAccount.js";
 
 // ---------------------------------------------------------------------------
 // HELPER — create + post a journal voucher
@@ -141,8 +84,12 @@ const createAndPostVoucher = async (
 //     Cheques In Transit A/c Cr   (liability — we have issued a cheque)
 // ---------------------------------------------------------------------------
 const createCheque = async (workspaceId, companyId, userId, payload) => {
+  const chequeType = payload.chequeType || payload.type;
+  if (!chequeType || ![CHEQUE_TYPE.RECEIVED, CHEQUE_TYPE.ISSUED].includes(chequeType)) {
+    throw new ApiError(400, "Cheque type is required and must be RECEIVED or ISSUED");
+  }
+
   const {
-    chequeType,
     chequeNumber,
     chequeDate,
     bankAccountId,
@@ -150,6 +97,7 @@ const createCheque = async (workspaceId, companyId, userId, payload) => {
     partyName,
     amount,
     narration,
+    remarks,
   } = payload;
 
   const session = await mongoose.startSession();
@@ -165,13 +113,47 @@ const createCheque = async (workspaceId, companyId, userId, payload) => {
     }).session(session);
     if (!bankAccount) throw new ApiError(400, "Bank Account not found");
 
-    // 2. Verify counterparty account
-    const counterpartyAccount = await Account.findOne({
-      _id: counterpartyAccountId,
-      companyId,
-      isDeleted: false,
-    }).session(session);
-    if (!counterpartyAccount) throw new ApiError(400, "Counterparty account not found");
+    // 2. Verify or auto-resolve counterparty account
+    let resolvedCounterpartyAccountId = counterpartyAccountId;
+    if (resolvedCounterpartyAccountId) {
+      const counterpartyAccount = await Account.findOne({
+        _id: resolvedCounterpartyAccountId,
+        companyId,
+        isDeleted: false,
+      }).session(session);
+      if (!counterpartyAccount) throw new ApiError(400, "Counterparty account not found");
+    } else {
+      // Auto-resolve default system account based on chequeType
+      if (chequeType === CHEQUE_TYPE.RECEIVED) {
+        const defaultPartyAcct = await findOrCreateSystemAccount(
+          workspaceId,
+          companyId,
+          userId,
+          "SYS-CHEQUE-DEBTORS",
+          "Cheque Debtors / Accounts Receivable",
+          "ASSET",
+          "CUSTOMER",
+          "CURRENT_ASSETS",
+          "Current Assets",
+          session,
+        );
+        resolvedCounterpartyAccountId = defaultPartyAcct._id;
+      } else {
+        const defaultPartyAcct = await findOrCreateSystemAccount(
+          workspaceId,
+          companyId,
+          userId,
+          "SYS-CHEQUE-CREDITORS",
+          "Cheque Creditors / Accounts Payable",
+          "LIABILITY",
+          "SUPPLIER",
+          "CURRENT_LIABILITIES",
+          "Current Liabilities",
+          session,
+        );
+        resolvedCounterpartyAccountId = defaultPartyAcct._id;
+      }
+    }
 
     // 3. Duplicate cheque number check (same type, same company)
     const duplicate = await chequeRepository.findChequeByNumber(
@@ -189,14 +171,22 @@ const createCheque = async (workspaceId, companyId, userId, payload) => {
 
     // 4. Get or create "Cheques In Transit" clearing account
     const chequeInTransit = await findOrCreateSystemAccount(
-      workspaceId, companyId, userId,
-      "CHEQ_IN_TRANSIT", "Cheques In Transit",
-      "ASSET", "CASH",
-      "CHEQ_IN_TRANSIT_GRP", "Cheques In Transit",
+      workspaceId,
+      companyId,
+      userId,
+      "CHEQ_IN_TRANSIT",
+      "Cheques In Transit",
+      "ASSET",
+      "CASH",
+      "CHEQ_IN_TRANSIT_GRP",
+      "Cheques In Transit",
       session,
     );
 
-    const txNarration = narration || `${chequeType} Cheque #${chequeNumber} - ${partyName}`;
+    const txNarration =
+      narration ||
+      remarks ||
+      `${chequeType} Cheque #${chequeNumber} - ${partyName}`;
 
     // 5. Build journal lines based on cheque type
     let lines;
@@ -204,20 +194,26 @@ const createCheque = async (workspaceId, companyId, userId, payload) => {
       // We received a cheque from the party → Cheques In Transit Dr, Party Cr
       lines = [
         { accountId: chequeInTransit._id, debit: amount, credit: 0, narration: txNarration },
-        { accountId: counterpartyAccountId, debit: 0, credit: amount, narration: txNarration },
+        { accountId: resolvedCounterpartyAccountId, debit: 0, credit: amount, narration: txNarration },
       ];
     } else {
       // We issued a cheque to the party → Party Dr, Cheques In Transit Cr
       lines = [
-        { accountId: counterpartyAccountId, debit: amount, credit: 0, narration: txNarration },
+        { accountId: resolvedCounterpartyAccountId, debit: amount, credit: 0, narration: txNarration },
         { accountId: chequeInTransit._id, debit: 0, credit: amount, narration: txNarration },
       ];
     }
 
     // 6. Create + post the pending voucher
     const pendingVoucher = await createAndPostVoucher(
-      workspaceId, companyId, userId,
-      chequeDate, txNarration, chequeNumber, lines, session,
+      workspaceId,
+      companyId,
+      userId,
+      chequeDate,
+      txNarration,
+      chequeNumber,
+      lines,
+      session,
     );
 
     // 7. Save the cheque record
@@ -229,10 +225,10 @@ const createCheque = async (workspaceId, companyId, userId, payload) => {
         chequeNumber: String(chequeNumber).trim().toUpperCase(),
         chequeDate: new Date(chequeDate),
         bankAccountId,
-        counterpartyAccountId,
+        counterpartyAccountId: resolvedCounterpartyAccountId,
         partyName: String(partyName).trim(),
         amount,
-        narration: narration || null,
+        narration: narration || remarks || null,
         status: CHEQUE_STATUS.PENDING,
         pendingJournalVoucherId: pendingVoucher._id,
         createdBy: userId,
@@ -342,13 +338,20 @@ const clearCheque = async (id, companyId, workspaceId, userId, payload) => {
       ];
     }
 
+    let clearDateVal = payload?.clearDate;
+    if (clearDateVal && typeof clearDateVal === "object" && !(clearDateVal instanceof Date)) {
+      clearDateVal = clearDateVal.clearDate;
+    }
+    const parsedClearDate = clearDateVal ? new Date(clearDateVal) : new Date();
+    const effectiveClearDate = isNaN(parsedClearDate.getTime()) ? new Date() : parsedClearDate;
+
     const clearingVoucher = await createAndPostVoucher(
       workspaceId, companyId, userId,
-      payload?.clearDate || new Date(), clearNarration, cheque.chequeNumber, lines, session,
+      effectiveClearDate, clearNarration, cheque.chequeNumber, lines, session,
     );
 
     cheque.status = CHEQUE_STATUS.CLEARED;
-    cheque.clearedAt = new Date();
+    cheque.clearedAt = effectiveClearDate;
     cheque.clearedBy = userId;
     cheque.clearingJournalVoucherId = clearingVoucher._id;
     await cheque.save({ session });

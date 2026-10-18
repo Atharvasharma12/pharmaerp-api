@@ -12,8 +12,6 @@ import {
 import BankAccount from "../../bank-management/bank-accounts/models/bankAccount.model.js";
 import branchCashRepository from "../../cash-management/branch-cash/repositories/branchCash.repository.js";
 import branchCashService from "../../cash-management/branch-cash/services/branchCash.service.js";
-import cashDenominationRepository from "../../cash-management/cash-denominations/repositories/cashDenomination.repository.js";
-import { CASH_DENOMINATION_STATUS } from "../../cash-management/cash-denominations/constants/cashDenomination.constant.js";
 
 import journalLineRepository from "../../../journal-vouchers/repositories/journalLine.repository.js";
 import journalPostingService from "../../../journal-vouchers/services/journalPosting.service.js";
@@ -153,7 +151,7 @@ const createAndPostContraVoucher = async (
  * Creates a bank deposit slip and immediately:
  *   1. Validates denomination sufficiency in the cash account.
  *   2. Deducts denominations from the cash account balance.
- *   3. Creates a CashDenomination snapshot record.
+ *   3. Stores denominations directly on the deposit slip.
  *   4. Posts Step-1 CONTRA journal: Cash A/c Cr | Cash In Transit A/c Dr
  *   5. Auto-links the open shift (same as FundTransfer).
  *
@@ -227,41 +225,7 @@ const createBankDepositSlip = async (
       { session },
     );
 
-    // ── 5. Create denomination snapshot record ─────────────────────────────
-    const physicalTotal = processedDenominations.reduce(
-      (sum, d) => sum + d.subtotal,
-      0,
-    );
-
-    const countNumber = await cashDenominationRepository.getNextCountNumber(
-      companyId,
-      workspaceId,
-      { session },
-    );
-
-    const denomRecord = await cashDenominationRepository.createCashDenomination(
-      {
-        workspaceId,
-        companyId,
-        branchId,             // NEW: branchId is required; cashAccountId deprecated
-        cashAccountId: null,  // deprecated — not set for new slips
-        partition: "frozen",  // deposit slips always from frozen
-        countNumber,
-        countDate: new Date(slipDate),
-        denominations: processedDenominations,
-        physicalTotal,
-        expectedBalance: amount,
-        variance: 0,
-        narration: narration || `Bank Deposit Slip ${slipNumber} - denomination count`,
-        status: CASH_DENOMINATION_STATUS.CONFIRMED,
-        confirmedAt: new Date(),
-        confirmedBy: userId,
-        createdBy: userId,
-      },
-      { session },
-    );
-
-    // ── 6. Deduct from FROZEN cash partition ───────────────────────────────
+    // ── 5. Deduct from FROZEN cash partition ───────────────────────────────
     await branchCashService.deductFromFrozen(
       branchId,
       companyId,
@@ -369,7 +333,7 @@ const createBankDepositSlip = async (
         amount,
         depositBagReference: depositBagReference || null,
         bankBranchName: bankBranchName || null,
-        cashDenominationId: denomRecord._id,
+        denominations: processedDenominations,
         status: BANK_DEPOSIT_SLIP_STATUS.PREPARED,
         preparationJournalVoucherId: preparationVoucher._id,
         narration: narration || null,
@@ -563,46 +527,40 @@ const cancelBankDepositSlip = async (
     );
     const remainingAmount = slip.amount - totalWithdrawn;
 
-    if (slip.cashDenominationId && remainingAmount > 0) {
-      const denomDoc = await mongoose
-        .model("CashDenomination")
-        .findById(slip.cashDenominationId)
-        .session(session);
+    const originalDenoms = slip.denominations && slip.denominations.length > 0 ? slip.denominations : [];
+    if (originalDenoms.length > 0 && remainingAmount > 0) {
+      // Compute which denominations to return based on withdrawal sub-totals
+      // If no partial withdrawals occurred, return everything.
+      let denominationsToReturn = originalDenoms;
 
-      if (denomDoc && denomDoc.denominations && denomDoc.denominations.length > 0) {
-        // Compute which denominations to return based on withdrawal sub-totals
-        // If no partial withdrawals occurred, return everything.
-        let denominationsToReturn = denomDoc.denominations;
-
-        if (totalWithdrawn > 0) {
-          // Aggregate withdrawn denominations to subtract from total
-          const withdrawnDenomMap = new Map();
-          for (const w of (slip.withdrawals || [])) {
-            for (const d of (w.denominations || [])) {
-              const key = Number(d.denomination);
-              withdrawnDenomMap.set(key, (withdrawnDenomMap.get(key) || 0) + Number(d.quantity));
-            }
+      if (totalWithdrawn > 0) {
+        // Aggregate withdrawn denominations to subtract from total
+        const withdrawnDenomMap = new Map();
+        for (const w of (slip.withdrawals || [])) {
+          for (const d of (w.denominations || [])) {
+            const key = Number(d.denomination);
+            withdrawnDenomMap.set(key, (withdrawnDenomMap.get(key) || 0) + Number(d.quantity));
           }
-          // Subtract withdrawn from original denominations
-          denominationsToReturn = denomDoc.denominations
-            .map((d) => {
-              const withdrawn = withdrawnDenomMap.get(Number(d.denomination)) || 0;
-              const returnQty = Math.max(0, Number(d.quantity) - withdrawn);
-              return { denomination: Number(d.denomination), quantity: returnQty };
-            })
-            .filter((d) => d.quantity > 0);
         }
+        // Subtract withdrawn from original denominations
+        denominationsToReturn = originalDenoms
+          .map((d) => {
+            const withdrawn = withdrawnDenomMap.get(Number(d.denomination)) || 0;
+            const returnQty = Math.max(0, Number(d.quantity) - withdrawn);
+            return { denomination: Number(d.denomination), quantity: returnQty };
+          })
+          .filter((d) => d.quantity > 0);
+      }
 
-        if (denominationsToReturn.length > 0) {
-          const branchCashRepo = (await import("../../cash-management/branch-cash/repositories/branchCash.repository.js")).default;
-          await branchCashRepo.addFrozenDenominations(
-            slip.branchId,
-            slip.companyId,
-            denominationsToReturn,
-            userId,
-            { session },
-          );
-        }
+      if (denominationsToReturn.length > 0) {
+        const branchCashRepo = (await import("../../cash-management/branch-cash/repositories/branchCash.repository.js")).default;
+        await branchCashRepo.addFrozenDenominations(
+          slip.branchId,
+          slip.companyId,
+          denominationsToReturn,
+          userId,
+          { session },
+        );
       }
     }
 

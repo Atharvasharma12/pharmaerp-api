@@ -119,15 +119,15 @@ const bankDepositSlipSchema = new mongoose.Schema(
     },
 
 
-    // ── Denomination snapshot ──────────────────────────────────────────────
-
-    // Linked CashDenomination record — the breakdown of notes in the deposit bag
-    cashDenominationId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CashDenomination",
-      default: null,
-      index: true,
-    },
+    // Denomination breakdown of notes in the deposit bag
+    denominations: [
+      {
+        denomination: { type: Number, required: true },
+        quantity: { type: Number, required: true, min: 0 },
+        subtotal: { type: Number, required: true },
+        _id: false,
+      },
+    ],
 
     // ── Partial Withdrawals ────────────────────────────────────────────────
     // Records each cash withdrawal taken from this slip before deposit/cancel.

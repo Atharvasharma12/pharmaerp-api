@@ -2,18 +2,6 @@ import asyncHandler from "../../../../../../utils/asyncHandler.js";
 import ApiResponse from "../../../../../../utils/ApiResponse.js";
 import cashTransactionService from "../services/cashTransaction.service.js";
 
-export const createCashTransaction = asyncHandler(async (req, res) => {
-  const cashTransaction = await cashTransactionService.createCashTransaction(
-    req.workspaceId,
-    req.companyId,
-    req.user._id,
-    req.body,
-  );
-  return res
-    .status(201)
-    .json(new ApiResponse(201, "Cash Transaction created successfully", cashTransaction));
-});
-
 export const getCashTransactions = asyncHandler(async (req, res) => {
   const result = await cashTransactionService.getCashTransactions(
     req.workspaceId,

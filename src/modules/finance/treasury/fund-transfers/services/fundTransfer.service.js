@@ -15,8 +15,6 @@ import journalCancellationService from "../../../journal-vouchers/services/journ
 import { VOUCHER_TYPE } from "../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../journal-vouchers/services/voucherNumber.service.js";
 import journalVoucherRepository from "../../../journal-vouchers/repositories/journalVoucher.repository.js";
-import cashDenominationRepository from "../../cash-management/cash-denominations/repositories/cashDenomination.repository.js";
-import { CASH_DENOMINATION_STATUS } from "../../cash-management/cash-denominations/constants/cashDenomination.constant.js";
 import branchCashRepository from "../../cash-management/branch-cash/repositories/branchCash.repository.js";
 
 /**
@@ -294,55 +292,12 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
 
     // 10. Create denomination records for cash sides of the transfer
     // Returns { id, countNumber, physicalTotal, denominations } so the snapshot
-    // can be written without an extra getNextCountNumber call.
-    const buildDenomRecord = async (denominations, cashAccountId) => {
-      if (!denominations || denominations.length === 0) return null;
-
-      const processedDenominations = denominations.map((d) => ({
+    const processDenoms = (denoms) => {
+      return (denoms || []).map((d) => ({
         denomination: d.denomination,
         quantity: d.quantity || 0,
         subtotal: d.denomination * (d.quantity || 0),
       }));
-
-      const physicalTotal = processedDenominations.reduce(
-        (sum, d) => sum + d.subtotal,
-        0,
-      );
-
-
-      const countNumber = await cashDenominationRepository.getNextCountNumber(
-        companyId,
-        workspaceId,
-        { session },
-      );
-
-      const record = await cashDenominationRepository.createCashDenomination(
-        {
-          workspaceId,
-          companyId,
-          cashAccountId: null,
-          branchId: cashAccountId,
-          countNumber,
-          countDate: new Date(transferDate),
-          denominations: processedDenominations,
-          physicalTotal,
-          expectedBalance: amount,
-          variance: 0,
-          narration:
-            narration || `Fund Transfer ${transferNumber} - denomination count`,
-          status: CASH_DENOMINATION_STATUS.CONFIRMED,
-          confirmedAt: new Date(),
-          confirmedBy: userId,
-          createdBy: userId,
-        },
-        { session },
-      );
-      return {
-        id: record._id,
-        countNumber,
-        physicalTotal,
-        denominations: processedDenominations,
-      };
     };
 
     if (
@@ -350,36 +305,30 @@ const createFundTransfer = async (workspaceId, companyId, userId, payload) => {
       fromDenominations &&
       fromDenominations.length > 0
     ) {
-      const result = await buildDenomRecord(fromDenominations, fromAccountId);
-      if (result) {
-        fundTransferPayload.fromCashDenominationId = result.id;
-        // subtractRunningDenominations recomputes runningTotal from denomination sums
-        await branchCashRepository.subtractRunningDenominations(
-          fromAccountId,
-          companyId,
-          result.denominations,
-          userId,
-          { session },
-        );
-      }
+      const processed = processDenoms(fromDenominations);
+      // subtractRunningDenominations recomputes runningTotal from denomination sums
+      await branchCashRepository.subtractRunningDenominations(
+        fromAccountId,
+        companyId,
+        processed,
+        userId,
+        { session },
+      );
     }
     if (
       toAccountType === "CASH" &&
       toDenominations &&
       toDenominations.length > 0
     ) {
-      const result = await buildDenomRecord(toDenominations, toAccountId);
-      if (result) {
-        fundTransferPayload.toCashDenominationId = result.id;
-        // addRunningDenominations recomputes runningTotal from denomination sums
-        await branchCashRepository.addRunningDenominations(
-          toAccountId,
-          companyId,
-          result.denominations,
-          userId,
-          { session },
-        );
-      }
+      const processed = processDenoms(toDenominations);
+      // addRunningDenominations recomputes runningTotal from denomination sums
+      await branchCashRepository.addRunningDenominations(
+        toAccountId,
+        companyId,
+        processed,
+        userId,
+        { session },
+      );
     }
 
     const fundTransfer = await fundTransferRepository.createFundTransfer(

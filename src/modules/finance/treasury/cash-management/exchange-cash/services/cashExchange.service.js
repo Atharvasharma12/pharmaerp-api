@@ -44,14 +44,22 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
   session.startTransaction();
 
   try {
-    // 1. Normalise incoming denominations (compute subtotals)
+    // 1. Service-level check: cash exchange is strictly for running cash drawer only
+    if (cashPartition && cashPartition !== "running") {
+      throw new ApiError(
+        400,
+        "Cash exchange is only permitted in the active running cash drawer",
+      );
+    }
+
+    // 2. Normalise incoming denominations (compute subtotals)
     const normReceived = normalizeDenominations(denominationsReceived);
     const normGiven = normalizeDenominations(denominationsGiven);
 
     const totalReceived = computeTotal(normReceived);
     const totalGiven = computeTotal(normGiven);
 
-    // 2. Service-layer balance invariant (defence-in-depth beyond Joi)
+    // 3. Service-layer balance invariant (defence-in-depth beyond Joi)
     if (Math.round(totalReceived * 100) !== Math.round(totalGiven * 100)) {
       throw new ApiError(
         400,
@@ -59,7 +67,7 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
       );
     }
 
-    // 3. Validate BranchCash exists and is active
+    // 4. Validate BranchCash exists and is active
     const branchCash = await BranchCash.findOne({
       branchId,
       workspaceId,
@@ -71,89 +79,57 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
       throw new ApiError(400, "Branch Cash not found or inactive");
     }
 
-    // 4. PRE-FLIGHT: validate sufficient denominations for what we give OUT
-    if (cashPartition === "running") {
-      await branchCashRepository.validateSufficientRunningDenominations(
-        branchId,
-        companyId,
-        normGiven,
-        { session },
-      );
-    } else {
-      await branchCashRepository.validateSufficientFrozenDenominations(
-        branchId,
-        companyId,
-        normGiven,
-        { session },
+    // 5. SHIFT GATE: Cash exchange is an active cashier operation requiring an open shift
+    const { Shift } = await import(
+      "../../../../../operations/shifts/shift.model.js"
+    );
+    const openShift = await Shift.findOne({
+      companyId,
+      workspaceId,
+      branchId,
+      status: "open",
+    })
+      .select("_id")
+      .session(session);
+
+    if (!openShift) {
+      throw new ApiError(
+        400,
+        "Cannot exchange cash: no active open shift found for this branch. Open a shift first.",
       );
     }
+    const shiftId = openShift._id;
 
-    // 5. Generate sequential exchange number: EX-YYYY-NNNNN
+    // 6. PRE-FLIGHT: validate sufficient running denominations for what we give OUT
+    await branchCashRepository.validateSufficientRunningDenominations(
+      branchId,
+      companyId,
+      normGiven,
+      { session },
+    );
+
+    // 7. Generate sequential exchange number: EX-YYYY-NNNNN
     const exchangeNumber = await cashExchangeRepository.getNextExchangeNumber(
       companyId,
       workspaceId,
       { session },
     );
 
-
-
-    // 7. Auto-detect open shift for this branch
-    let shiftId = null;
-    if (branchId) {
-      try {
-        const { Shift } = await import(
-          "../../../../../operations/shifts/shift.model.js"
-        );
-        const openShift = await Shift.findOne({
-          companyId,
-          workspaceId,
-          branchId,
-          status: "open",
-        })
-          .select("_id")
-          .session(session);
-        if (openShift) shiftId = openShift._id;
-      } catch (shiftErr) {
-        // Non-fatal: exchange saves without shiftId if lookup fails
-        console.warn(
-          "[CashExchange] Could not auto-link shift:",
-          shiftErr.message,
-        );
-      }
-    }
-
-    // 8. Update denomination balance:
-    if (cashPartition === "running") {
-      await branchCashRepository.subtractRunningDenominations(
-        branchId,
-        companyId,
-        normGiven,
-        userId,
-        { session },
-      );
-      await branchCashRepository.addRunningDenominations(
-        branchId,
-        companyId,
-        normReceived,
-        userId,
-        { session },
-      );
-    } else {
-      await branchCashRepository.subtractFrozenDenominations(
-        branchId,
-        companyId,
-        normGiven,
-        userId,
-        { session },
-      );
-      await branchCashRepository.addFrozenDenominations(
-        branchId,
-        companyId,
-        normReceived,
-        userId,
-        { session },
-      );
-    }
+    // 8. Update running denomination balance
+    await branchCashRepository.subtractRunningDenominations(
+      branchId,
+      companyId,
+      normGiven,
+      userId,
+      { session },
+    );
+    await branchCashRepository.addRunningDenominations(
+      branchId,
+      companyId,
+      normReceived,
+      userId,
+      { session },
+    );
 
     // 9. Persist the CashExchange record
     const cashExchange = await cashExchangeRepository.createCashExchange(
@@ -164,7 +140,7 @@ const createCashExchange = async (workspaceId, companyId, userId, payload) => {
         shiftId,
         exchangeNumber,
         exchangeDate: new Date(exchangeDate),
-        cashPartition,
+        cashPartition: "running",
         denominationsReceived: normReceived,
         totalReceived,
         denominationsGiven: normGiven,
@@ -225,99 +201,8 @@ const getCashExchangeById = async (id, companyId, workspaceId) => {
   return cashExchange.toSafeObject();
 };
 
-// ---------------------------------------------------------------------------
-// CANCEL CASH EXCHANGE
-// ---------------------------------------------------------------------------
-const cancelCashExchange = async (
-  id,
-  companyId,
-  workspaceId,
-  userId,
-  payload,
-) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  try {
-    const cashExchange = await mongoose
-      .model("CashExchange")
-      .findOne({ _id: id, companyId, workspaceId, isDeleted: false })
-      .session(session);
-
-    if (!cashExchange) {
-      throw new ApiError(404, "Cash Exchange not found");
-    }
-
-    if (cashExchange.status === CASH_EXCHANGE_STATUS.CANCELLED) {
-      throw new ApiError(400, "Cash Exchange is already cancelled");
-    }
-
-    // PRE-FLIGHT: validate we have enough of what was originally received
-    if (cashExchange.cashPartition === "running") {
-      await branchCashRepository.validateSufficientRunningDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        { session },
-      );
-      await branchCashRepository.subtractRunningDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        userId,
-        { session },
-      );
-      await branchCashRepository.addRunningDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsGiven,
-        userId,
-        { session },
-      );
-    } else {
-      await branchCashRepository.validateSufficientFrozenDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        { session },
-      );
-      await branchCashRepository.subtractFrozenDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsReceived,
-        userId,
-        { session },
-      );
-      await branchCashRepository.addFrozenDenominations(
-        cashExchange.branchId,
-        companyId,
-        cashExchange.denominationsGiven,
-        userId,
-        { session },
-      );
-    }
-
-    cashExchange.status = CASH_EXCHANGE_STATUS.CANCELLED;
-    cashExchange.cancelledAt = new Date();
-    cashExchange.cancelledBy = userId;
-    cashExchange.cancellationReason = payload?.reason || null;
-    await cashExchange.save({ session });
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return getCashExchangeById(cashExchange._id, companyId, workspaceId);
-  } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
-    throw error;
-  }
-};
-
-
 export default {
   createCashExchange,
   getCashExchanges,
   getCashExchangeById,
-  cancelCashExchange,
 };

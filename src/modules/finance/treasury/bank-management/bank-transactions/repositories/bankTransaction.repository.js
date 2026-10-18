@@ -2,7 +2,11 @@ import mongoose from "mongoose";
 import BankTransaction from "../models/bankTransaction.model.js";
 
 const POPULATE_FIELDS = [
-  { path: "bankAccountId", select: "accountName accountNumber bankMasterId ledgerAccountId" },
+  {
+    path: "bankAccountId",
+    select: "accountName accountNumber bankMasterId ledgerAccountId",
+    populate: { path: "bankMasterId", select: "name code logo" },
+  },
   { path: "counterpartyAccountId", select: "accountName accountCode accountNature accountCategory" },
   { path: "journalVoucherId", select: "voucherNumber voucherDate status" },
   { path: "createdBy", select: "name email" },
@@ -59,10 +63,10 @@ const getBankTransactions = async (
     isDeleted: false,
   };
 
-  if (filters.bankAccountId) query.bankAccountId = filters.bankAccountId;
-  if (filters.transactionType) query.transactionType = filters.transactionType;
-  if (filters.direction) query.direction = filters.direction;
-  if (filters.status) query.status = filters.status;
+  if (filters.bankAccountId && filters.bankAccountId !== "all") query.bankAccountId = filters.bankAccountId;
+  if (filters.transactionType && filters.transactionType !== "all") query.transactionType = filters.transactionType;
+  if (filters.direction && filters.direction !== "all") query.direction = filters.direction;
+  if (filters.status && filters.status !== "all") query.status = filters.status;
 
   if (filters.startDate || filters.endDate) {
     query.transactionDate = {};
@@ -79,21 +83,156 @@ const getBankTransactions = async (
     ];
   }
 
-  const sort = options.sort || { transactionDate: -1, createdAt: -1 };
+  let sort = { transactionDate: -1, createdAt: -1 };
+  if (options.sortBy) {
+    const sOrder = options.sortOrder === "asc" ? 1 : -1;
+    if (options.sortBy === "amount") sort = { amount: sOrder };
+    else if (options.sortBy === "date") sort = { transactionDate: sOrder, createdAt: sOrder };
+    else if (options.sortBy === "number" || options.sortBy === "transactionnumber") sort = { transactionNumber: sOrder };
+    else if (options.sortBy === "status") sort = { status: sOrder };
+  } else if (options.sort) {
+    sort = options.sort;
+  }
+
+  // Aggregation query for statistics calculation
+  const aggQuery = { isDeleted: false };
+  if (workspaceId && mongoose.Types.ObjectId.isValid(workspaceId)) {
+    aggQuery.workspaceId = new mongoose.Types.ObjectId(workspaceId);
+  }
+  if (companyId && mongoose.Types.ObjectId.isValid(companyId)) {
+    aggQuery.companyId = new mongoose.Types.ObjectId(companyId);
+  }
+  if (filters.bankAccountId && filters.bankAccountId !== "all" && mongoose.Types.ObjectId.isValid(filters.bankAccountId)) {
+    aggQuery.bankAccountId = new mongoose.Types.ObjectId(filters.bankAccountId);
+  }
+  if (filters.transactionType && filters.transactionType !== "all") aggQuery.transactionType = filters.transactionType;
+  if (filters.direction && filters.direction !== "all") aggQuery.direction = filters.direction;
+  if (filters.status && filters.status !== "all") aggQuery.status = filters.status;
+
+  if (filters.startDate || filters.endDate) {
+    aggQuery.transactionDate = {};
+    if (filters.startDate) aggQuery.transactionDate.$gte = new Date(filters.startDate);
+    if (filters.endDate) aggQuery.transactionDate.$lte = new Date(filters.endDate);
+  }
+
+  if (filters.search) {
+    const searchRegex = new RegExp(filters.search.trim(), "i");
+    aggQuery.$or = [
+      { transactionNumber: searchRegex },
+      { referenceNumber: searchRegex },
+      { narration: searchRegex },
+    ];
+  }
+
+  const summaryPromise = BankTransaction.aggregate([
+    { $match: aggQuery },
+    {
+      $group: {
+        _id: null,
+        totalTransactions: { $sum: 1 },
+        totalCredits: {
+          $sum: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ["$direction", "CREDIT"] },
+                  { $eq: ["$transactionType", "DEPOSIT"] },
+                  { $eq: ["$transactionType", "INTEREST"] },
+                ],
+              },
+              "$amount",
+              0,
+            ],
+          },
+        },
+        totalDebits: {
+          $sum: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ["$direction", "DEBIT"] },
+                  { $eq: ["$transactionType", "WITHDRAWAL"] },
+                  { $eq: ["$transactionType", "BANK_CHARGES"] },
+                ],
+              },
+              "$amount",
+              0,
+            ],
+          },
+        },
+        inwardCount: {
+          $sum: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ["$direction", "CREDIT"] },
+                  { $eq: ["$transactionType", "DEPOSIT"] },
+                  { $eq: ["$transactionType", "INTEREST"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        outwardCount: {
+          $sum: {
+            $cond: [
+              {
+                $or: [
+                  { $eq: ["$direction", "DEBIT"] },
+                  { $eq: ["$transactionType", "WITHDRAWAL"] },
+                  { $eq: ["$transactionType", "BANK_CHARGES"] },
+                ],
+              },
+              1,
+              0,
+            ],
+          },
+        },
+        draftCount: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "DRAFT"] }, 1, 0],
+          },
+        },
+        postedCount: {
+          $sum: {
+            $cond: [{ $eq: ["$status", "POSTED"] }, 1, 0],
+          },
+        },
+      },
+    },
+  ]);
 
   if (options.all === true) {
-    const bankTransactions = await BankTransaction.find(query)
-      .populate(POPULATE_FIELDS)
-      .sort(sort)
-      .session(options.session || null);
-    return { bankTransactions, total: bankTransactions.length };
+    const [bankTransactions, summaryAgg] = await Promise.all([
+      BankTransaction.find(query)
+        .populate(POPULATE_FIELDS)
+        .sort(sort)
+        .session(options.session || null),
+      summaryPromise,
+    ]);
+    const summaryRaw = summaryAgg?.[0] || {};
+    const totalCredits = summaryRaw.totalCredits || 0;
+    const totalDebits = summaryRaw.totalDebits || 0;
+    const summary = {
+      totalTransactions: summaryRaw.totalTransactions || bankTransactions.length,
+      totalCredits,
+      totalDebits,
+      netFlow: totalCredits - totalDebits,
+      inwardCount: summaryRaw.inwardCount || 0,
+      outwardCount: summaryRaw.outwardCount || 0,
+      draftCount: summaryRaw.draftCount || 0,
+      postedCount: summaryRaw.postedCount || 0,
+    };
+    return { bankTransactions, total: bankTransactions.length, summary };
   }
 
   const page = Math.max(1, parseInt(options.page) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(options.limit) || 20));
   const skip = (page - 1) * limit;
 
-  const [bankTransactions, total] = await Promise.all([
+  const [bankTransactions, total, summaryAgg] = await Promise.all([
     BankTransaction.find(query)
       .populate(POPULATE_FIELDS)
       .sort(sort)
@@ -101,9 +240,24 @@ const getBankTransactions = async (
       .limit(limit)
       .session(options.session || null),
     BankTransaction.countDocuments(query).session(options.session || null),
+    summaryPromise,
   ]);
 
-  return { bankTransactions, total, page, limit };
+  const summaryRaw = summaryAgg?.[0] || {};
+  const totalCredits = summaryRaw.totalCredits || 0;
+  const totalDebits = summaryRaw.totalDebits || 0;
+  const summary = {
+    totalTransactions: summaryRaw.totalTransactions || total,
+    totalCredits,
+    totalDebits,
+    netFlow: totalCredits - totalDebits,
+    inwardCount: summaryRaw.inwardCount || 0,
+    outwardCount: summaryRaw.outwardCount || 0,
+    draftCount: summaryRaw.draftCount || 0,
+    postedCount: summaryRaw.postedCount || 0,
+  };
+
+  return { bankTransactions, total, page, limit, summary };
 };
 
 const getNextTransactionNumber = async (companyId, workspaceId, options = {}) => {

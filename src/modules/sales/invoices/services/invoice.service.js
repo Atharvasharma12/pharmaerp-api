@@ -19,7 +19,6 @@ import PaymentQr from "../../../finance/treasury/payment-qr/models/paymentQr.mod
 
 import voucherNumberService from "../../../finance/journal-vouchers/services/voucherNumber.service.js";
 import cashTransactionRepository from "../../../finance/treasury/cash-management/cash-transactions/repositories/cashTransaction.repository.js";
-import cashDenominationRepository from "../../../finance/treasury/cash-management/cash-denominations/repositories/cashDenomination.repository.js";
 import SalesInvoice from "../models/invoice.model.js";
 import GstLedger from "../../../finance/gst-ledger/models/gstLedger.model.js";
 import JournalVoucher from "../../../finance/journal-vouchers/models/journalVoucher.model.js";
@@ -88,25 +87,17 @@ const revertCashTransactionsForInvoice = async (
         );
       }
     }
-    // Delete linked CashDenomination records and CashTransactions
-    const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
-    for (const ct of cashTxns) {
-      if (ct.cashDenominationId) {
-        await mongoose.model("CashDenomination").deleteOne({ _id: ct.cashDenominationId }, { session });
-      }
-    }
+    // Delete linked CashTransactions
     await CashTransaction.deleteMany({ referenceNumber: invoiceNo }, { session });
   } else {
     // Default fallback: exactly reverse original note counts
     const cashTxns = await CashTransaction.find({ referenceNumber: invoiceNo }).session(session);
     for (const ct of cashTxns) {
-      if (ct.cashDenominationId) {
-        const denomRecord = await mongoose.model("CashDenomination").findOne({ _id: ct.cashDenominationId }).session(session);
-        if (denomRecord) {
-          const processedDenominations = denomRecord.denominations || [];
-          const partition = ct.cashPartition || "running";
-          const resolvedBranchId = ct.branchId || branchId;
-          const ctDirection = ct.direction;
+      const processedDenominations = ct.denominations && ct.denominations.length > 0 ? ct.denominations : [];
+      if (processedDenominations.length > 0) {
+        const partition = ct.cashPartition || "running";
+        const resolvedBranchId = ct.branchId || branchId;
+        const ctDirection = ct.direction;
           
           if (ctDirection === "CREDIT") {
             if (partition === "running") {
@@ -121,10 +112,8 @@ const revertCashTransactionsForInvoice = async (
               await branchCashRepository.addFrozenDenominations(resolvedBranchId, companyId, processedDenominations, userId, { session });
             }
           }
-          await mongoose.model("CashDenomination").deleteOne({ _id: denomRecord._id }, { session });
         }
       }
-    }
     await CashTransaction.deleteMany({ referenceNumber: invoiceNo }, { session });
   }
 };
@@ -568,10 +557,8 @@ const postSaleAccounting = async ({
       }
 
       let baseCashTx = null;
-      let baseCount = null;
       if (needsCashTx > 0) {
         baseCashTx = await cashTransactionRepository.getNextTransactionNumber(invoice.companyId, invoice.workspaceId, { session });
-        baseCount = await cashDenominationRepository.getNextCountNumber(invoice.companyId, invoice.workspaceId, { session });
       }
 
       const [saleRes, receiptRes] = await Promise.all([
@@ -580,28 +567,21 @@ const postSaleAccounting = async ({
       ]);
 
       const cashTxRes = [];
-      const countRes = [];
       
-      if (needsCashTx > 0 && baseCashTx && baseCount) {
+      if (needsCashTx > 0 && baseCashTx) {
         const txParts = baseCashTx.split("-");
         const txPrefix = txParts.slice(0, 2).join("-") + "-";
         const txSeq = parseInt(txParts[txParts.length - 1]) || 1;
 
-        const countParts = baseCount.split("-");
-        const countPrefix = countParts.slice(0, 2).join("-") + "-";
-        const countSeq = parseInt(countParts[countParts.length - 1]) || 1;
-
         for (let i = 0; i < needsCashTx; i++) {
           cashTxRes.push(`${txPrefix}${String(txSeq + i).padStart(5, "0")}`);
-          countRes.push(`${countPrefix}${String(countSeq + i).padStart(5, "0")}`);
         }
       }
 
-      let receiptIdx = 0, cashTxIdx = 0, countIdx = 0;
+      let receiptIdx = 0, cashTxIdx = 0;
       const preSaleJv = needsSaleJv ? saleRes[0] : null;
       const nextReceiptJv = () => receiptRes[receiptIdx++];
       const nextCashTx = () => cashTxRes[cashTxIdx++];
-      const nextCount = () => countRes[countIdx++];
 
       // 1. If customer bought on credit, create the SALE JV (Customer -> Sales) for creditPortion ONLY
       if (customer.ledgerAccountId && preSaleJv && creditPortion > 0) {
@@ -684,7 +664,6 @@ const postSaleAccounting = async ({
               const cashInPayload = {
                 transactionNumber: nextCashTx(),
                 voucherNumber: nextReceiptJv(),
-                countNumber: nextCount(),
                 transactionDate: invoice.date || new Date(),
                 branchId: resolvedBranchId || invoice.branchId,
                 partition: "running",
@@ -710,7 +689,6 @@ const postSaleAccounting = async ({
                 const cashOutPayload = {
                   transactionNumber: nextCashTx(),
                   voucherNumber: nextReceiptJv(),
-                  countNumber: nextCount(),
                   transactionDate: invoice.date || new Date(),
                   branchId: resolvedBranchId || invoice.branchId,
                   partition: "running",

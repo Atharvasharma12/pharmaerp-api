@@ -5,14 +5,12 @@ import companyContextMiddleware from "../../../../../../middlewares/companyConte
 import validate from "../../../../../../middlewares/validate.middleware.js";
 
 import {
-  createBankTransaction,
   getBankTransactions,
   getBankTransactionById,
   cancelBankTransaction,
 } from "../controllers/bankTransaction.controller.js";
 
 import {
-  createBankTransactionSchema,
   cancelBankTransactionSchema,
   bankTransactionIdParamSchema,
   getBankTransactionsQuerySchema,
@@ -26,7 +24,6 @@ router.use(workspaceContextMiddleware);
 router.use(companyContextMiddleware);
 
 // Routes
-router.post("/", validate(createBankTransactionSchema), createBankTransaction);
 router.get("/", validate(getBankTransactionsQuerySchema, "query"), getBankTransactions);
 
 router.get(

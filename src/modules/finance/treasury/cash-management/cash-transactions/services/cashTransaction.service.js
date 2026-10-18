@@ -17,63 +17,8 @@ import journalPostingService from "../../../../journal-vouchers/services/journal
 import journalCancellationService from "../../../../journal-vouchers/services/journalCancellation.service.js";
 import { VOUCHER_TYPE } from "../../../../journal-vouchers/constants/voucherType.constant.js";
 import voucherNumberService from "../../../../journal-vouchers/services/voucherNumber.service.js";
-import cashDenominationRepository from "../../cash-denominations/repositories/cashDenomination.repository.js";
-import { CASH_DENOMINATION_STATUS } from "../../cash-denominations/constants/cashDenomination.constant.js";
 
-// ---------------------------------------------------------------------------
-// AUTO-CREATE SYSTEM ACCOUNT (for EXPENSE / PETTY_CASH auto-offset)
-// ---------------------------------------------------------------------------
-const findOrCreateSystemAccount = async (
-  workspaceId,
-  companyId,
-  userId,
-  accountCode,
-  accountName,
-  accountNature,
-  accountCategory,
-  groupCode,
-  groupName,
-  session,
-) => {
-  let account = await accountRepository.findAccountByCode(companyId, accountCode, { session });
-  if (account) return account;
-
-  let group = await accountGroupRepository.findGroupByCode(companyId, groupCode, { session });
-  if (!group) {
-    group = await accountGroupRepository.createGroup(
-      {
-        workspaceId,
-        companyId,
-        groupCode,
-        groupName,
-        parentGroupId: null,
-        nature: accountNature,
-        isSystemGroup: true,
-        createdBy: userId,
-      },
-      { session },
-    );
-  }
-
-  account = await accountRepository.createAccount(
-    {
-      workspaceId,
-      companyId,
-      accountCode,
-      accountName,
-      accountGroupId: group._id,
-      accountNature,
-      accountCategory,
-      openingBalance: 0,
-      openingBalanceType: "dr",
-      status: "active",
-      isSystemAccount: true,
-      createdBy: userId,
-    },
-    { session },
-  );
-  return account;
-};
+import findOrCreateSystemAccount from "../../../shared/findOrCreateSystemAccount.js";
 
 // ---------------------------------------------------------------------------
 // CREATE CASH TRANSACTION
@@ -293,43 +238,8 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
       createdBy: userId,
     };
 
-    // 10. Create a CONFIRMED denomination count record and update the running balance
-    let cashDenominationId = null;
+    // 10. Update branch cash running/frozen denomination balance
     if (denominations && denominations.length > 0) {
-      const physicalTotal = processedDenominations.reduce(
-        (sum, d) => sum + d.subtotal,
-        0,
-      );
-
-      const countNumber = payload.countNumber || await cashDenominationRepository.getNextCountNumber(
-        companyId,
-        workspaceId,
-        { session },
-      );
-
-      const denomRecord = await cashDenominationRepository.createCashDenomination(
-        {
-          workspaceId,
-          companyId,
-          cashAccountId: null,
-          branchId,
-          partition,
-          countNumber,
-          countDate: new Date(transactionDate),
-          denominations: processedDenominations,
-          physicalTotal,
-          expectedBalance: amount,
-          variance: 0,
-          narration: narration || `Cash denomination count for ${transactionNumber}`,
-          status: CASH_DENOMINATION_STATUS.CONFIRMED,
-          confirmedAt: new Date(),
-          confirmedBy: userId,
-          createdBy: userId,
-        },
-        { session },
-      );
-      cashDenominationId = denomRecord._id;
-
       if (direction === CASH_TRANSACTION_DIRECTION.CREDIT) {
         if (partition === "running") {
           // addRunningDenominations recomputes runningTotal from sums — no scalar increment needed
@@ -347,10 +257,7 @@ const createCashTransaction = async (workspaceId, companyId, userId, payload, op
           await branchCashRepository.subtractFrozenDenominations(branchId, companyId, processedDenominations, userId, { session });
         }
       }
-    }
-
-    if (cashDenominationId) {
-      txPayload.cashDenominationId = cashDenominationId;
+      txPayload.denominations = processedDenominations;
     }
 
     const cashTransaction = await cashTransactionRepository.createCashTransaction(

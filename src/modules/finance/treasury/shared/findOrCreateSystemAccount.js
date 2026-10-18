@@ -103,39 +103,75 @@ const findOrCreateSystemAccount = async (
   }
   
   if (!group) {
-    group = await accountGroupRepository.createGroup(
+    try {
+      group = await accountGroupRepository.createGroup(
+        {
+          workspaceId,
+          companyId,
+          groupCode,
+          groupName,
+          parentGroupId: null,
+          nature: normalizedNature,
+          isSystemGroup: true,
+          createdBy: userId,
+        },
+        { session },
+      );
+    } catch (grpErr) {
+      if (
+        grpErr.code === 11000 ||
+        grpErr.name === "MongoServerError" ||
+        String(grpErr.message).includes("E11000") ||
+        String(grpErr.message).includes("duplicate key")
+      ) {
+        group =
+          (await accountGroupRepository.findGroupByName(companyId, groupName, {
+            session,
+          })) ||
+          (await accountGroupRepository.findGroupByCode(companyId, groupCode, {
+            session,
+          }));
+      }
+      if (!group) throw grpErr;
+    }
+  }
+
+  // Create the system account
+  try {
+    account = await accountRepository.createAccount(
       {
         workspaceId,
         companyId,
-        groupCode,
-        groupName,
-        parentGroupId: null,
-        nature: normalizedNature,
-        isSystemGroup: true,
+        accountCode,
+        accountName: finalAccountName,
+        accountGroupId: group._id,
+        accountNature: normalizedNature,
+        accountCategory,
+        openingBalance: 0,
+        openingBalanceType: "dr",
+        status: "active",
+        isSystemAccount: true,
         createdBy: userId,
       },
       { session },
     );
+  } catch (acctErr) {
+    if (
+      acctErr.code === 11000 ||
+      acctErr.name === "MongoServerError" ||
+      String(acctErr.message).includes("E11000") ||
+      String(acctErr.message).includes("duplicate key")
+    ) {
+      account =
+        (await accountRepository.findAccountByCode(companyId, accountCode, {
+          session,
+        })) ||
+        (await accountRepository.findAccountByName(companyId, finalAccountName, {
+          session,
+        }));
+    }
+    if (!account) throw acctErr;
   }
-
-  // Create the system account
-  account = await accountRepository.createAccount(
-    {
-      workspaceId,
-      companyId,
-      accountCode,
-      accountName: finalAccountName,
-      accountGroupId: group._id,
-      accountNature: normalizedNature,
-      accountCategory,
-      openingBalance: 0,
-      openingBalanceType: "dr",
-      status: "active",
-      isSystemAccount: true,
-      createdBy: userId,
-    },
-    { session },
-  );
 
   return account;
 };

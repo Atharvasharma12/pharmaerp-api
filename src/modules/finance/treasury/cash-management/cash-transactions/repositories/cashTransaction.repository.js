@@ -5,7 +5,6 @@ import SalesInvoice from "../../../../../sales/invoices/models/invoice.model.js"
 const POPULATE_FIELDS = [
   { path: "counterpartyAccountId", select: "accountName accountCode accountNature accountCategory" },
   { path: "journalVoucherId", select: "voucherNumber voucherDate status" },
-  { path: "cashDenominationId", select: "denominations physicalTotal countNumber" },
   { path: "createdBy", select: "name email" },
   { path: "postedBy", select: "name email" },
   { path: "cancelledBy", select: "name email" },

@@ -45,18 +45,3 @@ export const getCashExchangeById = asyncHandler(async (req, res) => {
     );
 });
 
-export const cancelCashExchange = asyncHandler(async (req, res) => {
-  const cashExchange = await cashExchangeService.cancelCashExchange(
-    req.params.cashExchangeId,
-    req.companyId,
-    req.workspaceId,
-    req.user._id,
-    req.body,
-  );
-  return res
-    .status(200)
-    .json(
-      new ApiResponse(200, "Cash Exchange cancelled successfully", cashExchange),
-    );
-});
-
