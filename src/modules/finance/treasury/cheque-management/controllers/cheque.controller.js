@@ -49,17 +49,31 @@ export const depositCheque = asyncHandler(async (req, res) => {
 });
 
 export const clearCheque = asyncHandler(async (req, res) => {
+  let payload = { ...req.body };
+  if (
+    payload.clearDate &&
+    typeof payload.clearDate === "object" &&
+    !(payload.clearDate instanceof Date)
+  ) {
+    const nested = payload.clearDate;
+    payload.clearDate = nested.clearDate;
+    if (nested.narration && !payload.narration) {
+      payload.narration = nested.narration;
+    }
+  }
+
   const cheque = await chequeService.clearCheque(
     req.params.chequeId,
     req.companyId,
     req.workspaceId,
     req.user._id,
-    req.body,
+    payload,
   );
   return res
     .status(200)
     .json(new ApiResponse(200, "Cheque cleared successfully", cheque));
 });
+
 
 export const bounceCheque = asyncHandler(async (req, res) => {
   const cheque = await chequeService.bounceCheque(

@@ -202,19 +202,13 @@ export const PERMISSIONS = {
   BANK_ACCOUNT_DELETE: "bank-account:delete",
 
   BANK_TRANSACTION_VIEW: "bank-transaction:view",
-  BANK_TRANSACTION_CREATE: "bank-transaction:create",
   BANK_TRANSACTION_UPDATE: "bank-transaction:update",
 
   BRANCH_CASH_VIEW: "branch-cash:view",
   BRANCH_CASH_UPDATE: "branch-cash:update",
 
   CASH_TRANSACTION_VIEW: "cash-transaction:view",
-  CASH_TRANSACTION_CREATE: "cash-transaction:create",
   CASH_TRANSACTION_UPDATE: "cash-transaction:update",
-
-  CASH_DENOMINATION_VIEW: "cash-denomination:view",
-  CASH_DENOMINATION_CREATE: "cash-denomination:create",
-  CASH_DENOMINATION_UPDATE: "cash-denomination:update",
 
   FUND_TRANSFER_VIEW: "fund-transfer:view",
   FUND_TRANSFER_CREATE: "fund-transfer:create",
@@ -413,10 +407,8 @@ export const DEFAULT_ROLE_PERMISSIONS = {
     PERMISSIONS.PAYMENT_CREATE,
     PERMISSIONS.BANK_ACCOUNT_VIEW,
     PERMISSIONS.BANK_TRANSACTION_VIEW,
-    PERMISSIONS.BANK_TRANSACTION_CREATE,
     PERMISSIONS.BRANCH_CASH_VIEW,
     PERMISSIONS.CASH_TRANSACTION_VIEW,
-    PERMISSIONS.CASH_DENOMINATION_VIEW,
     PERMISSIONS.FUND_TRANSFER_VIEW,
     PERMISSIONS.FUND_TRANSFER_CREATE,
     PERMISSIONS.CHEQUE_VIEW,

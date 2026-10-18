@@ -52,7 +52,7 @@ const chequeSchema = new mongoose.Schema(
     counterpartyAccountId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Account",
-      required: [true, "Counterparty account is required"],
+      default: null,
       index: true,
     },
 
@@ -202,6 +202,10 @@ const chequeSchema = new mongoose.Schema(
 chequeSchema.methods.toSafeObject = function () {
   const obj = this.toObject();
   delete obj.__v;
+  if (obj.clearedAt) {
+    obj.clearedDate = obj.clearedAt;
+    obj.clearDate = obj.clearedAt;
+  }
   return obj;
 };
 

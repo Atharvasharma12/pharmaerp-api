@@ -215,7 +215,9 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
   const { product, facility, facility_id, branch_id, expiryDate, expired, lowStock, inStockOnly } = filters;
   const matchStage = { workspaceId: req.workspaceId };
 
-  if (inStockOnly) {
+  if (lowStock) {
+    matchStage.batchQty = inStockOnly ? { $gt: 0, $lt: 10 } : { $lt: 10 };
+  } else if (inStockOnly) {
     matchStage.batchQty = { $gt: 0 };
   }
 

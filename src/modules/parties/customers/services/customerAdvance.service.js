@@ -11,7 +11,6 @@ import journalVoucherService from "../../../finance/journal-vouchers/services/jo
 import voucherNumberService from "../../../finance/journal-vouchers/services/voucherNumber.service.js";
 import cashTransactionService from "../../../finance/treasury/cash-management/cash-transactions/services/cashTransaction.service.js";
 import cashTransactionRepository from "../../../finance/treasury/cash-management/cash-transactions/repositories/cashTransaction.repository.js";
-import cashDenominationRepository from "../../../finance/treasury/cash-management/cash-denominations/repositories/cashDenomination.repository.js";
 import bankTransactionService from "../../../finance/treasury/bank-management/bank-transactions/services/bankTransaction.service.js";
 import BankAccount from "../../../finance/treasury/bank-management/bank-accounts/models/bankAccount.model.js";
 import PaymentQr from "../../../finance/treasury/payment-qr/models/paymentQr.model.js";
@@ -365,12 +364,10 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
       if (effectiveBranchId) {
         try {
           const baseCashTx = await cashTransactionRepository.getNextTransactionNumber(companyId, workspaceId, { session });
-          const baseCount = await cashDenominationRepository.getNextCountNumber(companyId, workspaceId, { session });
 
           const cashInPayload = {
             transactionNumber: baseCashTx,
             voucherNumber: voucherNumber,
-            countNumber: baseCount,
             transactionDate: date ? new Date(date) : new Date(),
             branchId: effectiveBranchId,
             partition: "running",
@@ -397,7 +394,6 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
 
           if (changeDue > 0) {
             const outCashTx = await cashTransactionRepository.getNextTransactionNumber(companyId, workspaceId, { session });
-            const outCount = await cashDenominationRepository.getNextCountNumber(companyId, workspaceId, { session });
             const changeVoucherNumber = await voucherNumberService.generateVoucherNumber(
               companyId,
               workspaceId,
@@ -407,7 +403,6 @@ export const receiveCustomerAdvance = async (workspaceId, companyId, userId, pay
             const cashOutPayload = {
               transactionNumber: outCashTx,
               voucherNumber: changeVoucherNumber,
-              countNumber: outCount,
               transactionDate: date ? new Date(date) : new Date(),
               branchId: effectiveBranchId,
               partition: "running",
@@ -843,12 +838,10 @@ export const settleCustomerCredit = async (workspaceId, companyId, userId, paylo
       if (effectiveBranchId) {
         try {
           const baseCashTx = await cashTransactionRepository.getNextTransactionNumber(companyId, workspaceId, { session });
-          const baseCount = await cashDenominationRepository.getNextCountNumber(companyId, workspaceId, { session });
 
           const cashInPayload = {
             transactionNumber: baseCashTx,
             voucherNumber,
-            countNumber: baseCount,
             transactionDate: date ? new Date(date) : new Date(),
             branchId: effectiveBranchId,
             partition: "running",
@@ -875,7 +868,6 @@ export const settleCustomerCredit = async (workspaceId, companyId, userId, paylo
 
           if (changeDue > 0) {
             const outCashTx = await cashTransactionRepository.getNextTransactionNumber(companyId, workspaceId, { session });
-            const outCount = await cashDenominationRepository.getNextCountNumber(companyId, workspaceId, { session });
             const changeVoucherNumber = await voucherNumberService.generateVoucherNumber(
               companyId,
               workspaceId,
@@ -885,7 +877,6 @@ export const settleCustomerCredit = async (workspaceId, companyId, userId, paylo
             const cashOutPayload = {
               transactionNumber: outCashTx,
               voucherNumber: changeVoucherNumber,
-              countNumber: outCount,
               transactionDate: date ? new Date(date) : new Date(),
               branchId: effectiveBranchId,
               partition: "running",

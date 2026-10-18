@@ -85,7 +85,8 @@ const getCheques = async (
 ) => {
   const query = { workspaceId, companyId, isDeleted: false };
 
-  if (filters.chequeType) query.chequeType = filters.chequeType;
+  const resolvedChequeType = filters.chequeType || filters.type;
+  if (resolvedChequeType) query.chequeType = resolvedChequeType;
   if (filters.status) query.status = filters.status;
   if (filters.bankAccountId) query.bankAccountId = filters.bankAccountId;
   if (filters.counterpartyAccountId)

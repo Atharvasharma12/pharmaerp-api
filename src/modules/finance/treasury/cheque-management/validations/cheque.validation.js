@@ -6,8 +6,10 @@ const objectId = Joi.string()
   .messages({ "string.pattern.base": "Invalid ID format" });
 
 export const createChequeSchema = Joi.object({
-  chequeType: Joi.string().valid("RECEIVED", "ISSUED").required().messages({
-    "any.required": "Cheque type is required",
+  chequeType: Joi.string().valid("RECEIVED", "ISSUED").optional().messages({
+    "any.only": "Cheque type must be RECEIVED or ISSUED",
+  }),
+  type: Joi.string().valid("RECEIVED", "ISSUED").optional().messages({
     "any.only": "Cheque type must be RECEIVED or ISSUED",
   }),
   chequeNumber: Joi.string().trim().min(1).max(50).required().messages({
@@ -20,9 +22,7 @@ export const createChequeSchema = Joi.object({
   bankAccountId: objectId.required().messages({
     "any.required": "Bank Account ID is required",
   }),
-  counterpartyAccountId: objectId.required().messages({
-    "any.required": "Counterparty account ID is required",
-  }),
+  counterpartyAccountId: objectId.allow(null, "").optional(),
   partyName: Joi.string().trim().min(2).max(200).required().messages({
     "any.required": "Party name is required",
   }),
@@ -31,12 +31,28 @@ export const createChequeSchema = Joi.object({
     "number.positive": "Amount must be greater than zero",
   }),
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
-});
+  remarks: Joi.string().trim().max(500).allow(null, "").optional(),
+})
+  .or("chequeType", "type")
+  .messages({
+    "object.missing": "Cheque type is required",
+  });
 
 export const clearChequeSchema = Joi.object({
-  clearDate: Joi.date().iso().optional(),
+  clearDate: Joi.alternatives()
+    .try(
+      Joi.date(),
+      Joi.string().trim().allow(""),
+      Joi.object({
+        clearDate: Joi.any().optional(),
+        narration: Joi.string().allow(null, "").optional(),
+      })
+    )
+    .allow(null, "")
+    .optional(),
   narration: Joi.string().trim().max(500).allow(null, "").optional(),
 });
+
 
 export const bounceChequeSchema = Joi.object({
   reason: Joi.string().trim().max(500).required().messages({
@@ -57,6 +73,7 @@ export const chequeIdParamSchema = Joi.object({
 
 export const getChequesQuerySchema = Joi.object({
   chequeType: Joi.string().valid("RECEIVED", "ISSUED").optional(),
+  type: Joi.string().valid("RECEIVED", "ISSUED").optional(),
   status: Joi.string()
     .valid("PENDING", "DEPOSITED", "CLEARED", "BOUNCED", "CANCELLED")
     .optional(),

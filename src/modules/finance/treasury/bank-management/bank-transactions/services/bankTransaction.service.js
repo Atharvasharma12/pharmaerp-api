@@ -43,68 +43,7 @@ const resolveVoucherType = (transactionType) => {
   return VOUCHER_TYPE.JOURNAL;
 };
 
-/**
- * Find or auto-create a system account for bank charges / interest income.
- */
-const findOrCreateSystemAccount = async (
-  workspaceId,
-  companyId,
-  userId,
-  accountCode,
-  accountName,
-  accountNature,
-  accountCategory,
-  groupCode,
-  groupName,
-  session,
-) => {
-  let account = await accountRepository.findAccountByCode(
-    companyId,
-    accountCode,
-    { session },
-  );
-  if (account) return account;
-
-  let group = await accountGroupRepository.findGroupByCode(
-    companyId,
-    groupCode,
-    { session },
-  );
-  if (!group) {
-    group = await accountGroupRepository.createGroup(
-      {
-        workspaceId,
-        companyId,
-        groupCode,
-        groupName,
-        parentGroupId: null,
-        nature: accountNature,
-        isSystemGroup: true,
-        createdBy: userId,
-      },
-      { session },
-    );
-  }
-
-  account = await accountRepository.createAccount(
-    {
-      workspaceId,
-      companyId,
-      accountCode,
-      accountName,
-      accountGroupId: group._id,
-      accountNature,
-      accountCategory,
-      openingBalance: 0,
-      openingBalanceType: "dr",
-      status: "active",
-      isSystemAccount: true,
-      createdBy: userId,
-    },
-    { session },
-  );
-  return account;
-};
+import findOrCreateSystemAccount from "../../../shared/findOrCreateSystemAccount.js";
 
 // ---------------------------------------------------------------------------
 // CREATE BANK TRANSACTION
@@ -349,19 +288,22 @@ const createBankTransaction = async (
 // GET BANK TRANSACTIONS (LIST)
 // ---------------------------------------------------------------------------
 const getBankTransactions = async (workspaceId, companyId, query = {}) => {
-  const { page, limit, sort, all, ...filters } = query;
+  const { page, limit, sort, all, sortBy, sortOrder, ...filters } = query;
   const result = await bankTransactionRepository.getBankTransactions(
     workspaceId,
     companyId,
     filters,
-    { page, limit, sort, all: all === "true" || all === true },
+    { page, limit, sort, all: all === "true" || all === true, sortBy, sortOrder },
   );
 
   return {
-    bankTransactions: result.bankTransactions.map((bt) => bt.toSafeObject()),
+    bankTransactions: result.bankTransactions.map((bt) =>
+      bt.toSafeObject ? bt.toSafeObject() : bt,
+    ),
     total: result.total,
     page: result.page,
     limit: result.limit,
+    summary: result.summary,
   };
 };
 

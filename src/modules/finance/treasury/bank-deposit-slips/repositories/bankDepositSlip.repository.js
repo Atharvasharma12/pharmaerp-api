@@ -19,10 +19,6 @@ const POPULATE_DAY_CLOSING = [
   { path: "businessDayId", select: "businessDayNo businessDate status" },
 ];
 
-const POPULATE_DENOMINATION = [
-  { path: "cashDenominationId", select: "countNumber physicalTotal denominations status" },
-];
-
 const POPULATE_JOURNALS = [
   { path: "preparationJournalVoucherId", select: "voucherNumber voucherDate status" },
   { path: "depositJournalVoucherId", select: "voucherNumber voucherDate status" },
@@ -42,7 +38,6 @@ const buildPopulate = () => [
   ...POPULATE_ACCOUNTS,
   ...POPULATE_BRANCH,
   ...POPULATE_DAY_CLOSING,
-  ...POPULATE_DENOMINATION,
   ...POPULATE_JOURNALS,
   ...POPULATE_USERS,
 ];
