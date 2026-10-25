@@ -142,6 +142,27 @@ const invoiceSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    isReturn: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    returnType: {
+      type: String,
+      enum: ["CASH", "ADVANCE", "CREDIT_NOTE", "SPLIT", "OTHER", "advance_credit", "credit_note", "cash_refund", null],
+      default: null,
+    },
+    originalInvoiceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "SalesInvoice",
+      default: null,
+      index: true,
+    },
+    originalInvoiceNo: {
+      type: String,
+      default: null,
+      index: true,
+    },
     items: {
       type: Array,
       default: [],
