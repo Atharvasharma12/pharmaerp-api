@@ -371,8 +371,15 @@ const recordCustomerReturn = async (
 
     // 5. Auto-resolve open shift for branch
     let resolvedShiftId = returnData.shiftId || null;
+    if (resolvedShiftId && mongoose.Types.ObjectId.isValid(resolvedShiftId)) {
+      const shiftDoc = await Shift.findById(resolvedShiftId).session(session);
+      if (!shiftDoc || shiftDoc.status !== "open") {
+        resolvedShiftId = null;
+      }
+    }
     if (!resolvedShiftId && resolvedBranchId) {
       const activeOpenShift = await Shift.findOne({
+        workspaceId: workspaceId || customer.workspaceId,
         companyId: companyId || customer.companyId,
         branchId: resolvedBranchId,
         status: "open",
@@ -417,12 +424,116 @@ const recordCustomerReturn = async (
       dispensedDenoms = decomposeCashAmount(grandTotal);
     }
 
+    // Resolve originalInvoiceNo and originalInvoiceId from items if not provided or self-referential
+    let resolvedOriginalInvoiceNo = returnData.originalInvoiceNo || returnData.originalInvoice || null;
+    let resolvedOriginalInvoiceId = returnData.originalInvoiceId || null;
+
+    if (
+      (!resolvedOriginalInvoiceNo ||
+        resolvedOriginalInvoiceNo === finalReturnNo ||
+        resolvedOriginalInvoiceNo.startsWith("RET-")) &&
+      Array.isArray(returnData.items) &&
+      returnData.items.length > 0
+    ) {
+      const itWithOrig = returnData.items.find(
+        (it) => it.originalInvoiceNo && !it.originalInvoiceNo.startsWith("RET-")
+      );
+      if (itWithOrig) {
+        resolvedOriginalInvoiceNo = itWithOrig.originalInvoiceNo;
+        if (!resolvedOriginalInvoiceId && itWithOrig.originalInvoiceId) {
+          resolvedOriginalInvoiceId = itWithOrig.originalInvoiceId;
+        }
+      }
+    }
+
+    // 5b. Find Original Invoice and Validate Against Double / Over-Return
+    let originalInvoiceDoc = null;
+    const invFindQuery = {
+      workspaceId: workspaceId || customer.workspaceId,
+      companyId: companyId || customer.companyId,
+      isDeleted: false,
+    };
+
+    if (resolvedOriginalInvoiceId && mongoose.Types.ObjectId.isValid(resolvedOriginalInvoiceId)) {
+      originalInvoiceDoc = await SalesInvoice.findOne({
+        ...invFindQuery,
+        _id: resolvedOriginalInvoiceId,
+      }).session(session);
+    }
+
+    if (!originalInvoiceDoc && resolvedOriginalInvoiceNo) {
+      originalInvoiceDoc = await SalesInvoice.findOne({
+        ...invFindQuery,
+        invoiceNo: resolvedOriginalInvoiceNo,
+      }).session(session);
+    }
+
+    if (originalInvoiceDoc) {
+      resolvedOriginalInvoiceId = originalInvoiceDoc._id;
+      resolvedOriginalInvoiceNo = originalInvoiceDoc.invoiceNo;
+
+      // Validate each item to return against original invoice line items
+      if (Array.isArray(originalInvoiceDoc.items) && Array.isArray(returnData.items)) {
+        for (const retItem of returnData.items) {
+          const reqQty = Number(retItem.qty ?? retItem.quantity ?? retItem.returnQty ?? 0);
+          if (reqQty <= 0) continue;
+
+          const matchedItem =
+            originalInvoiceDoc.items.find((origIt) => {
+              const matchById =
+                origIt.productId &&
+                retItem.productId &&
+                origIt.productId.toString() === retItem.productId.toString();
+              const matchByName =
+                origIt.name &&
+                retItem.name &&
+                origIt.name.trim().toLowerCase() === retItem.name.trim().toLowerCase();
+              const matchBatch =
+                !origIt.batch || !retItem.batchNo || origIt.batch === retItem.batchNo;
+              return (matchById || matchByName) && matchBatch;
+            }) ||
+            originalInvoiceDoc.items.find((origIt) => {
+              return (
+                (origIt.productId &&
+                  retItem.productId &&
+                  origIt.productId.toString() === retItem.productId.toString()) ||
+                (origIt.name &&
+                  retItem.name &&
+                  origIt.name.trim().toLowerCase() === retItem.name.trim().toLowerCase())
+              );
+            });
+
+          if (matchedItem) {
+            const soldQty = Number(matchedItem.qty || 1);
+            const alreadyReturnedQty = Number(matchedItem.returnedQty || 0);
+            const availableQty = Math.max(0, soldQty - alreadyReturnedQty);
+
+            if (availableQty <= 0) {
+              throw new ApiError(
+                400,
+                `Cannot return item "${matchedItem.name || retItem.name}". All ${soldQty} units from bill #${originalInvoiceDoc.invoiceNo} have already been returned.`
+              );
+            }
+
+            if (reqQty > availableQty) {
+              throw new ApiError(
+                400,
+                `Cannot return ${reqQty} units of "${matchedItem.name || retItem.name}". Only ${availableQty} units remain available to return (Sold: ${soldQty}, Already Returned: ${alreadyReturnedQty}).`
+              );
+            }
+          }
+        }
+      }
+    }
+
     // 6. Build and save Sales Return Document in dedicated collection
     const newReturnBill = {
       workspaceId: workspaceId || customer.workspaceId,
       companyId: companyId || customer.companyId,
       branchId: resolvedBranchId,
       customerId: customer._id,
+      customerName: customer?.name || returnData.customerName || null,
+      customerPhone: customer?.mobile || customer?.phone || returnData.customerPhone || null,
       returnNo: finalReturnNo,
       invoiceNo: finalReturnNo,
       date: returnData.date || new Date(),
@@ -459,17 +570,118 @@ const recordCustomerReturn = async (
       items: Array.isArray(returnData.items) ? returnData.items : [],
       doctor: returnData.doctor || null,
       doctorId: returnData.doctorId || null,
-      notes: returnData.notes || `Sales return memo against invoice ${returnData.originalInvoiceNo || "original sale"}`,
+      notes: returnData.notes && !returnData.notes.includes(finalReturnNo)
+        ? returnData.notes
+        : `Sales return memo against invoice ${resolvedOriginalInvoiceNo || "original sale"}`,
       isReturn: true,
       returnType,
-      originalInvoiceId: returnData.originalInvoiceId || null,
-      originalInvoiceNo: returnData.originalInvoiceNo || returnData.originalInvoice || null,
+      originalInvoiceId: resolvedOriginalInvoiceId,
+      originalInvoiceNo: resolvedOriginalInvoiceNo,
       createdBy: user?._id || null,
       createdByName: user?.name || null,
       createdByEmail: user?.email || null,
     };
 
     const savedReturn = await salesReturnRepository.createSalesReturn(newReturnBill, { session });
+
+    // 6b. Update Original Sale Bill with Return IDs & Returned Item Quantities
+    if (originalInvoiceDoc) {
+      if (Array.isArray(originalInvoiceDoc.items)) {
+        originalInvoiceDoc.items = originalInvoiceDoc.items.map((origIt) => {
+          let updatedReturnedQty = Number(origIt.returnedQty || 0);
+          const retItem =
+            (newReturnBill.items || []).find((rIt) => {
+              const matchById =
+                origIt.productId &&
+                rIt.productId &&
+                origIt.productId.toString() === rIt.productId.toString();
+              const matchByName =
+                origIt.name &&
+                rIt.name &&
+                origIt.name.trim().toLowerCase() === rIt.name.trim().toLowerCase();
+              const matchBatch =
+                !origIt.batch || !rIt.batchNo || origIt.batch === rIt.batchNo;
+              return (matchById || matchByName) && matchBatch;
+            }) ||
+            (newReturnBill.items || []).find((rIt) => {
+              return (
+                (origIt.productId &&
+                  rIt.productId &&
+                  origIt.productId.toString() === rIt.productId.toString()) ||
+                (origIt.name &&
+                  rIt.name &&
+                  origIt.name.trim().toLowerCase() === rIt.name.trim().toLowerCase())
+              );
+            });
+
+          if (retItem) {
+            const addedQty = Number(retItem.qty ?? retItem.quantity ?? retItem.returnQty ?? 0);
+            updatedReturnedQty += addedQty;
+          }
+
+          const soldQty = Number(origIt.qty || 1);
+          const isReturned = updatedReturnedQty >= soldQty;
+          const itemReturnStatus = isReturned
+            ? "FULL"
+            : updatedReturnedQty > 0
+            ? "PARTIAL"
+            : "NONE";
+
+          return {
+            ...origIt,
+            returnedQty: updatedReturnedQty,
+            isReturned,
+            returnStatus: itemReturnStatus,
+          };
+        });
+      }
+
+      originalInvoiceDoc.returnInvoiceIds = originalInvoiceDoc.returnInvoiceIds || [];
+      if (
+        !originalInvoiceDoc.returnInvoiceIds.some(
+          (id) => id.toString() === savedReturn._id.toString()
+        )
+      ) {
+        originalInvoiceDoc.returnInvoiceIds.push(savedReturn._id);
+      }
+
+      originalInvoiceDoc.returnInvoices = originalInvoiceDoc.returnInvoices || [];
+      originalInvoiceDoc.returnInvoices.push({
+        returnId: savedReturn._id,
+        returnNo: savedReturn.returnNo || savedReturn.invoiceNo,
+        date: savedReturn.date || new Date(),
+        returnAmount: savedReturn.grandTotal || grandTotal,
+        returnType: savedReturn.returnType,
+        refundMethod: savedReturn.refundMethod || savedReturn.paymentMethod,
+        items: (newReturnBill.items || []).map((i) => ({
+          productId: i.productId,
+          batchNo: i.batch || i.batchNo,
+          name: i.name,
+          qty: i.qty || i.returnQty,
+          price: i.price || i.rate,
+          total: i.total || (Number(i.price || i.rate) * Number(i.qty || i.returnQty)),
+        })),
+      });
+
+      originalInvoiceDoc.totalReturnedAmount =
+        (Number(originalInvoiceDoc.totalReturnedAmount) || 0) + grandTotal;
+      originalInvoiceDoc.isReturned = true;
+
+      const isAllFullyReturned =
+        originalInvoiceDoc.items.length > 0 &&
+        originalInvoiceDoc.items.every(
+          (it) => (Number(it.returnedQty) || 0) >= Number(it.qty || 1)
+        );
+
+      originalInvoiceDoc.returnStatus = isAllFullyReturned ? "FULL" : "PARTIAL";
+      originalInvoiceDoc.isFullyReturned = isAllFullyReturned;
+
+      originalInvoiceDoc.markModified("items");
+      originalInvoiceDoc.markModified("returnInvoices");
+      originalInvoiceDoc.markModified("returnInvoiceIds");
+
+      await originalInvoiceDoc.save({ session });
+    }
 
     // 7. Increase Inventory (Restock Batch & ProductFacility)
     const resolvedWorkspaceId = workspaceId || customer?.workspaceId || savedReturn?.workspaceId;
@@ -638,6 +850,77 @@ const recordCustomerReturn = async (
       }
     }
 
+    // 10. Real-time Active Shift Sync
+    if (resolvedShiftId) {
+      try {
+        const returnInc = {
+          returnInvoiceCount: 1,
+          returnSalesTotal: grandTotal,
+        };
+        const pMethod = String(savedReturn.paymentMethod || "CASH").toUpperCase();
+        const retType = String(returnType || "").toLowerCase();
+
+        if (savedReturn.paymentMethod === "Split" && Array.isArray(savedReturn.payments) && savedReturn.payments.length > 0) {
+          returnInc.returnSplitTotal = grandTotal;
+          for (const p of savedReturn.payments) {
+            const pt = String(p.paymentType || p.mode || "").toUpperCase();
+            const amt = Math.abs(Number(p.amount || 0));
+            if (pt.includes("CASH")) returnInc.returnCashTotal = (returnInc.returnCashTotal || 0) + amt;
+            else if (pt.includes("UPI") || pt.includes("QR")) returnInc.returnUpiTotal = (returnInc.returnUpiTotal || 0) + amt;
+            else if (pt.includes("ADVANCE") || pt.includes("WALLET")) returnInc.returnAdvanceTotal = (returnInc.returnAdvanceTotal || 0) + amt;
+            else if (pt.includes("CREDIT")) returnInc.returnCreditTotal = (returnInc.returnCreditTotal || 0) + amt;
+          }
+        } else if (retType === "advance_credit" || pMethod.includes("ADVANCE") || pMethod.includes("WALLET")) {
+          returnInc.returnAdvanceTotal = grandTotal;
+        } else if (retType === "credit_note" || pMethod.includes("CREDIT")) {
+          returnInc.returnCreditTotal = grandTotal;
+        } else if (pMethod.includes("UPI") || pMethod.includes("QR")) {
+          returnInc.returnUpiTotal = grandTotal;
+        } else {
+          returnInc.returnCashTotal = grandTotal;
+        }
+
+        const returnEntry = {
+          invoiceId: savedReturn._id,
+          returnId: savedReturn._id,
+          invoiceNo: savedReturn.invoiceNo || savedReturn.returnNo,
+          returnNo: savedReturn.returnNo || savedReturn.invoiceNo,
+          originalInvoiceNo: savedReturn.originalInvoiceNo || resolvedOriginalInvoiceNo || "—",
+          originalInvoiceId: savedReturn.originalInvoiceId || resolvedOriginalInvoiceId || null,
+          grandTotal,
+          returnType: returnType || "cash_refund",
+          paymentMethod: savedReturn.paymentMethod || "Cash",
+          payments: savedReturn.payments || [],
+          returnedAt: savedReturn.date || new Date(),
+          returnedBy: user?._id || null,
+          createdByName: user?.name || null,
+          customerName: customer?.name || returnData.customerName || "Walk-in Customer",
+          customerPhone: customer?.mobile || customer?.phone || returnData.customerPhone || "",
+          itemsCount: Array.isArray(newReturnBill.items) ? newReturnBill.items.length : 0,
+          items: (newReturnBill.items || []).map((it) => ({
+            itemId: it.productId || it.itemId,
+            itemName: it.name || it.itemName,
+            quantity: it.qty || it.returnQty || it.quantity,
+            price: it.price || it.saleRate,
+            total: it.total || it.amount,
+            batchNumber: it.batchNo || it.batch || it.batchNumber,
+          })),
+          notes: savedReturn.notes || "",
+        };
+
+        await Shift.updateOne(
+          { _id: resolvedShiftId },
+          {
+            $inc: returnInc,
+            $push: { returnInvoices: returnEntry },
+          },
+          { session }
+        );
+      } catch (shiftErr) {
+        console.warn("[Sales Return] Shift real-time update error:", shiftErr.message);
+      }
+    }
+
     if (!existingSession) {
       await session.commitTransaction();
       session.endSession();
@@ -727,62 +1010,308 @@ const getAllCustomerReturns = async (companyId, workspaceId, filters = {}, pagin
   const page = Math.max(1, parseInt(pagination.page, 10) || 1);
   const limit = Math.max(1, parseInt(pagination.limit, 10) || 20);
 
-  const query = {
-    companyId: new mongoose.Types.ObjectId(companyId),
-    workspaceId: new mongoose.Types.ObjectId(workspaceId),
-    isDeleted: false,
-  };
-
-  if (filters.branchId && mongoose.Types.ObjectId.isValid(filters.branchId)) {
-    query.branchId = new mongoose.Types.ObjectId(filters.branchId);
-  }
-  if (filters.customerId && mongoose.Types.ObjectId.isValid(filters.customerId)) {
-    query.customerId = new mongoose.Types.ObjectId(filters.customerId);
-  }
-  if (filters.shiftId && mongoose.Types.ObjectId.isValid(filters.shiftId)) {
-    query.shiftId = new mongoose.Types.ObjectId(filters.shiftId);
-  }
-  if (filters.returnType && filters.returnType !== "all") {
-    query.returnType = filters.returnType;
-  }
-  if (filters.billingMode && filters.billingMode !== "all") {
-    query.billingMode = filters.billingMode;
-  }
-  if (filters.search && typeof filters.search === "string" && filters.search.trim()) {
-    const term = filters.search.trim();
-    query.$or = [
-      { returnNo: { $regex: term, $options: "i" } },
-      { invoiceNo: { $regex: term, $options: "i" } },
-      { originalInvoiceNo: { $regex: term, $options: "i" } },
-    ];
-  }
-  if (filters.dateFrom || filters.dateTo) {
-    query.date = {};
-    if (filters.dateFrom) query.date.$gte = new Date(filters.dateFrom);
-    if (filters.dateTo) {
-      const end = new Date(filters.dateTo);
-      end.setHours(23, 59, 59, 999);
-      query.date.$lte = end;
-    }
-  }
-
-  const result = await salesReturnRepository.findSalesReturns(query, { page, limit });
-
-  // If no records found in dedicated sales_returns and first page without search, fallback to legacy SalesInvoice returns
-  if (result.returns.length === 0 && page === 1 && !filters.search) {
-    const legacyQuery = {
+  // Auto-sync legacy returns from SalesInvoice (isReturn: true) into SalesReturn if not already present
+  try {
+    const legacyReturns = await SalesInvoice.find({
       companyId: new mongoose.Types.ObjectId(companyId),
       workspaceId: new mongoose.Types.ObjectId(workspaceId),
       isReturn: true,
       isDeleted: false,
-    };
-    if (query.branchId) legacyQuery.branchId = query.branchId;
-    if (query.customerId) legacyQuery.customerId = query.customerId;
-    if (query.shiftId) legacyQuery.shiftId = query.shiftId;
+    }).lean();
+
+    if (legacyReturns && legacyReturns.length > 0) {
+      for (const lr of legacyReturns) {
+        const retNo = lr.returnNo || lr.invoiceNo;
+        if (!retNo) continue;
+        const exists = await SalesReturn.findOne({
+          workspaceId: lr.workspaceId,
+          $or: [{ returnNo: retNo }, { invoiceNo: lr.invoiceNo }],
+        })
+          .select("_id")
+          .lean();
+
+        if (!exists) {
+          await SalesReturn.create({
+            workspaceId: lr.workspaceId,
+            companyId: lr.companyId,
+            branchId: lr.branchId || null,
+            customerId: lr.customerId,
+            financialPeriodId: lr.financialPeriodId || null,
+            shiftId: lr.shiftId || null,
+            returnNo: retNo,
+            invoiceNo: lr.invoiceNo || retNo,
+            date: lr.date || lr.createdAt || new Date(),
+            billingMode: lr.billingMode || "B2C",
+            subtotal: lr.subtotal || 0,
+            discount: lr.discount || 0,
+            tax: lr.tax || 0,
+            roundOff: lr.roundOff || 0,
+            grandTotal: lr.grandTotal || 0,
+            returnAmount: lr.grandTotal || 0,
+            returnType:
+              lr.returnType ||
+              (lr.paymentMethod === "Advance"
+                ? "advance_credit"
+                : lr.paymentMethod === "Credit Note"
+                ? "credit_note"
+                : "cash_refund"),
+            paymentMethod: lr.paymentMethod || "Cash",
+            refundMethod: lr.refundMethod || lr.paymentMethod || "Cash",
+            refundDenominations: lr.refundDenominations || lr.returnedDenominations || [],
+            payments: lr.payments || [],
+            originalInvoiceId: lr.originalInvoiceId || null,
+            originalInvoiceNo: lr.originalInvoiceNo || null,
+            items: lr.items || [],
+            doctor: lr.doctor || null,
+            doctorId: lr.doctorId || null,
+            notes: lr.notes || lr.cancelReason || null,
+            status: lr.status || "Completed",
+            createdBy: lr.createdBy || null,
+            createdAt: lr.createdAt || new Date(),
+            updatedAt: lr.updatedAt || new Date(),
+          });
+        }
+      }
+    }
+  } catch (syncErr) {
+    console.warn("[Sales Return] Legacy return auto-sync warning:", syncErr.message);
+  }
+
+  const andConditions = [
+    { companyId: new mongoose.Types.ObjectId(companyId) },
+    { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
+    { isDeleted: false },
+  ];
+
+  if (filters.branchId && mongoose.Types.ObjectId.isValid(filters.branchId)) {
+    andConditions.push({ branchId: new mongoose.Types.ObjectId(filters.branchId) });
+  }
+  if (filters.customerId && mongoose.Types.ObjectId.isValid(filters.customerId)) {
+    andConditions.push({ customerId: new mongoose.Types.ObjectId(filters.customerId) });
+  }
+  if (filters.shiftId && mongoose.Types.ObjectId.isValid(filters.shiftId)) {
+    andConditions.push({ shiftId: new mongoose.Types.ObjectId(filters.shiftId) });
+  }
+
+  // Billing Mode Filter (Case-insensitive)
+  if (filters.billingMode && filters.billingMode !== "all") {
+    andConditions.push({
+      billingMode: { $regex: new RegExp(`^${filters.billingMode.trim()}$`, "i") },
+    });
+  }
+
+  // Refund / Return Type Filter
+  if (filters.returnType && filters.returnType !== "all") {
+    const rt = String(filters.returnType).trim().toLowerCase();
+    if (rt.includes("cash")) {
+      andConditions.push({
+        $or: [
+          { returnType: { $in: ["cash_refund", "CASH", "Cash", "cash"] } },
+          { refundMethod: { $regex: /^cash/i } },
+          { paymentMethod: { $regex: /^cash/i } },
+        ],
+      });
+    } else if (rt.includes("adv")) {
+      andConditions.push({
+        $or: [
+          { returnType: { $in: ["advance_credit", "ADVANCE", "Advance", "advance"] } },
+          { refundMethod: { $regex: /^adv/i } },
+          { paymentMethod: { $regex: /^adv/i } },
+        ],
+      });
+    } else if (rt.includes("cred")) {
+      andConditions.push({
+        $or: [
+          { returnType: { $in: ["credit_note", "CREDIT_NOTE", "Credit Note", "credit"] } },
+          { refundMethod: { $regex: /^cred/i } },
+          { paymentMethod: { $regex: /^cred/i } },
+        ],
+      });
+    } else {
+      andConditions.push({
+        returnType: { $regex: new RegExp(`^${filters.returnType.trim()}$`, "i") },
+      });
+    }
+  }
+
+  // Search Filter: matches Return No, Bill No, Original Invoice No, or Customer Name / Phone / Mobile
+  if (filters.search && typeof filters.search === "string" && filters.search.trim()) {
+    const rawTerm = filters.search.trim();
+    const escapedTerm = rawTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    let matchingCustomerIds = [];
+    try {
+      const customers = await Customer.find({
+        workspaceId: new mongoose.Types.ObjectId(workspaceId),
+        $or: [
+          { name: { $regex: escapedTerm, $options: "i" } },
+          { mobile: { $regex: escapedTerm, $options: "i" } },
+          { phone: { $regex: escapedTerm, $options: "i" } },
+          { customerCode: { $regex: escapedTerm, $options: "i" } },
+        ],
+      })
+        .select("_id")
+        .lean();
+
+      matchingCustomerIds = customers.map((c) => c._id);
+    } catch (custErr) {
+      console.warn("[Sales Return] Customer search lookup warning:", custErr.message);
+    }
+
+    const searchOrConditions = [
+      { returnNo: { $regex: escapedTerm, $options: "i" } },
+      { invoiceNo: { $regex: escapedTerm, $options: "i" } },
+      { originalInvoiceNo: { $regex: escapedTerm, $options: "i" } },
+      { customerName: { $regex: escapedTerm, $options: "i" } },
+      { customerPhone: { $regex: escapedTerm, $options: "i" } },
+    ];
+
+    if (matchingCustomerIds.length > 0) {
+      searchOrConditions.push({ customerId: { $in: matchingCustomerIds } });
+    }
+
+    andConditions.push({ $or: searchOrConditions });
+  }
+
+  // Date Range Filter
+  if (filters.dateFrom || filters.dateTo) {
+    const dateCond = {};
+    if (filters.dateFrom) {
+      const fromDate = new Date(filters.dateFrom);
+      if (!Number.isNaN(fromDate.getTime())) {
+        dateCond.$gte = fromDate;
+      }
+    }
+    if (filters.dateTo) {
+      let toDate = new Date(filters.dateTo);
+      if (!Number.isNaN(toDate.getTime())) {
+        // If string date has no time portion (YYYY-MM-DD), set to end of that day
+        if (typeof filters.dateTo === "string" && !filters.dateTo.includes("T")) {
+          toDate.setHours(23, 59, 59, 999);
+        }
+        dateCond.$lte = toDate;
+      }
+    }
+
+    if (dateCond.$gte || dateCond.$lte) {
+      andConditions.push({
+        $or: [{ date: dateCond }, { createdAt: dateCond }],
+      });
+    }
+  }
+
+  const query = { $and: andConditions };
+
+  const result = await salesReturnRepository.findSalesReturns(query, { page, limit });
+
+  // If no records found in dedicated sales_returns and first page, fallback to legacy SalesInvoice returns with matching query
+  if (result.returns.length === 0 && page === 1) {
+    const legacyAndConditions = [
+      { companyId: new mongoose.Types.ObjectId(companyId) },
+      { workspaceId: new mongoose.Types.ObjectId(workspaceId) },
+      { isReturn: true },
+      { isDeleted: false },
+    ];
+
+    if (filters.branchId && mongoose.Types.ObjectId.isValid(filters.branchId)) {
+      legacyAndConditions.push({ branchId: new mongoose.Types.ObjectId(filters.branchId) });
+    }
+    if (filters.customerId && mongoose.Types.ObjectId.isValid(filters.customerId)) {
+      legacyAndConditions.push({ customerId: new mongoose.Types.ObjectId(filters.customerId) });
+    }
+    if (filters.shiftId && mongoose.Types.ObjectId.isValid(filters.shiftId)) {
+      legacyAndConditions.push({ shiftId: new mongoose.Types.ObjectId(filters.shiftId) });
+    }
+    if (filters.billingMode && filters.billingMode !== "all") {
+      legacyAndConditions.push({
+        billingMode: { $regex: new RegExp(`^${filters.billingMode.trim()}$`, "i") },
+      });
+    }
+    if (filters.returnType && filters.returnType !== "all") {
+      const rt = String(filters.returnType).trim().toLowerCase();
+      if (rt.includes("cash")) {
+        legacyAndConditions.push({
+          $or: [
+            { returnType: { $in: ["cash_refund", "CASH", "Cash", "cash"] } },
+            { refundMethod: { $regex: /^cash/i } },
+            { paymentMethod: { $regex: /^cash/i } },
+          ],
+        });
+      } else if (rt.includes("adv")) {
+        legacyAndConditions.push({
+          $or: [
+            { returnType: { $in: ["advance_credit", "ADVANCE", "Advance", "advance"] } },
+            { refundMethod: { $regex: /^adv/i } },
+            { paymentMethod: { $regex: /^adv/i } },
+          ],
+        });
+      } else if (rt.includes("cred")) {
+        legacyAndConditions.push({
+          $or: [
+            { returnType: { $in: ["credit_note", "CREDIT_NOTE", "Credit Note", "credit"] } },
+            { refundMethod: { $regex: /^cred/i } },
+            { paymentMethod: { $regex: /^cred/i } },
+          ],
+        });
+      }
+    }
+    if (filters.search && typeof filters.search === "string" && filters.search.trim()) {
+      const rawTerm = filters.search.trim();
+      const escapedTerm = rawTerm.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      let matchingCustomerIds = [];
+      try {
+        const customers = await Customer.find({
+          workspaceId: new mongoose.Types.ObjectId(workspaceId),
+          $or: [
+            { name: { $regex: escapedTerm, $options: "i" } },
+            { mobile: { $regex: escapedTerm, $options: "i" } },
+            { phone: { $regex: escapedTerm, $options: "i" } },
+            { customerCode: { $regex: escapedTerm, $options: "i" } },
+          ],
+        })
+          .select("_id")
+          .lean();
+        matchingCustomerIds = customers.map((c) => c._id);
+      } catch (custErr) {
+        // silent
+      }
+      const searchOr = [
+        { returnNo: { $regex: escapedTerm, $options: "i" } },
+        { invoiceNo: { $regex: escapedTerm, $options: "i" } },
+        { originalInvoiceNo: { $regex: escapedTerm, $options: "i" } },
+      ];
+      if (matchingCustomerIds.length > 0) {
+        searchOr.push({ customerId: { $in: matchingCustomerIds } });
+      }
+      legacyAndConditions.push({ $or: searchOr });
+    }
+    if (filters.dateFrom || filters.dateTo) {
+      const dateCond = {};
+      if (filters.dateFrom) {
+        const fromDate = new Date(filters.dateFrom);
+        if (!Number.isNaN(fromDate.getTime())) dateCond.$gte = fromDate;
+      }
+      if (filters.dateTo) {
+        let toDate = new Date(filters.dateTo);
+        if (!Number.isNaN(toDate.getTime())) {
+          if (typeof filters.dateTo === "string" && !filters.dateTo.includes("T")) {
+            toDate.setHours(23, 59, 59, 999);
+          }
+          dateCond.$lte = toDate;
+        }
+      }
+      if (dateCond.$gte || dateCond.$lte) {
+        legacyAndConditions.push({
+          $or: [{ date: dateCond }, { createdAt: dateCond }],
+        });
+      }
+    }
+
+    const legacyQuery = { $and: legacyAndConditions };
 
     const [legacyReturns, legacyTotal] = await Promise.all([
       SalesInvoice.find(legacyQuery)
-        .populate("customerId", "name mobile customerCode gstNumber")
+        .populate("customerId", "name mobile phone customerCode gstNumber")
         .populate("doctorId", "name doctorCode specialty")
         .sort({ date: -1, createdAt: -1 })
         .limit(limit)
@@ -792,10 +1321,20 @@ const getAllCustomerReturns = async (companyId, workspaceId, filters = {}, pagin
 
     if (legacyReturns.length > 0) {
       return {
-        returns: legacyReturns.map((r) => ({
-          ...r,
-          returnNo: r.returnNo || r.invoiceNo,
-        })),
+        returns: legacyReturns.map((r) => {
+          let origNo = r.originalInvoiceNo;
+          if (!origNo || origNo === r.returnNo || origNo === r.invoiceNo || origNo.startsWith("RET-")) {
+            const itOrig = Array.isArray(r.items)
+              ? r.items.find((it) => it.originalInvoiceNo && !it.originalInvoiceNo.startsWith("RET-"))
+              : null;
+            if (itOrig) origNo = itOrig.originalInvoiceNo;
+          }
+          return {
+            ...r,
+            returnNo: r.returnNo || r.invoiceNo,
+            originalInvoiceNo: origNo || r.originalInvoiceNo || "—",
+          };
+        }),
         meta: {
           total: legacyTotal,
           page: 1,
@@ -806,7 +1345,24 @@ const getAllCustomerReturns = async (companyId, workspaceId, filters = {}, pagin
     }
   }
 
-  return result;
+  const mappedReturns = (result.returns || []).map((r) => {
+    let origNo = r.originalInvoiceNo;
+    if (!origNo || origNo === r.returnNo || origNo === r.invoiceNo || origNo.startsWith("RET-")) {
+      const itOrig = Array.isArray(r.items)
+        ? r.items.find((it) => it.originalInvoiceNo && !it.originalInvoiceNo.startsWith("RET-"))
+        : null;
+      if (itOrig) origNo = itOrig.originalInvoiceNo;
+    }
+    return {
+      ...r,
+      originalInvoiceNo: origNo || r.originalInvoiceNo || "—",
+    };
+  });
+
+  return {
+    ...result,
+    returns: mappedReturns,
+  };
 };
 
 /**
@@ -834,7 +1390,7 @@ const getReturnById = async (returnId, companyId, workspaceId) => {
     returnDoc = await SalesInvoice.findOne(legacyQuery)
       .populate(
         "customerId",
-        "name mobile customerCode gstNumber billingAddress advanceBalance creditLimit"
+        "name mobile phone customerCode gstNumber billingAddress advanceBalance creditLimit"
       )
       .populate("doctorId", "name doctorCode specialty")
       .populate("shiftId", "shiftNo shiftNumber openedAt status")
@@ -843,6 +1399,21 @@ const getReturnById = async (returnId, companyId, workspaceId) => {
 
   if (!returnDoc) {
     throw new ApiError(404, "Sales return record not found");
+  }
+
+  if (returnDoc) {
+    let origNo = returnDoc.originalInvoiceNo;
+    if (!origNo || origNo === returnDoc.returnNo || origNo === returnDoc.invoiceNo || origNo.startsWith("RET-")) {
+      const itOrig = Array.isArray(returnDoc.items)
+        ? returnDoc.items.find((it) => it.originalInvoiceNo && !it.originalInvoiceNo.startsWith("RET-"))
+        : null;
+      if (itOrig) {
+        returnDoc.originalInvoiceNo = itOrig.originalInvoiceNo;
+        if (!returnDoc.originalInvoiceId && itOrig.originalInvoiceId) {
+          returnDoc.originalInvoiceId = itOrig.originalInvoiceId;
+        }
+      }
+    }
   }
 
   return returnDoc;

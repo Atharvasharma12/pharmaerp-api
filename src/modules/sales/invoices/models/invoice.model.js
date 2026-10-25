@@ -163,6 +163,30 @@ const invoiceSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    returnInvoiceIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "SalesReturn",
+      },
+    ],
+    returnInvoices: {
+      type: Array,
+      default: [],
+    },
+    returnStatus: {
+      type: String,
+      enum: ["NONE", "PARTIAL", "FULL"],
+      default: "NONE",
+      index: true,
+    },
+    totalReturnedAmount: {
+      type: Number,
+      default: 0,
+    },
+    isFullyReturned: {
+      type: Boolean,
+      default: false,
+    },
     items: {
       type: Array,
       default: [],

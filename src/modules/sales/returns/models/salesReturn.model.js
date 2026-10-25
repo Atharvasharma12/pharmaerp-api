@@ -48,6 +48,11 @@ const salesReturnSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    isReturn: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
     date: {
       type: Date,
       default: Date.now,
@@ -189,6 +194,9 @@ const salesReturnSchema = new mongoose.Schema(
 );
 
 salesReturnSchema.pre("save", function () {
+  if (this.isReturn === undefined) {
+    this.isReturn = true;
+  }
   if (!this.invoiceNo && this.returnNo) {
     this.invoiceNo = this.returnNo;
   }

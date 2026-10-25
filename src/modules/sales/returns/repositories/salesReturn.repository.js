@@ -61,7 +61,7 @@ const findSalesReturns = async (query = {}, options = {}) => {
 
   const [returns, total] = await Promise.all([
     SalesReturn.find(query)
-      .populate("customerId", "name mobile customerCode gstNumber")
+      .populate("customerId", "name mobile phone customerCode gstNumber")
       .populate("doctorId", "name doctorCode specialty")
       .populate("originalInvoiceId", "invoiceNo grandTotal date")
       .sort(sort)

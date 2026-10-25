@@ -486,7 +486,9 @@ const shiftSchema = new mongoose.Schema(
     returnInvoices: [
       {
         invoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "SalesInvoice", default: null },
+        returnId: { type: mongoose.Schema.Types.ObjectId, ref: "SalesReturn", default: null },
         invoiceNo: { type: String, default: "" },
+        returnNo: { type: String, default: "" },
         originalInvoiceNo: { type: String, default: "" },
         originalInvoiceId: { type: mongoose.Schema.Types.ObjectId, ref: "SalesInvoice", default: null },
         grandTotal: { type: Number, default: 0 },
@@ -495,6 +497,7 @@ const shiftSchema = new mongoose.Schema(
         payments: { type: Array, default: [] },
         returnedAt: { type: Date, default: Date.now },
         returnedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+        createdByName: { type: String, default: null },
         customerName: { type: String, default: "" },
         customerPhone: { type: String, default: "" },
         itemsCount: { type: Number, default: 0 },

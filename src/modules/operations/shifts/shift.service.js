@@ -223,6 +223,10 @@ export const closeShift = async (
   };
 
   for (const inv of invoices) {
+    if (inv.shiftId && shift._id && String(inv.shiftId._id || inv.shiftId) !== String(shift._id)) {
+      continue;
+    }
+
     if (inv.status === "Cancelled") {
       cancelledInvoiceCount += 1;
       const billTotal = Number(inv.grandTotal || 0);
@@ -277,7 +281,15 @@ export const closeShift = async (
       continue;
     }
 
-    if (inv.isReturn || inv.status === "Returned" || inv.grandTotal < 0) {
+    const isReturn = Boolean(
+      inv.isReturn ||
+      inv.returnNo ||
+      inv.status === "Returned" ||
+      inv.grandTotal < 0 ||
+      (inv.constructor && inv.constructor.modelName === "SalesReturn")
+    );
+
+    if (isReturn) {
       returnInvoiceCount += 1;
       const billTotal = Math.abs(Number(inv.grandTotal || 0));
       returnSalesTotal += billTotal;
@@ -331,25 +343,28 @@ export const closeShift = async (
 
       returnInvoices.push({
         invoiceId: inv._id,
-        invoiceNo: inv.invoiceNo,
+        returnId: inv._id,
+        invoiceNo: inv.returnNo || inv.invoiceNo,
+        returnNo: inv.returnNo || inv.invoiceNo,
         originalInvoiceNo: inv.originalInvoiceNo || inv.returnRefInvoiceNo || "—",
         originalInvoiceId: inv.originalInvoiceId || null,
         grandTotal: billTotal,
         returnType: inv.returnType || (retType === "advance_credit" ? "advance_credit" : retType === "credit_note" ? "credit_note" : "cash_refund"),
         paymentMethod: inv.paymentMethod || (retType === "advance_credit" ? "Advance Deposit" : retType === "credit_note" ? "Credit Note" : "Cash"),
         payments: inv.payments || [],
-        returnedAt: inv.createdAt || inv.date || new Date(),
+        returnedAt: inv.date || inv.createdAt || new Date(),
         returnedBy: inv.createdBy || null,
-        customerName: inv.customerId?.name || "Walk-in Customer",
-        customerPhone: inv.customerId?.phone || "",
+        createdByName: inv.createdByName || null,
+        customerName: inv.customerId?.name || inv.customerName || "Walk-in Customer",
+        customerPhone: inv.customerId?.phone || inv.customerPhone || "",
         itemsCount: Array.isArray(inv.items) ? inv.items.length : 0,
         items: (inv.items || []).map((it) => ({
-          itemId: it.itemId,
-          itemName: it.itemName || it.name,
-          quantity: it.quantity || it.qty,
+          itemId: it.productId || it.itemId,
+          itemName: it.name || it.itemName,
+          quantity: it.qty || it.returnQty || it.quantity,
           price: it.price || it.saleRate,
           total: it.total || it.amount,
-          batchNumber: it.batchNumber || it.batch,
+          batchNumber: it.batchNo || it.batch || it.batchNumber,
         })),
         notes: inv.notes || "",
       });
