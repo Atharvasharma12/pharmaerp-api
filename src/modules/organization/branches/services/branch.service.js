@@ -1,5 +1,8 @@
+import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 
+import Branch from "../models/branch.model.js";
+import Company from "../../companies/models/company.model.js";
 import branchRepository from "../repositories/branch.repository.js";
 import companyRepository from "../../companies/repositories/company.repository.js";
 import workspaceRepository from "../../workspaces/repositories/workspace.repository.js";
@@ -122,6 +125,9 @@ const getCompanyBranches = async (companyId, workspaceId, userId) => {
   const { member } = await ensureWorkspaceAccess(workspaceId, userId);
 
   await ensureCompanyAccess(companyId, workspaceId);
+
+  // Proactively ensure Scrap Store branch exists with company's general details
+  await getOrCreateScrapStoreBranch(workspaceId, companyId).catch(() => {});
 
   const [branches, members, accessList] = await Promise.all([
     branchRepository.getCompanyBranches(companyId),
@@ -636,6 +642,100 @@ const deleteBranch = async (branchId, companyId, workspaceId, userId) => {
   };
 };
 
+export const getOrCreateScrapStoreBranch = async (
+  workspaceId,
+  companyId,
+  session = null
+) => {
+  if (!companyId) return null;
+
+  // 1. Check if Scrap Store branch already exists
+  let scrapBranch = await Branch.findOne({
+    companyId: new mongoose.Types.ObjectId(companyId),
+    $or: [
+      { isScrapStore: true },
+      { type: "scrap" },
+      { slug: "scrap-store" },
+      { name: { $regex: /^scrap store$/i } },
+    ],
+    isDeleted: false,
+  }).session(session);
+
+  const companyDoc = await Company.findById(companyId).session(session).lean().catch(() => null);
+  const resolvedWorkspaceId = workspaceId || companyDoc?.workspaceId;
+
+  if (scrapBranch) {
+    if (!scrapBranch.isScrapStore || scrapBranch.type !== "scrap") {
+      scrapBranch.isScrapStore = true;
+      scrapBranch.type = "scrap";
+      if (!scrapBranch.address?.city && companyDoc?.address?.city) {
+        scrapBranch.address = {
+          ...scrapBranch.address,
+          addressLine1: companyDoc.address.addressLine1 || "Central Scrap & Damaged Stock Depot",
+          addressLine2: companyDoc.address.addressLine2 || "Segregated Return Storage",
+          city: companyDoc.address.city,
+          district: companyDoc.address.district,
+          state: companyDoc.address.state,
+          country: companyDoc.address.country || "India",
+          pincode: companyDoc.address.pincode,
+        };
+      }
+      await scrapBranch.save({ session }).catch(() => {});
+    }
+    return scrapBranch;
+  }
+
+  // 2. Create the Scrap Store branch with company general details
+  const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+  const slug = `scrap-store-${companyDoc?.companyCode ? companyDoc.companyCode.toLowerCase() : randomSuffix}`;
+  const branchData = {
+    workspaceId: new mongoose.Types.ObjectId(resolvedWorkspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
+    name: "Scrap Store",
+    slug,
+    branchCode: `SCRAP-${randomSuffix}`,
+    type: "scrap",
+    isPrimary: false,
+    isScrapStore: true,
+    status: "active",
+    email: companyDoc?.email || null,
+    phones: {
+      mobile: companyDoc?.phones?.mobile || null,
+      whatsapp: companyDoc?.phones?.whatsapp || null,
+      landline: companyDoc?.phones?.landline || null,
+    },
+    address: {
+      addressLine1: companyDoc?.address?.addressLine1 || "Central Scrap & Damaged Stock Depot",
+      addressLine2: companyDoc?.address?.addressLine2 || "Segregated Return Storage",
+      city: companyDoc?.address?.city || "Central",
+      district: companyDoc?.address?.district || null,
+      state: companyDoc?.address?.state || null,
+      country: companyDoc?.address?.country || "India",
+      pincode: companyDoc?.address?.pincode || null,
+    },
+    license: {
+      drugLicenseNumber: companyDoc?.license?.drugLicenseNumber || null,
+      drugLicenseType: "Scrap & Disposal Depot",
+    },
+    isDeleted: false,
+  };
+
+  try {
+    if (session) {
+      const created = await Branch.create([branchData], { session });
+      return created[0];
+    } else {
+      return await Branch.create(branchData);
+    }
+  } catch (err) {
+    return await Branch.findOne({
+      companyId: new mongoose.Types.ObjectId(companyId),
+      isDeleted: false,
+      $or: [{ slug }, { name: "Scrap Store" }],
+    }).session(session);
+  }
+};
+
 export default {
   createBranch,
   getCompanyBranches,
@@ -644,4 +744,5 @@ export default {
   getBranchMembers,
   updateBranch,
   deleteBranch,
+  getOrCreateScrapStoreBranch,
 };

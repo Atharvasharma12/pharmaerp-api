@@ -212,52 +212,105 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
   page = Number(page);
   limit = Number(limit);
 
-  const { product, facility, facility_id, branch_id, expiryDate, expired, lowStock, inStockOnly } = filters;
-  const matchStage = { workspaceId: req.workspaceId };
+  const {
+    product,
+    facility,
+    facility_id,
+    branch_id,
+    expiryDate,
+    expired,
+    expiredOnly,
+    scrapOnly,
+    lowStock,
+    inStockOnly,
+  } = filters;
 
-  if (lowStock) {
-    matchStage.batchQty = inStockOnly ? { $gt: 0, $lt: 10 } : { $lt: 10 };
+  const andConditions = [{ workspaceId: req.workspaceId, isDeleted: false }];
+
+  // 1. Stock / Quantity Filters
+  if (scrapOnly) {
+    andConditions.push({
+      $or: [
+        { scrapQty: { $gt: 0 } },
+        { brokenQty: { $gt: 0 } },
+        { expiredQty: { $gt: 0 } },
+      ],
+    });
+  } else if (expiredOnly || expired) {
+    andConditions.push({
+      $or: [
+        { scrapQty: { $gt: 0 } },
+        { brokenQty: { $gt: 0 } },
+        { expiredQty: { $gt: 0 } },
+        { batchQty: { $gt: 0 }, expiryDate: { $exists: true, $ne: "" } },
+      ],
+    });
+  } else if (lowStock) {
+    andConditions.push({
+      batchQty: inStockOnly ? { $gt: 0, $lt: 10 } : { $lt: 10 },
+    });
   } else if (inStockOnly) {
-    matchStage.batchQty = { $gt: 0 };
+    andConditions.push({
+      batchQty: { $gt: 0 },
+    });
   }
 
+  // 2. Product Filter
   if (product) {
     if (!mongoose.Types.ObjectId.isValid(product)) {
       return res.status(400).json(new ApiResponse(400, "Invalid product ID"));
     }
-    matchStage.product = new mongoose.Types.ObjectId(product);
+    andConditions.push({ product: new mongoose.Types.ObjectId(product) });
   }
 
+  // 3. Branch / Facility Scoping
   const targetFacility = facility || facility_id || branch_id;
   if (targetFacility && targetFacility !== "all_facility") {
     if (!mongoose.Types.ObjectId.isValid(targetFacility)) {
       return res.status(400).json(new ApiResponse(400, "Invalid facility ID"));
     }
-    matchStage.branch_id = new mongoose.Types.ObjectId(targetFacility);
+    andConditions.push({ branch_id: new mongoose.Types.ObjectId(targetFacility) });
   } else {
     // If the companyId is sent via headers or body but NOT in req.companyId because companyContextMiddleware is missing
     const extractedCompanyId = req.companyId || req.headers["x-company-id"] || req.body.companyId;
     if (extractedCompanyId) {
       const Branch = mongoose.model("Branch");
       const validBranches = await Branch.find({ companyId: extractedCompanyId, isDeleted: false }).select("_id").lean();
-      matchStage.branch_id = { $in: validBranches.map(b => b._id) };
+      andConditions.push({ branch_id: { $in: validBranches.map((b) => b._id) } });
     } else {
       // Prevent cross-company data leakage by defaulting to an impossible match if companyId is completely missing
-      matchStage.branch_id = null;
+      andConditions.push({ branch_id: null });
     }
   }
 
+  // 4. Search Filter (by Product Name, Product Code, or Batch No)
   if (search && !product) {
+    const escaped = search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const matchedProducts = await WorkspaceProduct.find({
       workspaceId: req.workspaceId,
-      name: { $regex: search, $options: "i" }
+      $or: [
+        { name: { $regex: escaped, $options: "i" } },
+        { displayName: { $regex: escaped, $options: "i" } },
+        { workspaceProductCode: { $regex: escaped, $options: "i" } },
+      ],
     }).select("_id");
-    matchStage.product = { $in: matchedProducts.map(p => p._id) };
+
+    andConditions.push({
+      $or: [
+        { product: { $in: matchedProducts.map((p) => p._id) } },
+        { batchNo: { $regex: escaped, $options: "i" } },
+        { originalBatchNo: { $regex: escaped, $options: "i" } },
+      ],
+    });
   }
+
+  const matchStage = andConditions.length > 1 ? { $and: andConditions } : andConditions[0];
 
   const total = await Batch.countDocuments(matchStage);
   const batches = await Batch.find(matchStage)
     .populate("product")
+    .populate("branch_id", "name code")
+    .sort({ updatedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
     .lean();
@@ -267,13 +320,42 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     if (exp.toLowerCase() === "active" || exp.toLowerCase() === "inactive") {
       exp = "";
     }
+    const baseCleanBatchNo =
+      b.originalBatchNo || (b.batchNo ? b.batchNo.replace(/\s*\[(EXPIRED|BROKEN|SCRAP)\]/gi, "").trim() : "");
+    const resolvedScrapType =
+      b.scrapType || (b.brokenQty > 0 ? "BROKEN" : b.expiredQty > 0 ? "EXPIRED" : "NONE");
+
+    const branchName = b.branch_id?.name || "Main Branch";
+    const branchCode = b.branch_id?.code || "";
+    const rawBranchId = b.branch_id?._id ? b.branch_id._id.toString() : (b.branch_id ? b.branch_id.toString() : null);
+    const rawProductId = b.product?._id ? b.product._id.toString() : (b.product ? b.product.toString() : null);
+
     return {
       ...b,
+      branchName,
+      branchCode,
+      branchId: rawBranchId,
+      branch_id: rawBranchId,
+      facility_id: rawBranchId,
+      productId: rawProductId,
+      product: rawProductId,
+      productDoc: typeof b.product === "object" ? b.product : null,
       name: b.product?.name || "N/A",
+      productName: b.product?.name || "N/A",
+      productCode: b.product?.workspaceProductCode || b.product?.code || "—",
       manufacturer: b.product?.manufacturer || b.product?.marketer || "N/A",
       pack: b.product?.pack || "N/A",
-      qty: b.batchQty,
+      stock: Number(b.batchQty || 0),
+      qty: Number(b.batchQty || 0),
+      batchQty: Number(b.batchQty || 0),
+      scrapQty: Number(b.scrapQty || 0),
+      brokenQty: Number(b.brokenQty || 0),
+      expiredQty: Number(b.expiredQty || 0),
+      batchNo: b.batchNo,
+      originalBatchNo: baseCleanBatchNo,
+      scrapType: resolvedScrapType,
       expiryDate: exp,
+      expiry: exp,
       rack: b.rack || b.product?.rack || "",
     };
   });
