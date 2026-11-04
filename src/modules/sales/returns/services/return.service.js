@@ -702,6 +702,13 @@ const recordCustomerReturn = async (
     }
 
     // 6. Build and save Sales Return Document in dedicated collection
+    const customerGstinEarly = (customer?.gstNumber || customer?.gstin || returnData.customerGstin || "").trim().toUpperCase();
+    const customerHasValidGstEarly = customerGstinEarly.length >= 15 && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(customerGstinEarly);
+    let resolvedReturnBillingMode = returnData.billingMode || "B2C";
+    if (String(resolvedReturnBillingMode).toUpperCase() === "B2B" && !customerHasValidGstEarly) {
+      resolvedReturnBillingMode = "B2C";
+    }
+
     const newReturnBill = {
       workspaceId: workspaceId || customer.workspaceId,
       companyId: companyId || customer.companyId,
@@ -714,7 +721,7 @@ const recordCustomerReturn = async (
       date: returnData.date || new Date(),
       financialPeriodId,
       shiftId: resolvedShiftId || null,
-      billingMode: returnData.billingMode || "B2C",
+      billingMode: resolvedReturnBillingMode,
       subtotal: returnData.subtotal || 0,
       discount: returnData.discount || 0,
       tax: returnData.tax || 0,
@@ -918,12 +925,8 @@ const recordCustomerReturn = async (
       );
 
       const companyGstin = company?.gstin || "";
-      const customerGstin = customer?.gstNumber || "";
-      const hasCustomerGst =
-        customerGstin &&
-        /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(
-          customerGstin.trim().toUpperCase()
-        );
+      const customerGstin = (customer?.gstNumber || customer?.gstin || returnData.customerGstin || "").trim().toUpperCase();
+      const hasCustomerGst = customerGstin.length >= 15 && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(customerGstin);
       const isIgst = Boolean(
         returnData.isIgst ||
           (companyGstin &&
@@ -933,7 +936,7 @@ const recordCustomerReturn = async (
             companyGstin.slice(0, 2) !== customerGstin.slice(0, 2))
       );
 
-      const groupDescription = hasCustomerGst || String(savedReturn.billingMode).toUpperCase() === "B2B"
+      const groupDescription = hasCustomerGst
         ? "Credit Note - Registered"
         : "Credit Note - Unregistered";
 

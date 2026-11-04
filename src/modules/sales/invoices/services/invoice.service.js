@@ -536,8 +536,8 @@ const postSaleAccounting = async ({
     );
 
     const companyGstin = resolvedCompany?.gstin || "";
-    const customerGstin = customer?.gstNumber || "";
-    const hasCustomerGst = customerGstin && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(customerGstin.trim().toUpperCase());
+    const customerGstin = (customer?.gstNumber || customer?.gstin || saleData?.customerGstin || "").trim().toUpperCase();
+    const hasCustomerGst = customerGstin.length >= 10;
     const grandTotal = Number(invoice.grandTotal || 0);
     const isIgst = Boolean(
       invoice.isIgst ||
@@ -548,7 +548,7 @@ const postSaleAccounting = async ({
     let groupDescription = "B2C (Small) Invoice";
     if (invoice.isExport || String(invoice.billingMode).toUpperCase() === "EXPORT") {
       groupDescription = "Export Invoices";
-    } else if (hasCustomerGst || String(invoice.billingMode).toUpperCase() === "B2B") {
+    } else if (hasCustomerGst && String(invoice.billingMode).toUpperCase() === "B2B") {
       groupDescription = "B2B";
     } else if (isIgst && grandTotal > 250000) {
       groupDescription = "B2C (Large) Invoice";
@@ -1321,6 +1321,14 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     }
   }
 
+  // Enforce B2C invoice creation if customer does not have a valid GST number
+  const resolvedCustomerGstin = (customer?.gstNumber || customer?.gstin || saleData.customerGstin || "").trim().toUpperCase();
+  const customerHasValidGst = resolvedCustomerGstin.length >= 15 && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(resolvedCustomerGstin);
+  let effectiveBillingMode = saleData.billingMode || "B2C";
+  if (String(effectiveBillingMode).toUpperCase() === "B2B" && !customerHasValidGst) {
+    effectiveBillingMode = "B2C";
+  }
+
   const newSale = {
     workspaceId: workspaceId || customer.workspaceId,
     companyId: companyId || customer.companyId,
@@ -1330,7 +1338,7 @@ const recordCustomerSale = async (customerId, saleData, companyId, workspaceId, 
     date: saleData.date || new Date(),
     financialPeriodId,
     shiftId: resolvedShiftId || null,
-    billingMode: saleData.billingMode || "B2C",
+    billingMode: effectiveBillingMode,
     subtotal: saleData.subtotal || 0,
     discount: saleData.discount || 0,
     tax: saleData.tax || 0,
@@ -1510,7 +1518,13 @@ const updateCustomerSale = async (invoiceId, customerId, saleData, companyId, wo
       existingInvoice.shiftId = saleData.shiftId;
     }
     if (saleData.billingMode) {
-      existingInvoice.billingMode = saleData.billingMode;
+      const updateCustGstin = (customer?.gstNumber || customer?.gstin || saleData.customerGstin || "").trim().toUpperCase();
+      const updateCustHasGst = updateCustGstin.length >= 15 && /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(updateCustGstin);
+      let effectiveMode = saleData.billingMode;
+      if (String(effectiveMode).toUpperCase() === "B2B" && !updateCustHasGst) {
+        effectiveMode = "B2C";
+      }
+      existingInvoice.billingMode = effectiveMode;
     }
     existingInvoice.subtotal = Number(saleData.subtotal !== undefined ? saleData.subtotal : existingInvoice.subtotal);
     existingInvoice.discount = Number(saleData.discount !== undefined ? saleData.discount : existingInvoice.discount);
