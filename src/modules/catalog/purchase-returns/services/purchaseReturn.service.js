@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import purchaseReturnRepository from "../repositories/purchaseReturn.repository.js";
-import purchaseBillRepository from "../purchase-bills/repositories/purchaseBill.repository.js";
-import PurchaseBill from "../purchase-bills/models/purchaseBill.model.js";
+import purchaseBillRepository from "../../purchase-bills/repositories/purchaseBill.repository.js";
+import PurchaseBill from "../../purchase-bills/models/purchaseBill.model.js";
 import Batch from "../../products/models/batch.model.js";
 import ProductFacility from "../../products/models/productFacility.model.js";
 import WorkspaceProduct from "../../products/models/workspaceProduct.model.js";
@@ -912,3 +912,4 @@ const purchaseReturnService = {
 };
 
 export default purchaseReturnService;
+

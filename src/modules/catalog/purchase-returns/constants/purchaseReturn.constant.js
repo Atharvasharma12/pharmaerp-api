@@ -35,3 +35,4 @@ export default {
   SETTLEMENT_STATUS,
   SEQUENCE_PREFIX,
 };
+

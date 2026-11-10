@@ -196,3 +196,4 @@ describe("Rate & Tax Calculation Verification", () => {
     expect(totalAmount).toBe(1629.15);
   });
 });
+
