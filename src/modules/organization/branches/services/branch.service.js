@@ -237,11 +237,11 @@ const getCompanyBranches = async (companyId, workspaceId, userId) => {
   });
 };
 
-const getWorkspaceBranches = async (workspaceId, userId) => {
+const getWorkspaceBranches = async (workspaceId, userId, options = {}) => {
   const { member } = await ensureWorkspaceAccess(workspaceId, userId);
 
   const [branches, members, accessList] = await Promise.all([
-    branchRepository.getWorkspaceBranches(workspaceId),
+    branchRepository.getWorkspaceBranches(workspaceId, options),
     workspaceRepository.getWorkspaceMembers(workspaceId, {
       status: WORKSPACE_MEMBER_STATUS.ACTIVE,
       populate: "roleId userId",
@@ -312,7 +312,11 @@ const getWorkspaceBranches = async (workspaceId, userId) => {
   });
 
   let filtered = branches;
-  if (!member.isOwner) {
+  const isShippingOrDestinationLookup = Boolean(
+    options.includeAll || options.forShipping || options.companyId
+  );
+
+  if (!member.isOwner && !isShippingOrDestinationLookup) {
     const userAccess =
       (await memberAccessRepository.findMemberAccessByMemberId(member._id)) ||
       (await memberAccessRepository.findMemberAccessByUserAndWorkspace(workspaceId, userId));
@@ -344,6 +348,10 @@ const getWorkspaceBranches = async (workspaceId, userId) => {
     safeObj.memberCount = count;
     safeObj.membersCount = count;
     safeObj.staffCount = count;
+    if (branch.companyId) {
+      safeObj.companyId = branch.companyId;
+      safeObj.company = branch.companyId;
+    }
     return safeObj;
   });
 };
