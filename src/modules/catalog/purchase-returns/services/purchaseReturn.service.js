@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import ApiError from "../../../../utils/ApiError.js";
 import purchaseReturnRepository from "../repositories/purchaseReturn.repository.js";
+import PurchaseReturn from "../models/purchaseReturn.model.js";
 import purchaseBillRepository from "../../purchase-bills/repositories/purchaseBill.repository.js";
 import PurchaseBill from "../../purchase-bills/models/purchaseBill.model.js";
 import Batch from "../../products/models/batch.model.js";

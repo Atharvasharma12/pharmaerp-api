@@ -11,6 +11,7 @@ import {
   getEligibleBatchesQuerySchema,
   dispatchReturnBoxSchema,
 } from "../../src/modules/catalog/purchase-returns/validations/purchaseReturn.validation.js";
+import purchaseReturnService from "../../src/modules/catalog/purchase-returns/services/purchaseReturn.service.js";
 
 describe("Purchase Return Constants & Enums", () => {
   it("should have correct status definitions", () => {
@@ -196,6 +197,23 @@ describe("Purchase Return Query Validations", () => {
     const { error, value } = dispatchReturnBoxSchema.validate(payload);
     expect(error).toBeUndefined();
     expect(value.boxCount).toBe(2);
+  });
+
+  it("should have dispatchReturnBox and receiveReturnBox methods defined on service", () => {
+    expect(typeof purchaseReturnService.dispatchReturnBox).toBe("function");
+    expect(typeof purchaseReturnService.receiveReturnBox).toBe("function");
+  });
+
+  it("should fail gracefully if destinationBranchId is missing in dispatchReturnBox", async () => {
+    await expect(
+      purchaseReturnService.dispatchReturnBox(
+        "507f1f77bcf86cd799439011",
+        "507f1f77bcf86cd799439012",
+        "507f1f77bcf86cd799439013",
+        "507f1f77bcf86cd799439014",
+        {}
+      )
+    ).rejects.toThrow("Destination branch is required");
   });
 });
 
