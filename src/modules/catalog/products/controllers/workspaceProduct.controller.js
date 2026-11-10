@@ -330,10 +330,50 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
   const batches = await Batch.find(matchStage)
     .populate("product")
     .populate("branch_id", "name code")
+    .populate({
+      path: "purchaseBillId",
+      select: "supplierId purchaseBillNo invoiceDate",
+      populate: {
+        path: "supplierId",
+        select: "businessName name gstNumber mobile phone email address",
+      },
+    })
     .sort({ updatedAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit)
     .lean();
+
+  // Fallback: Enrich batches missing direct purchaseBillId with matching PurchaseBill by product & batch
+  const batchesNeedingSupplier = batches.filter(
+    (b) => !b.purchaseBillId?.supplierId && b.product
+  );
+  if (batchesNeedingSupplier.length > 0) {
+    const PurchaseBill = mongoose.model("PurchaseBill");
+    await Promise.all(
+      batchesNeedingSupplier.map(async (b) => {
+        const prodId = b.product?._id || b.product;
+        try {
+          const bill = await PurchaseBill.findOne({
+            workspaceId: req.workspaceId,
+            isDeleted: false,
+            $or: [
+              { "items.productId": prodId, "items.batch": b.batchNo },
+              { "items.productId": prodId },
+            ],
+          })
+            .populate("supplierId", "businessName name gstNumber mobile phone email address")
+            .sort({ invoiceDate: -1, createdAt: -1 })
+            .select("supplierId purchaseBillNo invoiceDate")
+            .lean();
+          if (bill?.supplierId) {
+            b.purchaseBillId = bill;
+          }
+        } catch {
+          // ignore lookup error
+        }
+      })
+    );
+  }
 
   const formattedBatches = batches.map((b) => {
     let exp = b.expiryDate || "";
@@ -349,6 +389,12 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     const branchCode = b.branch_id?.code || "";
     const rawBranchId = b.branch_id?._id ? b.branch_id._id.toString() : (b.branch_id ? b.branch_id.toString() : null);
     const rawProductId = b.product?._id ? b.product._id.toString() : (b.product ? b.product.toString() : null);
+
+    const supplierDoc = b.purchaseBillId?.supplierId || null;
+    const supplierId = supplierDoc?._id ? supplierDoc._id.toString() : null;
+    const supplierName = supplierDoc?.businessName || supplierDoc?.name || "";
+    const supplierGst = supplierDoc?.gstNumber || "";
+    const supplierMobile = supplierDoc?.mobile || supplierDoc?.phone || "";
 
     return {
       ...b,
@@ -377,6 +423,13 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       expiryDate: exp,
       expiry: exp,
       rack: b.rack || b.product?.rack || "",
+      supplier: supplierDoc,
+      supplierId,
+      supplierName,
+      supplierGst,
+      supplierMobile,
+      purchaseBillId: b.purchaseBillId?._id ? b.purchaseBillId._id.toString() : null,
+      purchaseBillNo: b.purchaseBillId?.purchaseBillNo || "",
     };
   });
 

@@ -343,6 +343,7 @@ const ingestPurchaseBill = async (billId, workspaceId, companyId, branchId, user
       batch.finalRateB = item.finalRateB || batch.finalRateB;
       batch.finalRateC = item.finalRateC || batch.finalRateC;
       batch.schemeDiscountPercent = item.saleScheme || batch.schemeDiscountPercent;
+      batch.purchaseBillId = bill._id;
       await batch.save();
     } else {
       batch = await Batch.create({

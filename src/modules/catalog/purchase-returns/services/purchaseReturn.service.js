@@ -97,21 +97,44 @@ const getEligibleBatchesForReturn = async (
       // Find matching purchase bills for this product & batch
       const billFilter = {
         workspaceId: new mongoose.Types.ObjectId(workspaceId),
-        companyId: new mongoose.Types.ObjectId(companyId),
         isDeleted: false,
-        "items.productId": productId,
-        "items.batch": batch.batchNo,
       };
 
       if (supplierId) {
         billFilter.supplierId = new mongoose.Types.ObjectId(supplierId);
       }
 
-      const matchingBills = await PurchaseBill.find(billFilter)
-        .populate("supplierId", "businessName gstNumber")
+      if (batch.purchaseBillId) {
+        billFilter.$or = [
+          { _id: new mongoose.Types.ObjectId(batch.purchaseBillId) },
+          { "items.productId": productId, "items.batch": batch.batchNo },
+        ];
+      } else {
+        billFilter["items.productId"] = productId;
+        billFilter["items.batch"] = batch.batchNo;
+      }
+
+      let matchingBills = await PurchaseBill.find(billFilter)
+        .populate("supplierId", "businessName name gstNumber mobile phone email address")
         .sort({ invoiceDate: -1, createdAt: -1 })
         .limit(5)
         .lean();
+
+      // Fallback: If no bill matched by batch number, find any purchase bill for this product
+      if (matchingBills.length === 0 && !supplierId) {
+        const productBills = await PurchaseBill.find({
+          workspaceId: new mongoose.Types.ObjectId(workspaceId),
+          isDeleted: false,
+          "items.productId": productId,
+        })
+          .populate("supplierId", "businessName name gstNumber mobile phone email address")
+          .sort({ invoiceDate: -1, createdAt: -1 })
+          .limit(1)
+          .lean();
+        if (productBills.length > 0) {
+          matchingBills = productBills;
+        }
+      }
 
       // Find the best inflow item
       let inflowBill = null;
@@ -129,11 +152,16 @@ const getEligibleBatchesForReturn = async (
         }
 
         if (inflowBill) {
-          inflowItem = inflowBill.items.find(
-            (i) =>
-              String(i.productId) === String(productId) &&
-              i.batch === batch.batchNo
-          );
+          inflowItem =
+            inflowBill.items.find(
+              (i) =>
+                String(i.productId) === String(productId) &&
+                i.batch === batch.batchNo
+            ) ||
+            inflowBill.items.find(
+              (i) => String(i.productId) === String(productId)
+            ) ||
+            inflowBill.items[0];
         }
       }
 
@@ -198,6 +226,8 @@ const getEligibleBatchesForReturn = async (
         brokenStock,
         unreturnedBillQuota,
         supplier: inflowBill?.supplierId || null,
+        supplierId: inflowBill?.supplierId?._id || null,
+        supplierName: inflowBill?.supplierId?.businessName || inflowBill?.supplierId?.name || "",
         purchaseBillId: inflowBill?._id || null,
         purchaseBillNo: inflowBill?.purchaseBillNo || "",
         purchaseBillDate: inflowBill?.invoiceDate || "",
