@@ -83,7 +83,6 @@ const getWorkspaceBranches = async (workspaceId, options = {}) => {
     workspaceId,
     isDeleted: false,
   })
-    .populate("companyId", "name legalName gstin code")
     .sort(options.sort || { createdAt: -1 })
     .select(options.select || "");
 };

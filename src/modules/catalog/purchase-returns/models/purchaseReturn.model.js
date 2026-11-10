@@ -155,6 +155,41 @@ const purchaseReturnSchema = new mongoose.Schema(
     reason: { type: String, trim: true, default: "" },
     remarks: { type: String, trim: true, default: "" },
 
+    shippingDetails: {
+      destinationCompanyId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Company",
+        default: null,
+        index: true,
+      },
+      destinationBranchId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Branch",
+        default: null,
+        index: true,
+      },
+      boxCount: { type: Number, default: 1 },
+      packageNotes: { type: String, trim: true, default: "" },
+      transitStatus: {
+        type: String,
+        enum: ["NOT_DISPATCHED", "IN_TRANSIT", "RECEIVED"],
+        default: "NOT_DISPATCHED",
+        index: true,
+      },
+      dispatchedAt: { type: Date, default: null },
+      dispatchedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      receivedAt: { type: Date, default: null },
+      receivedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+    },
+
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -175,6 +210,9 @@ purchaseReturnSchema.index({ workspaceId: 1, branchId: 1, returnDate: -1 });
 purchaseReturnSchema.index({ workspaceId: 1, supplierId: 1 });
 purchaseReturnSchema.index({ workspaceId: 1, returnNo: 1 }, { unique: true });
 purchaseReturnSchema.index({ workspaceId: 1, debitNoteNo: 1 });
+purchaseReturnSchema.index({ workspaceId: 1, "shippingDetails.destinationBranchId": 1 });
+purchaseReturnSchema.index({ workspaceId: 1, "shippingDetails.destinationCompanyId": 1 });
+purchaseReturnSchema.index({ workspaceId: 1, "shippingDetails.transitStatus": 1 });
 
 purchaseReturnSchema.set("toJSON", { virtuals: true });
 purchaseReturnSchema.set("toObject", { virtuals: true });

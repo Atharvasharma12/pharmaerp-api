@@ -734,14 +734,31 @@ const getPurchaseReturns = async (
   filters = {},
   pagination = {}
 ) => {
-  const query = {
-    workspaceId: new mongoose.Types.ObjectId(workspaceId),
-    companyId: new mongoose.Types.ObjectId(companyId),
-    isDeleted: false,
-  };
+  let query;
 
-  if (branchId && branchId !== "all") {
-    query.branchId = new mongoose.Types.ObjectId(branchId);
+  if (filters.direction === "incoming") {
+    // Queries purchase return boxes routed to the active destination facility or company
+    query = {
+      workspaceId: new mongoose.Types.ObjectId(workspaceId),
+      isDeleted: false,
+      "shippingDetails.transitStatus": { $in: ["IN_TRANSIT", "RECEIVED"] },
+    };
+
+    if (branchId && branchId !== "all") {
+      query["shippingDetails.destinationBranchId"] = new mongoose.Types.ObjectId(branchId);
+    } else if (companyId) {
+      query["shippingDetails.destinationCompanyId"] = new mongoose.Types.ObjectId(companyId);
+    }
+  } else {
+    query = {
+      workspaceId: new mongoose.Types.ObjectId(workspaceId),
+      companyId: new mongoose.Types.ObjectId(companyId),
+      isDeleted: false,
+    };
+
+    if (branchId && branchId !== "all") {
+      query.branchId = new mongoose.Types.ObjectId(branchId);
+    }
   }
 
   if (filters.supplierId) {
@@ -933,12 +950,125 @@ const cancelPurchaseReturn = async (
   return { message: "Purchase return cancelled and stock restored successfully" };
 };
 
+/**
+ * Dispatch / Ship Purchase Return Box to Destination Hub or Other Company Branch
+ */
+const dispatchReturnBox = async (
+  returnId,
+  companyId,
+  workspaceId,
+  userId,
+  dispatchData = {}
+) => {
+  const {
+    destinationCompanyId,
+    destinationBranchId,
+    boxCount = 1,
+    packageNotes = "",
+  } = dispatchData;
+
+  if (!destinationBranchId) {
+    throw new ApiError(400, "Destination branch is required for consignment shipping");
+  }
+
+  const returnDoc = await purchaseReturnRepository.findPurchaseReturnById(
+    returnId,
+    companyId,
+    workspaceId
+  );
+
+  if (!returnDoc) {
+    throw new ApiError(404, "Purchase return record not found");
+  }
+
+  const updated = await PurchaseReturn.findOneAndUpdate(
+    {
+      _id: returnDoc._id,
+      workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    },
+    {
+      $set: {
+        "shippingDetails.destinationCompanyId": destinationCompanyId
+          ? new mongoose.Types.ObjectId(destinationCompanyId)
+          : null,
+        "shippingDetails.destinationBranchId": new mongoose.Types.ObjectId(
+          destinationBranchId
+        ),
+        "shippingDetails.boxCount": Number(boxCount) || 1,
+        "shippingDetails.packageNotes": packageNotes || "",
+        "shippingDetails.transitStatus": "IN_TRANSIT",
+        "shippingDetails.dispatchedAt": new Date(),
+        "shippingDetails.dispatchedBy": new mongoose.Types.ObjectId(userId),
+      },
+    },
+    { new: true }
+  )
+    .populate("companyId", "name legalName")
+    .populate("shippingDetails.destinationCompanyId", "name legalName")
+    .populate("shippingDetails.destinationBranchId", "name branchCode address phone")
+    .populate("supplierId", "businessName gstNumber")
+    .lean();
+
+  return updated;
+};
+
+/**
+ * Mark Incoming Purchase Return Box as Received at Destination Branch
+ */
+const receiveReturnBox = async (
+  returnId,
+  companyId,
+  branchId,
+  workspaceId,
+  userId
+) => {
+  const returnDoc = await PurchaseReturn.findOne({
+    _id: returnId,
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    isDeleted: false,
+  });
+
+  if (!returnDoc) {
+    throw new ApiError(404, "Purchase return record not found");
+  }
+
+  if (returnDoc.shippingDetails?.transitStatus === "RECEIVED") {
+    throw new ApiError(400, "This consignment box has already been marked as received");
+  }
+
+  const updated = await PurchaseReturn.findOneAndUpdate(
+    {
+      _id: returnDoc._id,
+      workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    },
+    {
+      $set: {
+        "shippingDetails.transitStatus": "RECEIVED",
+        "shippingDetails.receivedAt": new Date(),
+        "shippingDetails.receivedBy": new mongoose.Types.ObjectId(userId),
+      },
+    },
+    { new: true }
+  )
+    .populate("companyId", "name legalName")
+    .populate("branchId", "name branchCode address")
+    .populate("shippingDetails.destinationCompanyId", "name legalName")
+    .populate("shippingDetails.destinationBranchId", "name branchCode address phone")
+    .populate("shippingDetails.receivedBy", "name")
+    .populate("supplierId", "businessName gstNumber")
+    .lean();
+
+  return updated;
+};
+
 const purchaseReturnService = {
   getEligibleBatchesForReturn,
   createPurchaseReturn,
   getPurchaseReturns,
   getPurchaseReturnById,
   cancelPurchaseReturn,
+  dispatchReturnBox,
+  receiveReturnBox,
 };
 
 export default purchaseReturnService;

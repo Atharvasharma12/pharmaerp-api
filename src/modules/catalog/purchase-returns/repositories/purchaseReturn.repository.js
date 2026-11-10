@@ -21,29 +21,43 @@ const findPurchaseReturnById = async (
   session = null
 ) => {
   const isObjectId = mongoose.Types.ObjectId.isValid(returnId);
+  const targetIdFilter = isObjectId
+    ? {
+        $or: [
+          { _id: new mongoose.Types.ObjectId(returnId) },
+          { returnNo: returnId },
+          { debitNoteNo: returnId },
+        ],
+      }
+    : {
+        $or: [{ returnNo: returnId }, { debitNoteNo: returnId }],
+      };
+
   const query = {
-    companyId: new mongoose.Types.ObjectId(companyId),
     workspaceId: new mongoose.Types.ObjectId(workspaceId),
     isDeleted: false,
-    ...(isObjectId
-      ? {
-          $or: [
-            { _id: new mongoose.Types.ObjectId(returnId) },
-            { returnNo: returnId },
-            { debitNoteNo: returnId },
-          ],
-        }
-      : {
-          $or: [{ returnNo: returnId }, { debitNoteNo: returnId }],
-        }),
+    $and: [
+      {
+        $or: [
+          { companyId: new mongoose.Types.ObjectId(companyId) },
+          { "shippingDetails.destinationCompanyId": new mongoose.Types.ObjectId(companyId) },
+        ],
+      },
+      targetIdFilter,
+    ],
   };
 
   const queryBuilder = PurchaseReturn.findOne(query)
+    .populate("companyId", "name legalName gstin code")
     .populate(
       "supplierId",
       "businessName contactPerson mobile email gstNumber address drugLicenseNumber"
     )
     .populate("branchId", "name branchCode address")
+    .populate("shippingDetails.destinationCompanyId", "name legalName gstin")
+    .populate("shippingDetails.destinationBranchId", "name branchCode address phone")
+    .populate("shippingDetails.dispatchedBy", "name email")
+    .populate("shippingDetails.receivedBy", "name email")
     .populate("createdBy", "name email")
     .lean();
 
@@ -65,11 +79,15 @@ const findPurchaseReturns = async (query = {}, options = {}) => {
 
   const [data, total] = await Promise.all([
     PurchaseReturn.find(query)
+      .populate("companyId", "name legalName gstin code")
       .populate(
         "supplierId",
         "businessName contactPerson mobile gstNumber drugLicenseNumber"
       )
-      .populate("branchId", "name branchCode")
+      .populate("branchId", "name branchCode address")
+      .populate("shippingDetails.destinationCompanyId", "name legalName gstin")
+      .populate("shippingDetails.destinationBranchId", "name branchCode address phone")
+      .populate("shippingDetails.receivedBy", "name")
       .populate("createdBy", "name")
       .sort(sort)
       .skip(skip)

@@ -10,6 +10,8 @@ import {
   getPurchaseReturnById,
   getEligibleBatches,
   cancelPurchaseReturn,
+  dispatchReturnBox,
+  receiveReturnBox,
 } from "../controllers/purchaseReturn.controller.js";
 
 import {
@@ -18,6 +20,7 @@ import {
   getEligibleBatchesQuerySchema,
   purchaseReturnIdParamSchema,
   cancelPurchaseReturnSchema,
+  dispatchReturnBoxSchema,
 } from "../validations/purchaseReturn.validation.js";
 
 const router = Router();
@@ -61,6 +64,21 @@ router.post(
   validate(purchaseReturnIdParamSchema, "params"),
   validate(cancelPurchaseReturnSchema),
   cancelPurchaseReturn
+);
+
+// Dispatch / ship return box to destination facility or other company branch
+router.post(
+  "/:returnId/dispatch",
+  validate(purchaseReturnIdParamSchema, "params"),
+  validate(dispatchReturnBoxSchema),
+  dispatchReturnBox
+);
+
+// Mark incoming return box as received at destination facility
+router.post(
+  "/:returnId/receive-box",
+  validate(purchaseReturnIdParamSchema, "params"),
+  receiveReturnBox
 );
 
 export default router;

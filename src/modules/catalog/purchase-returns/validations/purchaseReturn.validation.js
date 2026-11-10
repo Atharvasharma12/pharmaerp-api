@@ -57,6 +57,7 @@ export const createPurchaseReturnSchema = Joi.object({
 });
 
 export const getPurchaseReturnsQuerySchema = Joi.object({
+  direction: Joi.string().valid("outgoing", "incoming").default("outgoing").optional(),
   supplierId: objectId.optional(),
   branchId: Joi.string().optional(),
   returnMotive: Joi.string().optional(),
@@ -82,5 +83,12 @@ export const purchaseReturnIdParamSchema = Joi.object({
 
 export const cancelPurchaseReturnSchema = Joi.object({
   reason: Joi.string().trim().allow("").max(500).optional(),
+});
+
+export const dispatchReturnBoxSchema = Joi.object({
+  destinationCompanyId: objectId.allow(null).optional(),
+  destinationBranchId: objectId.required(),
+  boxCount: Joi.number().integer().min(1).max(99).default(1),
+  packageNotes: Joi.string().trim().allow("").max(500).optional(),
 });
 

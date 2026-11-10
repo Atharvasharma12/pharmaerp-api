@@ -9,6 +9,7 @@ import {
   createPurchaseReturnSchema,
   getPurchaseReturnsQuerySchema,
   getEligibleBatchesQuerySchema,
+  dispatchReturnBoxSchema,
 } from "../../src/modules/catalog/purchase-returns/validations/purchaseReturn.validation.js";
 
 describe("Purchase Return Constants & Enums", () => {
@@ -170,6 +171,31 @@ describe("Purchase Return Query Validations", () => {
     const { error, value } = getEligibleBatchesQuerySchema.validate(query);
     expect(error).toBeUndefined();
     expect(value.sourceBin).toBe("SCRAP");
+  });
+
+  it("should accept valid query parameters for incoming box returns", () => {
+    const query = {
+      direction: "incoming",
+      page: 1,
+      limit: 20,
+    };
+
+    const { error, value } = getPurchaseReturnsQuerySchema.validate(query);
+    expect(error).toBeUndefined();
+    expect(value.direction).toBe("incoming");
+  });
+
+  it("should validate dispatch return box payload", () => {
+    const payload = {
+      destinationCompanyId: "507f1f77bcf86cd799439011",
+      destinationBranchId: "507f1f77bcf86cd799439012",
+      boxCount: 2,
+      packageNotes: "Fragile ampoules",
+    };
+
+    const { error, value } = dispatchReturnBoxSchema.validate(payload);
+    expect(error).toBeUndefined();
+    expect(value.boxCount).toBe(2);
   });
 });
 

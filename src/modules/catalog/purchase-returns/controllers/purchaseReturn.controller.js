@@ -80,12 +80,43 @@ export const cancelPurchaseReturn = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, result.message, result));
 });
 
+export const dispatchReturnBox = asyncHandler(async (req, res) => {
+  const result = await purchaseReturnService.dispatchReturnBox(
+    req.params.returnId,
+    req.companyId,
+    req.workspaceId,
+    req.user._id,
+    req.body
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Purchase return box dispatched to destination facility", result));
+});
+
+export const receiveReturnBox = asyncHandler(async (req, res) => {
+  const branchId = req.headers["x-branch-id"] || req.branchId;
+  const result = await purchaseReturnService.receiveReturnBox(
+    req.params.returnId,
+    req.companyId,
+    branchId,
+    req.workspaceId,
+    req.user._id
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Consignment box marked as received successfully", result));
+});
+
 const purchaseReturnController = {
   createPurchaseReturn,
   getPurchaseReturns,
   getPurchaseReturnById,
   getEligibleBatches,
   cancelPurchaseReturn,
+  dispatchReturnBox,
+  receiveReturnBox,
 };
 
 export default purchaseReturnController;
