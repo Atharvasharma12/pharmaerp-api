@@ -109,6 +109,32 @@ export const receiveReturnBox = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Consignment box marked as received successfully", result));
 });
 
+export const ingestFreshStockToStore = asyncHandler(async (req, res) => {
+  const branchId =
+    req.body?.branchId ||
+    req.headers["x-branch-id"] ||
+    req.branchId ||
+    req.user?.branch_id;
+
+  const result = await purchaseReturnService.ingestFreshStockToStore(
+    req.params.returnId,
+    req.companyId,
+    branchId,
+    req.workspaceId,
+    req.user?._id
+  );
+
+  return res
+    .status(200)
+    .json(
+      new ApiResponse(
+        200,
+        "Fresh return stock ingested into store shelf inventory successfully",
+        result
+      )
+    );
+});
+
 const purchaseReturnController = {
   createPurchaseReturn,
   getPurchaseReturns,
@@ -117,6 +143,7 @@ const purchaseReturnController = {
   cancelPurchaseReturn,
   dispatchReturnBox,
   receiveReturnBox,
+  ingestFreshStockToStore,
 };
 
 export default purchaseReturnController;

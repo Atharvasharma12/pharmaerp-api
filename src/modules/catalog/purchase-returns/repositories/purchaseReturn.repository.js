@@ -27,10 +27,15 @@ const findPurchaseReturnById = async (
           { _id: new mongoose.Types.ObjectId(returnId) },
           { returnNo: returnId },
           { debitNoteNo: returnId },
+          { creditNoteNo: returnId },
         ],
       }
     : {
-        $or: [{ returnNo: returnId }, { debitNoteNo: returnId }],
+        $or: [
+          { returnNo: returnId },
+          { debitNoteNo: returnId },
+          { creditNoteNo: returnId },
+        ],
       };
 
   const query = {
@@ -54,8 +59,10 @@ const findPurchaseReturnById = async (
       "businessName contactPerson mobile email gstNumber address drugLicenseNumber"
     )
     .populate("branchId", "name branchCode address")
+    .populate("sourceBranchId", "name branchCode address")
     .populate("shippingDetails.destinationCompanyId", "name legalName gstin")
     .populate("shippingDetails.destinationBranchId", "name branchCode address phone")
+    .populate("shippingDetails.destinationSupplierId", "businessName name contactPerson mobile phone gstNumber address")
     .populate("shippingDetails.dispatchedBy", "name email")
     .populate("shippingDetails.receivedBy", "name email")
     .populate("createdBy", "name email")
@@ -85,8 +92,10 @@ const findPurchaseReturns = async (query = {}, options = {}) => {
         "businessName contactPerson mobile gstNumber drugLicenseNumber"
       )
       .populate("branchId", "name branchCode address")
+      .populate("sourceBranchId", "name branchCode address")
       .populate("shippingDetails.destinationCompanyId", "name legalName gstin")
       .populate("shippingDetails.destinationBranchId", "name branchCode address phone")
+    .populate("shippingDetails.destinationSupplierId", "businessName name contactPerson mobile phone gstNumber address")
       .populate("shippingDetails.receivedBy", "name")
       .populate("createdBy", "name")
       .sort(sort)
@@ -187,6 +196,34 @@ const generateNextDebitNoteNo = async (companyId, workspaceId, branchCode = "BR0
 };
 
 /**
+ * Generate sequential credit note number for inter-branch returns (e.g. CN-BR01-2026-0001)
+ */
+const generateNextCreditNoteNo = async (companyId, workspaceId, branchCode = "BR01") => {
+  const year = new Date().getFullYear();
+  const prefix = `CN-${branchCode}-${year}-`;
+
+  const latest = await PurchaseReturn.findOne({
+    workspaceId: new mongoose.Types.ObjectId(workspaceId),
+    companyId: new mongoose.Types.ObjectId(companyId),
+    creditNoteNo: { $regex: `^${prefix}` },
+  })
+    .sort({ creditNoteNo: -1 })
+    .select("creditNoteNo")
+    .lean();
+
+  let nextSequence = 1;
+  if (latest && latest.creditNoteNo) {
+    const parts = latest.creditNoteNo.split("-");
+    const lastSeq = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastSeq)) {
+      nextSequence = lastSeq + 1;
+    }
+  }
+
+  return `${prefix}${String(nextSequence).padStart(4, "0")}`;
+};
+
+/**
  * Get all confirmed returns referencing a specific purchase bill
  */
 const getReturnsForBill = async (purchaseBillId, workspaceId) => {
@@ -207,6 +244,7 @@ const purchaseReturnRepository = {
   updatePurchaseReturn,
   generateNextReturnNo,
   generateNextDebitNoteNo,
+  generateNextCreditNoteNo,
   getReturnsForBill,
 };
 

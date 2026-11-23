@@ -44,8 +44,20 @@ const stockAdjustmentSchema = new mongoose.Schema(
     },
     reason: {
       type: String,
-      enum: ["EXPIRED", "BROKEN"],
+      enum: ["EXPIRED", "BROKEN", "FRESH_RETURN", "GENERAL_RETURN"],
       required: true,
+      index: true,
+    },
+    destination: {
+      type: String,
+      enum: ["SHELF", "SCRAP"],
+      default: "SCRAP",
+      index: true,
+    },
+    action: {
+      type: String,
+      enum: ["QUARANTINE", "INGEST_INVENTORY", "DEDUCT_SHELF"],
+      default: "QUARANTINE",
       index: true,
     },
     remarks: {

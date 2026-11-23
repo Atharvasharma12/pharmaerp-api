@@ -13,6 +13,7 @@ export const RETURN_MOTIVE = {
 
 export const SETTLEMENT_TYPE = {
   DEBIT_NOTE: "DEBIT_NOTE",
+  CREDIT_NOTE: "CREDIT_NOTE",
   CLAIM_MEMO: "CLAIM_MEMO",
 };
 
@@ -26,6 +27,7 @@ export const SETTLEMENT_STATUS = {
 export const SEQUENCE_PREFIX = {
   PURCHASE_RETURN: "PR",
   DEBIT_NOTE: "DN",
+  CREDIT_NOTE: "CN",
 };
 
 export default {

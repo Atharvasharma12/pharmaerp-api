@@ -37,7 +37,7 @@ const batchSchema = new mongoose.Schema(
 
     scrapType: {
       type: String,
-      enum: ["NONE", "EXPIRED", "BROKEN"],
+      enum: ["NONE", "EXPIRED", "BROKEN", "SCRAP", "FRESH_RETURN"],
       default: "NONE",
       index: true,
     },
@@ -87,6 +87,42 @@ const batchSchema = new mongoose.Schema(
       ref: "PurchaseBill",
       index: true,
       default: null,
+    },
+
+    // Inter-Branch Provenance & Consignment Tracking
+    isIncoming: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    sourceBranchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+    sourceTransferOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TransferOrder",
+      default: null,
+      index: true,
+    },
+    sourceTransferOrderNo: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+    sourceCompanyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+      index: true,
+    },
+    sourceConsignmentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "PurchaseReturn",
+      default: null,
+      index: true,
     },
 
     isDeleted: {

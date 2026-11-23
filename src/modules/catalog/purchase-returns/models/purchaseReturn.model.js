@@ -34,9 +34,30 @@ const purchaseReturnItemSchema = new mongoose.Schema(
 
     sourceBin: {
       type: String,
-      enum: ["SELLABLE", "SCRAP_EXPIRED", "SCRAP_BROKEN"],
+      enum: ["SELLABLE", "SCRAP_EXPIRED", "SCRAP_BROKEN", "SCRAP_FRESH"],
       default: "SELLABLE",
     },
+
+    isIncoming: { type: Boolean, default: false },
+    sourceBranchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+    },
+    sourceTransferOrderNo: { type: String, trim: true, default: "" },
+    sourceTransferOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TransferOrder",
+      default: null,
+    },
+
+    subSupplierId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Supplier",
+      default: null,
+    },
+    subSupplierName: { type: String, trim: true, default: "" },
+    subSupplierGst: { type: String, trim: true, default: "" },
 
     returnQty: { type: Number, required: true, min: 1 },
     rate: { type: Number, required: true, default: 0 },
@@ -90,12 +111,33 @@ const purchaseReturnSchema = new mongoose.Schema(
     supplierId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Supplier",
-      required: true,
+      default: null,
+      index: true,
+    },
+
+    sourceBranchId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+
+    sourceTransferOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TransferOrder",
+      default: null,
+      index: true,
+    },
+
+    isInterBranch: {
+      type: Boolean,
+      default: false,
       index: true,
     },
 
     returnNo: { type: String, required: true, trim: true },
     debitNoteNo: { type: String, trim: true, default: "" },
+    creditNoteNo: { type: String, trim: true, default: "" },
     returnDate: { type: Date, default: Date.now, index: true },
 
     returnMotive: {
@@ -156,6 +198,12 @@ const purchaseReturnSchema = new mongoose.Schema(
     remarks: { type: String, trim: true, default: "" },
 
     shippingDetails: {
+      destinationType: {
+        type: String,
+        enum: ["COMPANY_BRANCH", "SUPPLIER"],
+        default: "COMPANY_BRANCH",
+        index: true,
+      },
       destinationCompanyId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "Company",
@@ -168,6 +216,14 @@ const purchaseReturnSchema = new mongoose.Schema(
         default: null,
         index: true,
       },
+      destinationSupplierId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Supplier",
+        default: null,
+        index: true,
+      },
+      courierName: { type: String, trim: true, default: "" },
+      trackingNo: { type: String, trim: true, default: "" },
       boxCount: { type: Number, default: 1 },
       packageNotes: { type: String, trim: true, default: "" },
       transitStatus: {
@@ -186,6 +242,26 @@ const purchaseReturnSchema = new mongoose.Schema(
       receivedBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: "User",
+        default: null,
+      },
+      inventoryMaterialized: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+    },
+
+    ingestionDetails: {
+      ingestedToStore: { type: Boolean, default: false, index: true },
+      ingestedAt: { type: Date, default: null },
+      ingestedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      ingestedBranchId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Branch",
         default: null,
       },
     },

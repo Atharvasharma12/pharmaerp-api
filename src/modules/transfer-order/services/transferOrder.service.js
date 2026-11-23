@@ -374,6 +374,10 @@ export const receiveTransferOrder = async (workspaceId, transferOrderId, user) =
           }
           destBatch.scrapType = resolvedScrapType;
           destBatch.originalBatchNo = originalBatchNo;
+          destBatch.isIncoming = true;
+          destBatch.sourceBranchId = transferOrder.sourceBranchId;
+          destBatch.sourceTransferOrderId = transferOrder._id;
+          destBatch.sourceTransferOrderNo = transferOrder.transferNo;
           await destBatch.save({ session });
         } else {
           destBatch = new Batch({
@@ -387,6 +391,11 @@ export const receiveTransferOrder = async (workspaceId, transferOrderId, user) =
             scrapQty: item.transferQty,
             brokenQty: resolvedScrapType === "BROKEN" ? item.transferQty : 0,
             expiredQty: resolvedScrapType === "EXPIRED" ? item.transferQty : 0,
+            isIncoming: true,
+            sourceBranchId: transferOrder.sourceBranchId,
+            sourceTransferOrderId: transferOrder._id,
+            sourceTransferOrderNo: transferOrder.transferNo,
+            purchaseBillId: sourceBatch.purchaseBillId || null,
             mrp: sourceBatch.mrp,
             MRP: sourceBatch.MRP,
             ptr: sourceBatch.ptr,
@@ -436,6 +445,10 @@ export const receiveTransferOrder = async (workspaceId, transferOrderId, user) =
 
         if (destBatch) {
           destBatch.batchQty += item.transferQty;
+          destBatch.isIncoming = true;
+          destBatch.sourceBranchId = transferOrder.sourceBranchId;
+          destBatch.sourceTransferOrderId = transferOrder._id;
+          destBatch.sourceTransferOrderNo = transferOrder.transferNo;
           await destBatch.save({ session });
         } else {
           // Create new batch for destination
@@ -445,6 +458,11 @@ export const receiveTransferOrder = async (workspaceId, transferOrderId, user) =
             product: item.product,
             batchNo: item.batchNo,
             batchQty: item.transferQty,
+            isIncoming: true,
+            sourceBranchId: transferOrder.sourceBranchId,
+            sourceTransferOrderId: transferOrder._id,
+            sourceTransferOrderNo: transferOrder.transferNo,
+            purchaseBillId: sourceBatch.purchaseBillId || null,
             mrp: sourceBatch.mrp,
             MRP: sourceBatch.MRP,
             ptr: sourceBatch.ptr,

@@ -22,7 +22,7 @@ const transferOrderItemSchema = new mongoose.Schema(
     },
     scrapType: {
       type: String,
-      enum: ["NONE", "EXPIRED", "BROKEN"],
+      enum: ["NONE", "EXPIRED", "BROKEN", "SCRAP", "FRESH_RETURN"],
       default: "NONE",
     },
     sourceBin: {

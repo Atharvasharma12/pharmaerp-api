@@ -25,8 +25,17 @@ const returnItemSchema = Joi.object({
   purchaseBillDate: Joi.string().trim().allow("").optional(),
 
   sourceBin: Joi.string()
-    .valid("SELLABLE", "SCRAP_EXPIRED", "SCRAP_BROKEN")
+    .valid("SELLABLE", "SCRAP_EXPIRED", "SCRAP_BROKEN", "SCRAP_FRESH")
     .default("SELLABLE"),
+
+  isIncoming: Joi.boolean().optional(),
+  sourceBranchId: objectId.allow(null, "").optional(),
+  sourceTransferOrderNo: Joi.string().trim().allow("").optional(),
+  sourceTransferOrderId: objectId.allow(null, "").optional(),
+
+  subSupplierId: objectId.allow(null, "").optional(),
+  subSupplierName: Joi.string().trim().allow("").optional(),
+  subSupplierGst: Joi.string().trim().allow("").optional(),
 
   returnQty: Joi.number().min(1).required(),
   rate: Joi.number().min(0).required(),
@@ -42,7 +51,18 @@ const returnItemSchema = Joi.object({
 
 export const createPurchaseReturnSchema = Joi.object({
   branchId: objectId.allow(null).optional(),
-  supplierId: objectId.required(),
+  supplierId: objectId.when("settlementType", {
+    is: "CREDIT_NOTE",
+    then: objectId.allow(null, "").optional(),
+    otherwise: objectId.when("isInterBranch", {
+      is: true,
+      then: objectId.allow(null, "").optional(),
+      otherwise: objectId.required(),
+    }),
+  }),
+  sourceBranchId: objectId.allow(null, "").optional(),
+  sourceTransferOrderId: objectId.allow(null, "").optional(),
+  isInterBranch: Joi.boolean().optional(),
   returnDate: Joi.date().iso().allow(null, "").optional(),
   returnMotive: Joi.string()
     .valid(...Object.values(RETURN_MOTIVE))
@@ -72,7 +92,7 @@ export const getPurchaseReturnsQuerySchema = Joi.object({
 export const getEligibleBatchesQuerySchema = Joi.object({
   supplierId: objectId.optional(),
   branchId: Joi.string().optional(),
-  sourceBin: Joi.string().valid("ALL", "SELLABLE", "SCRAP", "EXPIRED", "BROKEN").default("ALL"),
+  sourceBin: Joi.string().valid("ALL", "SELLABLE", "SCRAP", "EXPIRED", "BROKEN", "FRESH").default("ALL"),
   search: Joi.string().trim().allow("").optional(),
   limit: Joi.number().integer().min(1).max(200).default(50),
 });
@@ -86,8 +106,18 @@ export const cancelPurchaseReturnSchema = Joi.object({
 });
 
 export const dispatchReturnBoxSchema = Joi.object({
-  destinationCompanyId: objectId.allow(null).optional(),
-  destinationBranchId: objectId.required(),
+  destinationType: Joi.string()
+    .valid("COMPANY_BRANCH", "SUPPLIER")
+    .default("COMPANY_BRANCH"),
+  destinationCompanyId: objectId.allow(null, "").optional(),
+  destinationBranchId: objectId.when("destinationType", {
+    is: "SUPPLIER",
+    then: objectId.allow(null, "").optional(),
+    otherwise: objectId.required(),
+  }),
+  destinationSupplierId: objectId.allow(null, "").optional(),
+  courierName: Joi.string().trim().allow("").max(200).optional(),
+  trackingNo: Joi.string().trim().allow("").max(120).optional(),
   boxCount: Joi.number().integer().min(1).max(99).default(1),
   packageNotes: Joi.string().trim().allow("").max(500).optional(),
 });

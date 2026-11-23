@@ -12,6 +12,7 @@ import {
   cancelPurchaseReturn,
   dispatchReturnBox,
   receiveReturnBox,
+  ingestFreshStockToStore,
 } from "../controllers/purchaseReturn.controller.js";
 
 import {
@@ -79,6 +80,13 @@ router.post(
   "/:returnId/receive-box",
   validate(purchaseReturnIdParamSchema, "params"),
   receiveReturnBox
+);
+
+// Ingest fresh general return stock directly into store shelf inventory
+router.post(
+  "/:returnId/ingest-to-store",
+  validate(purchaseReturnIdParamSchema, "params"),
+  ingestFreshStockToStore
 );
 
 export default router;

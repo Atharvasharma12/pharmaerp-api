@@ -7,6 +7,7 @@ import Batch from "../models/batch.model.js";
 import WorkspaceProduct from "../models/workspaceProduct.model.js";
 import ProductFacility from "../models/productFacility.model.js";
 import StockAdjustment from "../models/stockAdjustment.model.js";
+import purchaseReturnService from "../../purchase-returns/services/purchaseReturn.service.js";
 import mongoose from "mongoose";
 
 /**
@@ -226,9 +227,21 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     lowStock,
     inStockOnly,
     motive,
+    showIncoming,
+    incomingOnly,
+    excludeIncoming,
   } = filters;
 
   const andConditions = [{ workspaceId: req.workspaceId, isDeleted: false }];
+
+  // Incoming / Inter-Branch Visibility Filter
+  if (incomingOnly) {
+    andConditions.push({ isIncoming: true });
+  } else if (showIncoming === false || excludeIncoming) {
+    andConditions.push({
+      $or: [{ isIncoming: false }, { isIncoming: { $exists: false } }],
+    });
+  }
 
   // 1. Stock / Quantity Filters
   if (motive === "shelf_expired") {
@@ -246,6 +259,14 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     // Scrap bin: broken returns only
     andConditions.push({
       brokenQty: { $gt: 0 },
+    });
+  } else if (motive === "fresh_return") {
+    // Scrap bin: fresh returns only
+    andConditions.push({
+      $or: [
+        { scrapType: { $in: ["FRESH_RETURN", "SCRAP"] } },
+        { batchNo: { $regex: /\[(FRESH_RETURN|SCRAP)\]/i } },
+      ],
     });
   } else if (motive === "all" || scrapOnly) {
     // "all" in scrap register or scrapOnly: ONLY quarantine scrap bin items (excluding shelf stock)
@@ -285,21 +306,91 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
 
   // 3. Branch / Facility Scoping
   const targetFacility = facility || facility_id || branch_id;
+  let targetBranchIds = [];
   if (targetFacility && targetFacility !== "all_facility") {
     if (!mongoose.Types.ObjectId.isValid(targetFacility)) {
       return res.status(400).json(new ApiResponse(400, "Invalid facility ID"));
     }
-    andConditions.push({ branch_id: new mongoose.Types.ObjectId(targetFacility) });
+    const branchObjectId = new mongoose.Types.ObjectId(targetFacility);
+    targetBranchIds = [branchObjectId];
+    andConditions.push({ branch_id: branchObjectId });
   } else {
     // If the companyId is sent via headers or body but NOT in req.companyId because companyContextMiddleware is missing
     const extractedCompanyId = req.companyId || req.headers["x-company-id"] || req.body.companyId;
     if (extractedCompanyId) {
-      const Branch = mongoose.model("Branch");
-      const validBranches = await Branch.find({ companyId: extractedCompanyId, isDeleted: false }).select("_id").lean();
-      andConditions.push({ branch_id: { $in: validBranches.map((b) => b._id) } });
+      const BranchModel = mongoose.model("Branch");
+      const validBranches = await BranchModel.find({ companyId: extractedCompanyId, isDeleted: false }).select("_id").lean();
+      targetBranchIds = validBranches.map((b) => b._id);
+      andConditions.push({ branch_id: { $in: targetBranchIds } });
     } else {
       // Prevent cross-company data leakage by defaulting to an impossible match if companyId is completely missing
       andConditions.push({ branch_id: null });
+    }
+  }
+
+  // Retroactive self-healing: ensure any received purchase return boxes for the target branches have their scrap batches materialized
+  if (targetBranchIds.length > 0) {
+    try {
+      const PurchaseReturn = mongoose.model("PurchaseReturn");
+      const unmaterializedReceivedReturns = await PurchaseReturn.find({
+        workspaceId: req.workspaceId,
+        "shippingDetails.destinationBranchId": { $in: targetBranchIds },
+        "shippingDetails.transitStatus": "RECEIVED",
+        "shippingDetails.inventoryMaterialized": { $ne: true },
+        isDeleted: false,
+      });
+
+      if (unmaterializedReceivedReturns && unmaterializedReceivedReturns.length > 0) {
+        for (const ret of unmaterializedReceivedReturns) {
+          await purchaseReturnService.materializeConsignmentBatches(ret);
+        }
+      }
+
+      // Self-healing cleanup: if any received return was already ingested into store shelf inventory,
+      // purge any errant scrap batches created for it so they never appear in the scrap bin
+      const ingestedReturns = await PurchaseReturn.find({
+        workspaceId: req.workspaceId,
+        $or: [
+          { "shippingDetails.destinationBranchId": { $in: targetBranchIds } },
+          { branchId: { $in: targetBranchIds } },
+        ],
+        "ingestionDetails.ingestedToStore": true,
+        isDeleted: false,
+      }).select("_id items");
+
+      if (ingestedReturns && ingestedReturns.length > 0) {
+        const returnIds = ingestedReturns.map((r) => r._id);
+        const errantScrapBatches = await Batch.find({
+          workspaceId: req.workspaceId,
+          branch_id: { $in: targetBranchIds },
+          sourceConsignmentId: { $in: returnIds },
+          $or: [
+            { scrapType: "FRESH_RETURN" },
+            { batchNo: /\[(FRESH_RETURN|SCRAP)\]/i },
+          ],
+          scrapQty: { $gt: 0 },
+        });
+
+        for (const eb of errantScrapBatches) {
+          const removedQty = Number(eb.scrapQty) || 0;
+          eb.scrapQty = 0;
+          if ((Number(eb.batchQty) || 0) === 0) {
+            eb.isDeleted = true;
+          }
+          await eb.save();
+
+          await ProductFacility.updateOne(
+            {
+              workspaceId: req.workspaceId,
+              facility_id: eb.branch_id,
+              product_id: eb.product,
+            },
+            { $inc: { scrapQty: -removedQty } }
+          );
+        }
+      }
+    } catch (err) {
+      console.error("Auto-materialization of received purchase returns failed:", err);
     }
   }
 
@@ -329,10 +420,11 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
   const total = await Batch.countDocuments(matchStage);
   const batches = await Batch.find(matchStage)
     .populate("product")
-    .populate("branch_id", "name code")
+    .populate("branch_id", "name branchCode code companyId")
+    .populate("sourceBranchId", "name branchCode code")
     .populate({
       path: "purchaseBillId",
-      select: "supplierId purchaseBillNo invoiceDate",
+      select: "companyId supplierId purchaseBillNo supplierInvoiceNo invoiceDate",
       populate: {
         path: "supplierId",
         select: "businessName name gstNumber mobile phone email address",
@@ -343,33 +435,120 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     .limit(limit)
     .lean();
 
-  // Fallback: Enrich batches missing direct purchaseBillId with matching PurchaseBill by product & batch
-  const batchesNeedingSupplier = batches.filter(
-    (b) => !b.purchaseBillId?.supplierId && b.product
-  );
+  // Enrich batches missing direct purchaseBillId OR linked to a foreign company's PurchaseBill
+  // (e.g., an inter-company returned consignment from Pahuch whose purchaseBillId points to Pahuch's bill from Agam)
+  const reqCompanyId = req.companyId || req.headers["x-company-id"] || req.body.companyId || null;
+  const batchesNeedingSupplier = batches.filter((b) => {
+    if (!b.product) return false;
+    const batchCompanyId = b.branch_id?.companyId || reqCompanyId;
+    const billCompanyId = b.purchaseBillId?.companyId;
+    const isForeignBill =
+      Boolean(billCompanyId) &&
+      Boolean(batchCompanyId) &&
+      String(billCompanyId) !== String(batchCompanyId);
+    return !b.purchaseBillId?.supplierId || isForeignBill;
+  });
+
   if (batchesNeedingSupplier.length > 0) {
-    const PurchaseBill = mongoose.model("PurchaseBill");
     await Promise.all(
       batchesNeedingSupplier.map(async (b) => {
         const prodId = b.product?._id || b.product;
+        const batchCompanyId = b.branch_id?.companyId || reqCompanyId;
+        const billCompanyId = b.purchaseBillId?.companyId;
+        const isForeignBill =
+          Boolean(billCompanyId) &&
+          Boolean(batchCompanyId) &&
+          String(billCompanyId) !== String(batchCompanyId);
+
+        const candidateInvoiceNos = [];
+        let foreignBillId = null;
+        if (isForeignBill && b.purchaseBillId) {
+          foreignBillId = b.purchaseBillId._id || null;
+          if (b.purchaseBillId.supplierInvoiceNo) {
+            candidateInvoiceNos.push(b.purchaseBillId.supplierInvoiceNo);
+          }
+          if (b.purchaseBillId.purchaseBillNo) {
+            candidateInvoiceNos.push(b.purchaseBillId.purchaseBillNo);
+          }
+        }
+
         try {
-          const bill = await PurchaseBill.findOne({
-            workspaceId: req.workspaceId,
-            isDeleted: false,
-            $or: [
-              { "items.productId": prodId, "items.batch": b.batchNo },
-              { "items.productId": prodId },
-            ],
-          })
-            .populate("supplierId", "businessName name gstNumber mobile phone email address")
-            .sort({ invoiceDate: -1, createdAt: -1 })
-            .select("supplierId purchaseBillNo invoiceDate")
-            .lean();
-          if (bill?.supplierId) {
-            b.purchaseBillId = bill;
+          let resolvedBill = null;
+          if (batchCompanyId) {
+            resolvedBill = await purchaseReturnService.resolveOriginalPurchaseBillForDestination({
+              workspaceId: req.workspaceId,
+              destCompanyId: batchCompanyId,
+              destBranchId: b.branch_id?._id || b.branch_id || null,
+              productId: prodId,
+              batchNo: b.originalBatchNo || b.batchNo,
+              sourcePurchaseBillId: foreignBillId,
+              candidateInvoiceNos,
+              sourceConsignmentId: b.sourceConsignmentId || null,
+            });
+          } else {
+            const PurchaseBill = mongoose.model("PurchaseBill");
+            const cleanBatch = (b.originalBatchNo || b.batchNo || "")
+              .replace(/\s*\[(EXPIRED|BROKEN|SCRAP|IN|INCOMING)\]/gi, "")
+              .trim();
+            resolvedBill = await PurchaseBill.findOne({
+              workspaceId: req.workspaceId,
+              isDeleted: false,
+              $or: [
+                ...(cleanBatch ? [{ "items.productId": prodId, "items.batch": cleanBatch }] : []),
+                { "items.productId": prodId },
+              ],
+            })
+              .populate("supplierId", "businessName name gstNumber mobile phone email address")
+              .sort({ invoiceDate: -1, createdAt: -1 })
+              .select("companyId supplierId purchaseBillNo supplierInvoiceNo invoiceDate")
+              .lean();
+          }
+
+          if (resolvedBill?.supplierId) {
+            const shouldHealDb = isForeignBill || !b.purchaseBillId;
+            b.purchaseBillId = resolvedBill;
+            // Self-heal foreign or missing purchaseBillId in DB so future reads are instant
+            if (shouldHealDb) {
+              Batch.updateOne(
+                { _id: b._id },
+                { $set: { purchaseBillId: resolvedBill._id } }
+              ).catch(() => {});
+            }
+          } else if (isForeignBill) {
+            // Never leak a foreign company's supplier (e.g. Agam itself from Pahuch's purchase bill)
+            b.purchaseBillId = null;
           }
         } catch {
-          // ignore lookup error
+          if (isForeignBill) {
+            b.purchaseBillId = null;
+          }
+        }
+      })
+    );
+  }
+
+  // Enrich batches with upstream "Sub Supplier" (e.g., Aristo when Pahuch purchased from Agam via Agam's Sale Bill or provenance)
+  const batchesToEnrich = batches.filter((b) => b.product);
+  if (batchesToEnrich.length > 0) {
+    await Promise.all(
+      batchesToEnrich.map(async (b) => {
+        const prodId = b.product?._id || b.product;
+        const batchCompanyId = b.branch_id?.companyId || reqCompanyId;
+        if (!batchCompanyId) return;
+        try {
+          const subMeta = await purchaseReturnService.resolveSubSupplierFromPurchaseBill({
+            workspaceId: req.workspaceId,
+            currentCompanyId: batchCompanyId,
+            productId: prodId,
+            batchNo: b.originalBatchNo || b.batchNo,
+            purchaseBill: b.purchaseBillId || null,
+            batchDoc: b,
+          });
+          if (subMeta) {
+            b._subSupplierMeta = subMeta;
+          }
+        } catch {
+          // non-blocking
         }
       })
     );
@@ -381,9 +560,19 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       exp = "";
     }
     const baseCleanBatchNo =
-      b.originalBatchNo || (b.batchNo ? b.batchNo.replace(/\s*\[(EXPIRED|BROKEN|SCRAP)\]/gi, "").trim() : "");
+      b.originalBatchNo ||
+      (b.batchNo
+        ? b.batchNo.replace(/\s*\[(EXPIRED|BROKEN|SCRAP|FRESH_RETURN)\]/gi, "").trim()
+        : "");
     const resolvedScrapType =
-      b.scrapType || (b.brokenQty > 0 ? "BROKEN" : b.expiredQty > 0 ? "EXPIRED" : "NONE");
+      b.scrapType ||
+      (b.brokenQty > 0
+        ? "BROKEN"
+        : b.expiredQty > 0
+        ? "EXPIRED"
+        : b.scrapQty > 0
+        ? "FRESH_RETURN"
+        : "NONE");
 
     const branchName = b.branch_id?.name || "Main Branch";
     const branchCode = b.branch_id?.code || "";
@@ -396,8 +585,32 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
     const supplierGst = supplierDoc?.gstNumber || "";
     const supplierMobile = supplierDoc?.mobile || supplierDoc?.phone || "";
 
+    const isIncoming = Boolean(
+      b.isIncoming ||
+      (b.sourceBranchId && String(b.sourceBranchId._id || b.sourceBranchId) !== String(rawBranchId))
+    );
+    const sourceBranchDoc = b.sourceBranchId || null;
+    const sourceBranchId = sourceBranchDoc?._id
+      ? sourceBranchDoc._id.toString()
+      : (sourceBranchDoc ? sourceBranchDoc.toString() : null);
+    const sourceBranchName = sourceBranchDoc?.name || "";
+    const sourceBranchCode = sourceBranchDoc?.code || sourceBranchDoc?.branchCode || "";
+    const sourceTransferOrderNo = b.sourceTransferOrderNo || "";
+    const sourceTransferOrderId = b.sourceTransferOrderId
+      ? b.sourceTransferOrderId.toString()
+      : null;
+
     return {
       ...b,
+      isIncoming,
+      sourceBranch: sourceBranchDoc,
+      sourceBranchId,
+      sourceBranchName,
+      sourceBranchCode,
+      sourceTransferOrderNo,
+      sourceTransferOrderId,
+      sourceCompanyId: b.sourceCompanyId || null,
+      sourceConsignmentId: b.sourceConsignmentId || null,
       branchName,
       branchCode,
       branchId: rawBranchId,
@@ -428,6 +641,10 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       supplierName,
       supplierGst,
       supplierMobile,
+      subSupplier: b._subSupplierMeta?.subSupplier || null,
+      subSupplierId: b._subSupplierMeta?.subSupplierId || null,
+      subSupplierName: b._subSupplierMeta?.subSupplierName || "",
+      subSupplierGst: b._subSupplierMeta?.subSupplierGst || "",
       purchaseBillId: b.purchaseBillId?._id ? b.purchaseBillId._id.toString() : null,
       purchaseBillNo: b.purchaseBillId?.purchaseBillNo || "",
     };
@@ -451,7 +668,7 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       }
     }
 
-    const [totalScrapBin, totalShelfExpired, totalScrapExpired, totalBroken] = await Promise.all([
+    const [totalScrapBin, totalShelfExpired, totalScrapExpired, totalBroken, totalFreshReturn] = await Promise.all([
       Batch.countDocuments({
         ...baseScope,
         $or: [{ scrapQty: { $gt: 0 } }, { brokenQty: { $gt: 0 } }, { expiredQty: { $gt: 0 } }],
@@ -469,6 +686,13 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
         ...baseScope,
         brokenQty: { $gt: 0 },
       }),
+      Batch.countDocuments({
+        ...baseScope,
+        $or: [
+          { scrapType: { $in: ["FRESH_RETURN", "SCRAP"] } },
+          { batchNo: { $regex: /\[(FRESH_RETURN|SCRAP)\]/i } },
+        ],
+      }),
     ]);
 
     counts = {
@@ -476,6 +700,7 @@ export const getProductFacilityBatchesByQueryV2 = asyncHandler(async (req, res) 
       shelfExpired: totalShelfExpired,
       scrapExpired: totalScrapExpired,
       broken: totalBroken,
+      freshReturn: totalFreshReturn,
     };
   }
 
@@ -727,6 +952,8 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
     batchId,
     quantity: rawQuantity,
     reason: rawReason,
+    destination: rawDestination,
+    deductFromShelf: rawDeductFromShelf,
     remarks,
   } = req.body;
   const branchId = reqBranchId || req.headers["x-branch-id"] || req.user?.branch_id;
@@ -749,9 +976,55 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
   }
 
   const normalizedReason = String(rawReason || "").toUpperCase().trim();
-  if (!["EXPIRED", "BROKEN"].includes(normalizedReason)) {
-    return res.status(400).json(new ApiResponse(400, "Reason must be either 'EXPIRED' or 'BROKEN'"));
+  if (
+    !["EXPIRED", "BROKEN", "FRESH_RETURN", "GENERAL_RETURN"].includes(
+      normalizedReason
+    )
+  ) {
+    return res
+      .status(400)
+      .json(
+        new ApiResponse(
+          400,
+          "Reason must be either 'EXPIRED', 'BROKEN', or 'FRESH_RETURN'"
+        )
+      );
   }
+
+  const isFreshReturn =
+    normalizedReason === "FRESH_RETURN" || normalizedReason === "GENERAL_RETURN";
+  const canonicalReason = isFreshReturn ? "FRESH_RETURN" : normalizedReason;
+
+  // Destination: "SHELF" (ingest into stock matrix) vs "SCRAP" (move to scrap bin)
+  const destination = String(
+    rawDestination || (isFreshReturn ? "SHELF" : "SCRAP")
+  )
+    .toUpperCase()
+    .trim();
+  if (!["SHELF", "SCRAP"].includes(destination)) {
+    return res
+      .status(400)
+      .json(
+        new ApiResponse(
+          400,
+          "Destination must be either 'SHELF' or 'SCRAP'"
+        )
+      );
+  }
+
+  // Shelf ingestion is only permissible for fresh returns
+  if (destination === "SHELF" && !isFreshReturn) {
+    return res
+      .status(400)
+      .json(
+        new ApiResponse(
+          400,
+          "Only fresh return stock can be ingested directly into shelf inventory"
+        )
+      );
+  }
+
+  const deductFromShelf = rawDeductFromShelf !== false;
 
   const workspaceId = req.workspaceId;
   const branchObjId = mongoose.Types.ObjectId.isValid(branchId)
@@ -802,27 +1075,118 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
         .json(new ApiResponse(404, "Selected batch not found in the current branch"));
     }
 
-    const availableQty = Math.max(0, Number(sourceBatch.batchQty) || 0);
-    if (quantity > availableQty) {
-      if (inTransaction && session) await session.abortTransaction();
-      return res.status(400).json(
-        new ApiResponse(
-          400,
-          `Entered quantity (${quantity}) exceeds available batch quantity (${availableQty})`
-        )
+    const unitCost = Number(sourceBatch.rate || sourceBatch.ptr || 0);
+    const mrp = Number(sourceBatch.mrp || sourceBatch.MRP || 0);
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // BRANCH A: INGEST DIRECTLY INTO STOCK MATRIX (SELLABLE SHELF INVENTORY)
+    // ──────────────────────────────────────────────────────────────────────────
+    if (destination === "SHELF") {
+      // Increment active shelf batch stock
+      sourceBatch.batchQty = (Number(sourceBatch.batchQty) || 0) + quantity;
+      sourceBatch.isDeleted = false;
+      await sourceBatch.save(sessionOpt);
+
+      // Increment ProductFacility active sellable inventory
+      const facilityInc = {
+        total_qty_available: quantity,
+        qoh: quantity,
+        atp: quantity,
+      };
+
+      await ProductFacility.findOneAndUpdate(
+        {
+          workspaceId: workspaceObjId,
+          facility_id: branchObjId,
+          product_id: productObjId,
+        },
+        {
+          $inc: facilityInc,
+          $setOnInsert: {
+            itemCode: sourceBatch.productCode || "",
+            consumption: 0,
+            poStatus: "NONE",
+            isDeleted: false,
+          },
+        },
+        { upsert: true, ...sessionOpt }
+      );
+
+      // Create StockAdjustment record
+      const adjustmentRecord = new StockAdjustment({
+        workspaceId: workspaceObjId,
+        facility_id: branchObjId,
+        branch_id: branchObjId,
+        product: productObjId,
+        sourceBatch: sourceBatch._id,
+        targetScrapBatch: null,
+        quantity,
+        reason: canonicalReason,
+        destination: "SHELF",
+        action: "INGEST_INVENTORY",
+        remarks: remarks || "",
+        unitCost,
+        mrp,
+        totalLossValue: 0,
+        adjustmentDate: new Date(),
+        performedBy: req.user?._id || null,
+      });
+
+      await adjustmentRecord.save(sessionOpt);
+
+      if (inTransaction && session) {
+        await session.commitTransaction();
+      }
+
+      return res.status(200).json(
+        new ApiResponse(200, "Fresh return stock ingested into Stock Matrix inventory successfully", {
+          adjustment: adjustmentRecord,
+          sourceBatch: {
+            _id: sourceBatch._id,
+            batchNo: sourceBatch.batchNo,
+            remainingBatchQty: sourceBatch.batchQty,
+          },
+          targetScrapBatch: null,
+        })
       );
     }
 
-    // 2. Decrement source shelf batch
-    sourceBatch.batchQty = Math.max(0, availableQty - quantity);
-    await sourceBatch.save(sessionOpt);
+    // ──────────────────────────────────────────────────────────────────────────
+    // BRANCH B: MOVE TO SCRAP BIN (QUARANTINE)
+    // ──────────────────────────────────────────────────────────────────────────
+    const availableQty = Math.max(0, Number(sourceBatch.batchQty) || 0);
 
-    // 3. Resolve destination scrap batch
-    const tag = normalizedReason === "BROKEN" ? "[BROKEN]" : "[EXPIRED]";
+    if (deductFromShelf) {
+      if (quantity > availableQty) {
+        if (inTransaction && session) await session.abortTransaction();
+        return res.status(400).json(
+          new ApiResponse(
+            400,
+            `Entered quantity (${quantity}) exceeds available batch quantity (${availableQty})`
+          )
+        );
+      }
+      sourceBatch.batchQty = Math.max(0, availableQty - quantity);
+      await sourceBatch.save(sessionOpt);
+    }
+
+    // Resolve target scrap batch tag and type
+    let tag = "[FRESH_RETURN]";
+    let targetScrapType = "FRESH_RETURN";
+    if (canonicalReason === "BROKEN") {
+      tag = "[BROKEN]";
+      targetScrapType = "BROKEN";
+    } else if (canonicalReason === "EXPIRED") {
+      tag = "[EXPIRED]";
+      targetScrapType = "EXPIRED";
+    }
+
     const rawBatchNo = sourceBatch.batchNo || "";
     const baseBatchNo =
       sourceBatch.originalBatchNo ||
-      rawBatchNo.replace(/\s*\[(EXPIRED|BROKEN|SCRAP)\]/gi, "").trim();
+      rawBatchNo
+        .replace(/\s*\[(EXPIRED|BROKEN|SCRAP|FRESH_RETURN)\]/gi, "")
+        .trim();
     const targetBatchNo = `${baseBatchNo} ${tag}`;
 
     let scrapBatch = session
@@ -841,12 +1205,12 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
 
     if (scrapBatch) {
       scrapBatch.scrapQty = (Number(scrapBatch.scrapQty) || 0) + quantity;
-      if (normalizedReason === "BROKEN") {
+      if (canonicalReason === "BROKEN") {
         scrapBatch.brokenQty = (Number(scrapBatch.brokenQty) || 0) + quantity;
-      } else {
+      } else if (canonicalReason === "EXPIRED") {
         scrapBatch.expiredQty = (Number(scrapBatch.expiredQty) || 0) + quantity;
       }
-      scrapBatch.scrapType = normalizedReason;
+      scrapBatch.scrapType = targetScrapType;
       scrapBatch.originalBatchNo = baseBatchNo;
       scrapBatch.isDeleted = false;
       if (!scrapBatch.expiryDate && sourceBatch.expiryDate) {
@@ -863,11 +1227,11 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
               product: productObjId,
               batchNo: targetBatchNo,
               originalBatchNo: baseBatchNo,
-              scrapType: normalizedReason,
+              scrapType: targetScrapType,
               batchQty: 0,
               scrapQty: quantity,
-              brokenQty: normalizedReason === "BROKEN" ? quantity : 0,
-              expiredQty: normalizedReason === "EXPIRED" ? quantity : 0,
+              brokenQty: canonicalReason === "BROKEN" ? quantity : 0,
+              expiredQty: canonicalReason === "EXPIRED" ? quantity : 0,
               mrp: sourceBatch.mrp || sourceBatch.MRP || 0,
               MRP: sourceBatch.mrp || sourceBatch.MRP || 0,
               rate: sourceBatch.rate || 0,
@@ -902,12 +1266,12 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
               });
           if (scrapBatch) {
             scrapBatch.scrapQty = (Number(scrapBatch.scrapQty) || 0) + quantity;
-            if (normalizedReason === "BROKEN") {
+            if (canonicalReason === "BROKEN") {
               scrapBatch.brokenQty = (Number(scrapBatch.brokenQty) || 0) + quantity;
-            } else {
+            } else if (canonicalReason === "EXPIRED") {
               scrapBatch.expiredQty = (Number(scrapBatch.expiredQty) || 0) + quantity;
             }
-            scrapBatch.scrapType = normalizedReason;
+            scrapBatch.scrapType = targetScrapType;
             scrapBatch.originalBatchNo = baseBatchNo;
             scrapBatch.isDeleted = false;
             await scrapBatch.save(sessionOpt);
@@ -918,16 +1282,18 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
       }
     }
 
-    // 4. Update ProductFacility
+    // Update ProductFacility
     const facilityInc = {
-      total_qty_available: -quantity,
-      qoh: -quantity,
-      atp: -quantity,
       scrapQty: quantity,
     };
-    if (normalizedReason === "BROKEN") {
+    if (deductFromShelf) {
+      facilityInc.total_qty_available = -quantity;
+      facilityInc.qoh = -quantity;
+      facilityInc.atp = -quantity;
+    }
+    if (canonicalReason === "BROKEN") {
       facilityInc.brokenQty = quantity;
-    } else {
+    } else if (canonicalReason === "EXPIRED") {
       facilityInc.expiredQty = quantity;
     }
 
@@ -949,9 +1315,7 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
       { upsert: true, ...sessionOpt }
     );
 
-    // 5. Create StockAdjustment record
-    const unitCost = Number(sourceBatch.rate || sourceBatch.ptr || 0);
-    const mrp = Number(sourceBatch.mrp || sourceBatch.MRP || 0);
+    // Create StockAdjustment record
     const totalLossValue = (mrp > 0 ? mrp : unitCost) * quantity;
 
     const adjustmentRecord = new StockAdjustment({
@@ -962,7 +1326,9 @@ export const addExpiredBrokenStock = asyncHandler(async (req, res) => {
       sourceBatch: sourceBatch._id,
       targetScrapBatch: scrapBatch ? scrapBatch._id : null,
       quantity,
-      reason: normalizedReason,
+      reason: canonicalReason,
+      destination: "SCRAP",
+      action: deductFromShelf ? "QUARANTINE" : "QUARANTINE",
       remarks: remarks || "",
       unitCost,
       mrp,
